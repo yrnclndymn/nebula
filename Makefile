@@ -17,6 +17,9 @@ db-init:          ## Create Neo4j constraints + indexes (idempotent)
 import:           ## Import a sheet CSV. Usage: make import CSV=data/x.csv TOPIC="SAP ecosystem"
 	cd backend && uv run python -m app.importer.csv_import $(CSV) $(if $(TOPIC),--topic "$(TOPIC)",)
 
+enrich:           ## Research one company via the ADK agent. NAME= WEBSITE= [TOPIC=]
+	cd backend && uv run python -m app.agents.enrichment.enrich "$(NAME)" "$(WEBSITE)" $(if $(TOPIC),"$(TOPIC)",)
+
 dev:              ## Run the API with reload on :8080
 	cd backend && uv run uvicorn app.main:app --reload --port 8080
 
@@ -33,4 +36,4 @@ frontend-install: ## Install frontend dependencies
 frontend-dev:     ## Run the Vite dev server on :5173
 	cd frontend && npm run dev
 
-.PHONY: db-up db-down install db-init import dev test lint frontend-install frontend-dev
+.PHONY: db-up db-down install db-init import enrich dev test lint frontend-install frontend-dev

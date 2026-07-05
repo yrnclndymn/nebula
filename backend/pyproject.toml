@@ -11,6 +11,10 @@ dependencies = [
     "pydantic-settings>=2.6.0",
     "python-dotenv>=1.0.0",
     "google-adk>=1.25.0",
+    "ddgs>=9.14.4",
+    "beautifulsoup4>=4.15.0",
+    "lxml>=6.1.1",
+    "requests>=2.34.2",
 ]
 
 [dependency-groups]

@@ -68,7 +68,9 @@ _COMPANY_TYPE_CANON = {
     "not-for-profit": "non-profit",
     "pbc": "PBC",
     "public benefit corporation": "PBC",
+    "public-benefit corporation": "PBC",
     "public benefit corp": "PBC",
+    "benefit corporation": "PBC",
     "foundation-owned": "foundation-owned",
     "foundation owned": "foundation-owned",
 }

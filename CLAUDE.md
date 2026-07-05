@@ -76,9 +76,12 @@ Health wiring: `GET /health` (process up, no DB) and `GET /health/graph`
    residual notes and parses people+titles. Run: `make import CSV=data/x.csv
    TOPIC="SAP ecosystem"` (`--dry-run` to preview, `--no-llm` for a cheap
    heuristic pass). Verified end-to-end against local Neo4j.
-3. **Enrichment agent** ← next — `{name, website}` → ADK agent with search/scrape
-   tools → structured `CompanyRecord` → `upsert_company`. Reuse the `extract.py`
-   schema and `../adk-workspace/company_linkedin_profile_agent/`.
+3. ~~**Enrichment agent**~~ — done. A real ADK agent (`app/agents/enrichment/`,
+   `root_agent`) with a tools module (`app/tools/`: `web_search`, `fetch_page`,
+   `save_company`). `{name, website, topic}` → reasoning loop → `upsert_company`.
+   Run: `make enrich NAME=... WEBSITE=... TOPIC=...` (prints the tool trajectory).
+   Uses `gemini-3.1-flash-lite` (2.5-flash free tier is ~20 req/day). This is the
+   hands-on surface for the agents course — see `LEARNING.md`.
 4. ~~**API + SPA tables**~~ — done. Read queries in `app/graph/queries.py`;
    endpoints in `app/api/routes.py` (`/companies` with topic/search/type/headcount
    filters, `/companies/{name}` detail, `/topics`, `/company-types`). Frontend
