@@ -44,11 +44,9 @@ def web_search(query: str) -> dict:
 
 def fetch_page(url: str) -> dict:
     """Fetch a web page and return its readable text plus its internal links and
-    images. Use `links` to discover relevant sub-pages (e.g. "clients", "who we've
-    helped", "case studies", and their sector sub-pages) and `images` to spot
-    client logos — logo filenames/alt often contain the company name (e.g.
-    "logo-equifax.jpg"). For logos whose company isn't clear, pass their src URLs
-    to identify_logos.
+    images (src + alt). Use `links` to find relevant sub-pages and `images` when a
+    page shows information as logos. To gather a company's client list, prefer the
+    find_clients tool over crawling by hand.
 
     Returns {url, text (~5000 chars), links:[{url,text}], images:[{src,alt}]} on
     success, or {url, error} on failure.
@@ -112,9 +110,12 @@ async def identify_logos(image_urls: list[str]) -> dict:
     parts: list[types.Part] = [
         types.Part(
             text=(
-                "Each image is a company logo (e.g. from a consultancy's client "
-                "page). Identify the company or brand shown in each. Skip any you "
-                "cannot confidently identify. Return the list of company names."
+                "Each image is a logo from a company's website. Return the names of "
+                "the actual client/customer ORGANISATIONS shown. Skip: certification "
+                "or compliance badges (e.g. Living Wage, GDPR, ISO, Cyber Essentials, "
+                "Armed Forces Covenant, B-Corp, Disability Confident), award badges, "
+                "social-media and generic icons, and any logo you cannot confidently "
+                "identify. Return the list of organisation names."
             )
         )
     ]
@@ -139,3 +140,123 @@ async def identify_logos(image_urls: list[str]) -> dict:
     )
     parsed = resp.parsed
     return {"companies": parsed.companies if isinstance(parsed, _LogoNames) else []}
+
+
+_CLIENT_PAGE_KEYWORDS = (
+    "client",
+    "customer",
+    "who-we-have-helped",
+    "case-stud",
+    "case_stud",
+    "our-work",
+    "portfolio",
+    "helped",
+    "success-stor",
+)
+
+
+def _looks_like_client_page(link: dict) -> bool:
+    hay = (link.get("url", "") + " " + link.get("text", "")).lower()
+    return any(k in hay for k in _CLIENT_PAGE_KEYWORDS)
+
+
+def _dedup_names(names: list[str]) -> list[str]:
+    out, seen = [], set()
+    for name in names:
+        name = name.strip()
+        key = name.lower()
+        if name and key not in seen:
+            seen.add(key)
+            out.append(name)
+    return out
+
+
+# Certification / award / compliance badges that show up as logos but aren't clients.
+_BADGE_TERMS = (
+    "gdpr",
+    "iso ",
+    "iso9001",
+    "iso 27001",
+    "cyber essentials",
+    "living wage",
+    "armed forces covenant",
+    "b-corp",
+    "bcorp",
+    "disability confident",
+    "great place to work",
+    "investors in people",
+)
+
+
+def _is_noise(name: str, brand: str) -> bool:
+    low = name.lower().strip()
+    if not low:
+        return True
+    if brand and brand in low.replace(" ", ""):  # the company's own logo
+        return True
+    return any(term in low for term in _BADGE_TERMS)
+
+
+async def find_clients(website: str) -> dict:
+    """Discover a company's CLIENTS/CUSTOMERS by crawling its site deterministically:
+    it finds client / "who we've helped" / case-study pages and their sub-pages,
+    collects the client LOGOS, and reads the company names off them with vision.
+    Prefer this over fetching pages yourself when you need the client list — pass
+    the company's website. Returns {"clients": [names], "pages_crawled": [...]}.
+    """
+    start = website if website.startswith("http") else "https://" + website
+    home = fetch_page(start)
+    if "error" in home:
+        return {"clients": [], "error": home["error"], "pages_crawled": []}
+
+    # Homepage + candidate client pages (and one level of their sub-pages).
+    client_pages = _dedup_names(
+        link["url"] for link in home.get("links", []) if _looks_like_client_page(link)
+    )[:5]
+    to_crawl = [start] + client_pages
+    crawled: list[str] = []
+    logo_srcs: list[str] = []
+    alt_names: list[str] = []
+
+    def collect(page: dict) -> None:
+        for im in page.get("images", []):
+            src = im.get("src", "")
+            if "logo" in src.lower():
+                logo_srcs.append(src)
+                alt = im.get("alt", "").strip()
+                if alt and len(alt.split()) <= 5:
+                    alt_names.append(alt)
+
+    collect(home)
+    crawled.append(start)
+    for url in to_crawl[1:]:
+        page = fetch_page(url)
+        if "error" in page:
+            continue
+        crawled.append(url)
+        collect(page)
+        subs = [
+            link["url"]
+            for link in page.get("links", [])
+            if link["url"].startswith(url.rstrip("/") + "/") and link["url"] != url
+        ][:6]
+        for sub in subs:
+            sub_page = fetch_page(sub)
+            if "error" not in sub_page:
+                crawled.append(sub)
+                collect(sub_page)
+
+    # Read the logos with vision, in batches (cap total to bound cost).
+    logo_srcs = _dedup_names(logo_srcs)[:32]
+    companies: list[str] = []
+    for i in range(0, len(logo_srcs), _MAX_LOGO_IMAGES):
+        result = await identify_logos(logo_srcs[i : i + _MAX_LOGO_IMAGES])
+        companies.extend(result["companies"])
+
+    brand = urlparse(start).netloc.lower().removeprefix("www.").split(".")[0]
+    clients = [n for n in _dedup_names(companies + alt_names) if not _is_noise(n, brand)]
+    return {
+        "clients": clients,
+        "pages_crawled": crawled[:12],
+        "logos_read": len(logo_srcs),
+    }
