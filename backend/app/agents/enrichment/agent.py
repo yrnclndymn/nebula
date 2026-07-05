@@ -34,7 +34,9 @@ Process:
      `citations` entry "field | value | source_url | source_date", where source_url
      is the exact page you read it on and source_date is when the info is from.
    - If you cannot cite a specific source for a financial figure or headcount, DO
-     NOT save it — leave it "" or 0. A number without a citation is a bug.
+     NOT save it — leave it "" or 0. A number without a citation is a bug, and the
+     system will DISCARD any uncited funding / estimated_revenue / headcount value,
+     so an uncited number is wasted work — always cite these.
    - Record the source's own date; do not invent or forward-date it.
 5. Finish with a 2-3 sentence summary of what you saved and any gaps. If you left
    financials or headcount empty because no source stated them, say so.

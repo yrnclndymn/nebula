@@ -1,6 +1,7 @@
 """Agent wiring + tool-helper tests (no network / no model calls)."""
 
-from app.tools.graph_tools import _parse_citations, _parse_leaders
+from app.graph.models import Citation
+from app.tools.graph_tools import _drop_uncited, _parse_citations, _parse_leaders
 
 
 def test_root_agent_wires_up_with_tools():
@@ -34,3 +35,16 @@ def test_parse_citations_finds_url_by_content():
         ("year_founded", "https://example.com/about", None),
         ("leadership", "https://example.com/team", "Co-Founder"),
     ]
+
+
+def test_drop_uncited_removes_unbacked_financials():
+    values = {"funding": "$40M", "estimated_revenue": "$5M", "headcount": 200}
+    citations = [
+        Citation(field="funding", value="$40M", source="https://x.com"),
+        # "revenue" is an accepted alias for estimated_revenue
+        Citation(field="revenue", value="$5M", source="https://y.com"),
+        # headcount has no citation → dropped
+    ]
+    kept, dropped = _drop_uncited(values, citations)
+    assert kept == {"funding": "$40M", "estimated_revenue": "$5M", "headcount": None}
+    assert dropped == ["headcount"]

@@ -23,6 +23,28 @@ def _parse_leaders(leadership: list[str]) -> list[Leader]:
     return leaders
 
 
+# Fields that must not be saved without a citation, and the citation-field
+# labels that count as citing them (the model isn't always exact).
+_MUST_CITE = {
+    "funding": {"funding"},
+    "estimated_revenue": {"estimated_revenue", "estimatedrevenue", "revenue", "est_revenue"},
+    "headcount": {"headcount", "headcounts", "employees", "employee_count", "staff"},
+}
+
+
+def _drop_uncited(values: dict, citations: list[Citation]) -> tuple[dict, list[str]]:
+    """Enforce "no number without a source": null out any must-cite field whose
+    value isn't backed by a matching citation. Returns (kept_values, dropped)."""
+    cited = {c.field.strip().lower() for c in citations}
+    kept = dict(values)
+    dropped: list[str] = []
+    for field, aliases in _MUST_CITE.items():
+        if kept.get(field) and not (cited & aliases):
+            kept[field] = None
+            dropped.append(field)
+    return kept, dropped
+
+
 def _parse_citations(citations: list[str]) -> list[Citation]:
     """Each item is "field | value | source_url | source_date" (date optional).
 
@@ -72,22 +94,32 @@ async def save_company(
     page you got it from; `source_date` is when the info is from (e.g. "2025-09" or
     "as of 2024"). REQUIRED for every financial figure and headcount you save.
     """
+    parsed_citations = _parse_citations(citations)
+    # Guardrail: financials/headcount are dropped unless a citation backs them.
+    guarded, dropped = _drop_uncited(
+        {
+            "funding": funding or None,
+            "estimated_revenue": estimated_revenue or None,
+            "headcount": headcount or None,
+        },
+        parsed_citations,
+    )
     record = CompanyRecord(
         name=name,
         about=about or None,
         website=website or None,
         hq_location=hq_location or None,
-        headcount=headcount or None,
-        estimated_revenue=estimated_revenue or None,
+        headcount=guarded["headcount"],
+        estimated_revenue=guarded["estimated_revenue"],
         year_founded=year_founded or None,
-        funding=funding or None,
+        funding=guarded["funding"],
         notes=notes or None,
         topics=[topic] if topic else [],
         company_types=canonical_company_types(company_types),
         partnerships=partnerships,
         clients=clients,
         leadership=_parse_leaders(leadership),
-        citations=_parse_citations(citations),
+        citations=parsed_citations,
         origin="agent",
     )
     await upsert_company(get_driver(), record)
@@ -98,5 +130,6 @@ async def save_company(
         "clients": len(record.clients),
         "leaders": len(record.leadership),
         "citations": len(record.citations),
+        "dropped_uncited": dropped,
         "company_types": record.company_types,
     }
