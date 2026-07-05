@@ -16,7 +16,7 @@ agent?*
 | --- | ------- | ----------------- | ------ |
 | **1 — Agents** | reasoning loop, agent vs. one-shot call, agent components | `app/agents/enrichment/agent.py` (`root_agent`), run loop in `enrich.py`; baseline non-agent in `app/importer/extract.py` | ✅ done |
 | **2 — Tools / MCP** | function-calling, tool design, read vs. write tools, **MCP interoperability** | `app/tools/` (agent tools) + `app/mcp_server.py` (MCP server exposing the graph); registered in `.mcp.json` | ✅ done |
-| **3 — Context / Memory** | sessions (short-term), long-term memory, stateful agents | `enrich.py` uses `InMemorySessionService` (ephemeral) | ⬜ persistent sessions + a chat-over-graph assistant |
+| **3 — Context / Memory** | sessions (short-term), **long-term memory**, stateful agents | `app/agents/assistant/`: chat agent + graph tools; session = multi-turn per run; `memory.py` = long-term memory as `(:Memory)` nodes | ✅ done (`make chat`) |
 | **4 — Quality** | observability, **LLM-as-Judge**, **trajectory eval**, field checks | `backend/evals/`: golden dataset, deterministic field checks, `judge.py` (LLM-as-Judge), trajectory checks; `enrich.py` captures the tool trajectory | ✅ eval done · ⬜ Cloud Trace / structured tracing |
 | **5 — Production** | deployment, A2A, security/governance | roadmap step 5 | ⬜ Cloud Run + Firebase Auth + (optionally) Vertex AI Agent Engine |
 
@@ -80,8 +80,21 @@ the company drawer).
 Free-tier note: flash-lite is ~15 req/min, so the harness bursts into 429s; the
 generate/grade split + `app/genai_retry.py` handle it.
 
+## Chat assistant + memory
+
+`make chat` (interactive) or `make chat ARGS="a question"` (one-shot) talks to a
+research assistant over the graph. Two kinds of memory, which is the lesson:
+- **Short-term (session):** multi-turn context within one run, via ADK's
+  `InMemorySessionService` — the assistant remembers earlier turns.
+- **Long-term:** durable facts stored as `(:Memory)` nodes in Neo4j
+  (`app/agents/assistant/memory.py`), loaded at start and written by the `remember`
+  tool — so a fact learned in one run is recalled in a later, separate run.
+  (Verified: "remember I focus on employee-owned companies" persisted and was
+  recalled by a fresh process.) Mirrors an ADK MemoryService, kept in the graph so
+  it's persistent + inspectable.
+
 ## Suggested next builds (in course order)
 
-1. **Memory + chat assistant** over the graph — Day 3 (sessions + long-term memory).
-2. **Structured tracing** — Day 4; Cloud Trace / OpenTelemetry over the agent runs.
+1. **Structured tracing** — Day 4; Cloud Trace / OpenTelemetry over the agent runs.
+2. **Day 5 — Production**: Firebase Auth + Cloud Run deploy (roadmap step 5).
 3. **Multi-agent** decomposition (basics / funding / partnerships sub-agents) — Day 1/5.
