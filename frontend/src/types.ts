@@ -50,9 +50,11 @@ export interface ProposalRecord {
 export interface Proposal {
   proposal_id: string;
   name: string;
-  exists: boolean;
-  summary: string;
-  record: ProposalRecord;
+  status: "pending" | "ready" | "error";
+  exists?: boolean;
+  summary?: string;
+  record?: ProposalRecord;
+  error?: string;
 }
 
 export interface CompanyDetail {

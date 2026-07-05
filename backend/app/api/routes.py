@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.agents.assistant.proposals import commit_proposal
+from app.agents.assistant.proposals import commit_proposal, get_proposal
 from app.agents.assistant.service import respond
 from app.graph import queries
 from app.graph.driver import check_connectivity, get_driver
@@ -71,6 +71,15 @@ async def chat(req: ChatRequest) -> dict:
     enrichment the assistant prepared for the user to review and commit."""
     turn = await respond(req.session_id, req.message)
     return {"reply": turn.reply, "proposals": turn.proposals}
+
+
+@router.get("/proposals/{proposal_id}")
+async def proposal_status(proposal_id: str) -> dict:
+    """Poll a background enrichment proposal until status is 'ready' (or 'error')."""
+    proposal = get_proposal(proposal_id)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="unknown proposal")
+    return proposal
 
 
 class CommitRequest(BaseModel):

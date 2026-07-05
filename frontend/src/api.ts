@@ -25,6 +25,9 @@ export const sendChat = (sessionId: string, message: string) =>
     message,
   });
 
+export const getProposal = (proposalId: string) =>
+  getJson<Proposal>(`/proposals/${encodeURIComponent(proposalId)}`);
+
 export const commitProposal = (proposalId: string) =>
   postJson<{ committed?: string; error?: string }>("/proposals/commit", {
     proposal_id: proposalId,

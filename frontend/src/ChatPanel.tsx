@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { commitProposal, sendChat } from "./api";
+import { commitProposal, getProposal, sendChat } from "./api";
 import type { Proposal } from "./types";
 
 interface Msg {
@@ -14,26 +14,58 @@ const SUGGESTIONS = [
   "Research Cursor (cursor.com) and prepare it to add.",
 ];
 
-type PropStatus = "pending" | "committing" | "committed" | "discarded";
+type CommitStatus = "idle" | "committing" | "committed" | "discarded";
 
-function ProposalCard({ p }: { p: Proposal }) {
-  const [status, setStatus] = useState<PropStatus>("pending");
+function ProposalCard({ p: initial }: { p: Proposal }) {
+  const [prop, setProp] = useState<Proposal>(initial);
+  const [commitState, setCommitState] = useState<CommitStatus>("idle");
   const [error, setError] = useState<string | null>(null);
-  const r = p.record;
+
+  // Poll while the background research is still running.
+  useEffect(() => {
+    if (prop.status !== "pending") return;
+    const iv = setInterval(async () => {
+      try {
+        const updated = await getProposal(prop.proposal_id);
+        if (updated.status !== "pending") setProp(updated);
+      } catch {
+        /* transient — keep polling */
+      }
+    }, 2500);
+    return () => clearInterval(iv);
+  }, [prop.status, prop.proposal_id]);
 
   async function commit() {
-    setStatus("committing");
+    setCommitState("committing");
     setError(null);
     try {
-      const res = await commitProposal(p.proposal_id);
+      const res = await commitProposal(prop.proposal_id);
       if (res.error) throw new Error(res.error);
-      setStatus("committed");
+      setCommitState("committed");
     } catch (e) {
       setError(String(e));
-      setStatus("pending");
+      setCommitState("idle");
     }
   }
 
+  if (prop.status === "pending") {
+    return (
+      <div className="proposal pending">
+        🔎 researching <strong>{prop.name}</strong>…{" "}
+        <span className="muted">this can take a minute</span>
+      </div>
+    );
+  }
+  if (prop.status === "error" || !prop.record) {
+    return (
+      <div className="proposal">
+        ⚠ couldn't research <strong>{prop.name}</strong>
+        {prop.error ? `: ${prop.error}` : ""}
+      </div>
+    );
+  }
+
+  const r = prop.record;
   const facts: [string, unknown][] = [
     ["HQ", r.hq_location],
     ["Founded", r.year_founded],
@@ -50,11 +82,11 @@ function ProposalCard({ p }: { p: Proposal }) {
   ];
 
   return (
-    <div className={`proposal ${status}`}>
+    <div className={`proposal ${commitState}`}>
       <div className="proposal-head">
-        <strong>{p.name}</strong>
-        <span className={`origin ${p.exists ? "" : "origin-agent"}`}>
-          {p.exists ? "updates existing" : "new"}
+        <strong>{prop.name}</strong>
+        <span className={`origin ${prop.exists ? "" : "origin-agent"}`}>
+          {prop.exists ? "updates existing" : "new"}
         </span>
       </div>
       <div className="proposal-facts">
@@ -98,16 +130,16 @@ function ProposalCard({ p }: { p: Proposal }) {
         </details>
       )}
       {error && <div className="proposal-err">{error}</div>}
-      {status === "committed" ? (
+      {commitState === "committed" ? (
         <div className="proposal-done">✓ committed to the graph</div>
-      ) : status === "discarded" ? (
+      ) : commitState === "discarded" ? (
         <div className="proposal-done muted">discarded</div>
       ) : (
         <div className="proposal-actions">
-          <button className="commit" onClick={commit} disabled={status === "committing"}>
-            {status === "committing" ? "committing…" : "Commit"}
+          <button className="commit" onClick={commit} disabled={commitState === "committing"}>
+            {commitState === "committing" ? "committing…" : "Commit"}
           </button>
-          <button className="discard" onClick={() => setStatus("discarded")}>
+          <button className="discard" onClick={() => setCommitState("discarded")}>
             Discard
           </button>
         </div>
