@@ -31,6 +31,10 @@ funded that partner with Anthropic and have headcount < 100*).
   endpoint via `service.py`, surfaced as the SPA's 💬 chat panel): conversational
   ADK agent over the graph with session memory (per client) + long-term memory as
   `(:Memory)` nodes. See `LEARNING.md` (course Day 3).
+- **Crawl cache** — `app/graph/cache.py`: `fetch_page`/`find_clients` read through
+  a graph-backed cache (`:Page`, `:SiteClients`) with a `cache_ttl_days` TTL, so
+  repeat questions about a company don't re-crawl. `POST /cache/refresh {domain}`
+  clears it. In the graph (not SQLite) for Cloud-Run/Aura fit + dev/prod parity.
 - **Auth — Firebase Auth (Google provider)**, restricted to the owner. SPA gates
   on sign-in; the backend verifies the Firebase ID token. *(Not yet built.)*
 - Deploys into the **same Firebase/GCP project as `emergent-strategies`** (the

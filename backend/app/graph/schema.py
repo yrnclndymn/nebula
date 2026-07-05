@@ -19,6 +19,8 @@ SCHEMA_STATEMENTS = [
     "CREATE CONSTRAINT companytype_name IF NOT EXISTS FOR (ct:CompanyType) REQUIRE ct.name IS UNIQUE",
     "CREATE CONSTRAINT tool_name IF NOT EXISTS FOR (t:Tool) REQUIRE t.name IS UNIQUE",
     "CREATE CONSTRAINT source_url IF NOT EXISTS FOR (s:Source) REQUIRE s.url IS UNIQUE",
+    "CREATE CONSTRAINT page_url IF NOT EXISTS FOR (p:Page) REQUIRE p.url IS UNIQUE",
+    "CREATE CONSTRAINT siteclients_domain IF NOT EXISTS FOR (sc:SiteClients) REQUIRE sc.domain IS UNIQUE",
     "CREATE INDEX company_website IF NOT EXISTS FOR (c:Company) ON (c.website)",
     "CREATE INDEX person_name IF NOT EXISTS FOR (p:Person) ON (p.name)",
 ]

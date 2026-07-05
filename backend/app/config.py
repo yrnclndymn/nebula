@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # and handles this tool loop fine. Override with AGENT_MODEL.
     agent_model: str = "gemini-3.1-flash-lite"
 
+    # Crawl cache: reuse a page/client snapshot if it's younger than this. Company
+    # site copy changes slowly, so weeks is fine.
+    cache_ttl_days: int = 21
+
 
 settings = Settings()
 
