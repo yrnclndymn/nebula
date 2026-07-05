@@ -11,11 +11,21 @@ export interface CompanyRow {
   funding: string | null;
   notes: string | null;
   origin: string | null;
+  kind: string | null;
   topics: string[];
   companyTypes: string[];
   partnerCount: number;
   clientCount: number;
   leaderCount: number;
+}
+
+export const KINDS = ["service_provider", "isv", "cloud_provider"] as const;
+
+export function kindLabel(kind: string | null): string {
+  if (kind === "service_provider") return "Service provider";
+  if (kind === "isv") return "ISV";
+  if (kind === "cloud_provider") return "Cloud provider";
+  return "—";
 }
 
 export interface Leader {
@@ -70,6 +80,7 @@ export interface CompanyDetail {
   funding: string | null;
   notes: string | null;
   origin: string | null;
+  kind: string | null;
   topics: string[];
   companyTypes: string[];
   partners: string[];

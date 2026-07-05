@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
+import { setKind } from "./api";
 import type { CompanyDetail } from "./types";
+import { KINDS, kindLabel } from "./types";
 
 function Field({ label, value }: { label: string; value: ReactNode }) {
   if (value == null || value === "") return null;
@@ -32,10 +34,22 @@ function Chips({ label, items }: { label: string; items: string[] }) {
 export function CompanyDrawer({
   company,
   onClose,
+  onKindChange,
 }: {
   company: CompanyDetail;
   onClose: () => void;
+  onKindChange: (name: string, kind: string | null) => void;
 }) {
+  async function changeKind(value: string) {
+    const kind = value || null;
+    onKindChange(company.name, kind); // optimistic
+    try {
+      await setKind(company.name, kind);
+    } catch {
+      /* revert would need the old value; keep simple for a personal tool */
+    }
+  }
+
   return (
     <div className="drawer-overlay" onClick={onClose}>
       <aside className="drawer" onClick={(e) => e.stopPropagation()}>
@@ -50,6 +64,17 @@ export function CompanyDrawer({
             </span>
           )}
         </h2>
+        <div className="drawer-kind">
+          <span className="field-label">Kind</span>
+          <select value={company.kind ?? ""} onChange={(e) => changeKind(e.target.value)}>
+            <option value="">— unset —</option>
+            {KINDS.map((k) => (
+              <option key={k} value={k}>
+                {kindLabel(k)}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="drawer-links">
           {company.website && (
             <a href={company.website} target="_blank" rel="noreferrer">

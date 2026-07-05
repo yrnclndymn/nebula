@@ -12,7 +12,7 @@ from neo4j import AsyncDriver
 
 _COMPANY_PROPS = (
     "c{.name,.priority,.about,.website,.linkedin,.hqLocation,.headcount,"
-    ".estimatedRevenue,.yearFounded,.funding,.notes,.origin}"
+    ".estimatedRevenue,.yearFounded,.funding,.notes,.origin,.kind}"
 )
 
 
@@ -22,6 +22,7 @@ async def list_companies(
     topic: str | None = None,
     q: str | None = None,
     company_type: str | None = None,
+    kind: str | None = None,
     headcount_min: int | None = None,
     headcount_max: int | None = None,
 ) -> list[dict]:
@@ -30,6 +31,9 @@ async def list_companies(
     if topic:
         conditions.append("t0.name = $topic")
         params["topic"] = topic
+    if kind:
+        conditions.append("c.kind = $kind")
+        params["kind"] = kind
     if q:
         conditions.append(
             "(toLower(c.name) CONTAINS toLower($q) OR toLower(coalesce(c.about,'')) CONTAINS toLower($q))"
@@ -115,6 +119,17 @@ async def get_company(driver: AsyncDriver, name: str) -> dict | None:
         "leadership": leadership,
         "citations": citations,
     }
+
+
+async def set_company_kind(driver: AsyncDriver, name: str, kind: str | None) -> bool:
+    """Set (or clear, with None) a company's kind. Returns False if not found."""
+    async with driver.session() as session:
+        result = await session.run(
+            "MATCH (c:Company {name: $name}) SET c.kind = $kind RETURN c.name AS name",
+            name=name,
+            kind=kind,
+        )
+        return await result.single() is not None
 
 
 async def list_topics(driver: AsyncDriver) -> list[str]:

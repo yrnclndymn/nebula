@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 import { fetchCompanies, fetchCompanyTypes, fetchCompany, fetchTopics } from "./api";
 import type { CompanyDetail, CompanyRow } from "./types";
+import { KINDS, kindLabel } from "./types";
 import { CompanyDrawer } from "./CompanyDrawer";
 import { ChatPanel } from "./ChatPanel";
 
@@ -35,6 +36,7 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [topic, setTopic] = useState("");
   const [companyType, setCompanyType] = useState("");
+  const [kind, setKind] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortAsc, setSortAsc] = useState(true);
 
@@ -57,6 +59,7 @@ export default function App() {
     const filtered = companies.filter((c) => {
       if (topic && !c.topics.includes(topic)) return false;
       if (companyType && !c.companyTypes.includes(companyType)) return false;
+      if (kind && c.kind !== kind) return false;
       if (needle) {
         const hay = `${c.name} ${c.about ?? ""} ${c.hqLocation ?? ""}`.toLowerCase();
         if (!hay.includes(needle)) return false;
@@ -65,7 +68,12 @@ export default function App() {
     });
     filtered.sort((a, b) => (sortAsc ? 1 : -1) * compare(a, b, sortKey));
     return filtered;
-  }, [companies, search, topic, companyType, sortKey, sortAsc]);
+  }, [companies, search, topic, companyType, kind, sortKey, sortAsc]);
+
+  function updateCompanyKind(name: string, newKind: string | null) {
+    setCompanies((cs) => cs.map((c) => (c.name === name ? { ...c, kind: newKind } : c)));
+    setSelected((s) => (s && s.name === name ? { ...s, kind: newKind } : s));
+  }
 
   function toggleSort(key: SortKey) {
     if (key === sortKey) setSortAsc((v) => !v);
@@ -108,19 +116,28 @@ export default function App() {
             <option key={t}>{t}</option>
           ))}
         </select>
+        <select value={kind} onChange={(e) => setKind(e.target.value)}>
+          <option value="">All kinds</option>
+          {KINDS.map((k) => (
+            <option key={k} value={k}>
+              {kindLabel(k)}
+            </option>
+          ))}
+        </select>
         <select value={companyType} onChange={(e) => setCompanyType(e.target.value)}>
           <option value="">All types</option>
           {types.map((t) => (
             <option key={t}>{t}</option>
           ))}
         </select>
-        {(search || topic || companyType) && (
+        {(search || topic || companyType || kind) && (
           <button
             className="clear"
             onClick={() => {
               setSearch("");
               setTopic("");
               setCompanyType("");
+              setKind("");
             }}
           >
             Clear
@@ -144,6 +161,7 @@ export default function App() {
                   {sortKey === col.key && <span className="arrow">{sortAsc ? " ▲" : " ▼"}</span>}
                 </th>
               ))}
+              <th>Kind</th>
               <th>HQ</th>
               <th>Types</th>
               <th>Funding</th>
@@ -157,6 +175,7 @@ export default function App() {
                 <td className="num">{c.yearFounded ?? "—"}</td>
                 <td className="num">{c.partnerCount || "—"}</td>
                 <td className="num">{c.clientCount || "—"}</td>
+                <td className="muted">{c.kind ? kindLabel(c.kind) : "—"}</td>
                 <td className="muted">{c.hqLocation ?? "—"}</td>
                 <td>
                   {c.companyTypes.map((t) => (
@@ -170,7 +189,7 @@ export default function App() {
             ))}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="empty">
+                <td colSpan={9} className="empty">
                   No companies match these filters.
                 </td>
               </tr>
@@ -179,7 +198,13 @@ export default function App() {
         </table>
       </div>
 
-      {selected && <CompanyDrawer company={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <CompanyDrawer
+          company={selected}
+          onClose={() => setSelected(null)}
+          onKindChange={updateCompanyKind}
+        />
+      )}
       {chatOpen && <ChatPanel onClose={() => setChatOpen(false)} />}
     </div>
   );
