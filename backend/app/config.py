@@ -15,7 +15,8 @@ class Settings(BaseSettings):
     frontend_origin: str = "http://localhost:5173"
 
     # Gemini (google-genai reads GEMINI_API_KEY / GOOGLE_API_KEY from the env).
-    gemini_model: str = "gemini-2.5-flash"
+    # flash-lite tier: cheap, fast, and less demand-throttled than 2.5-flash.
+    gemini_model: str = "gemini-3.1-flash-lite"
 
 
 settings = Settings()

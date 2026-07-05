@@ -9,12 +9,18 @@ This extractor is intentionally standalone (a plain google-genai structured call
 no tools), so the later ADK enrichment agent can reuse the same schema.
 """
 
+import asyncio
+
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.graph.models import Leader
+
+# Transient statuses worth retrying: rate limit + server-side unavailability.
+_RETRYABLE = {429, 500, 502, 503, 504}
+_MAX_ATTEMPTS = 8
 
 _PROMPT = """You are cleaning up messy spreadsheet cells for a company research \
 database. Given the raw freeform text below for a single company, extract the \
@@ -72,20 +78,35 @@ async def extract_fields(
     if not any([notes, leadership, partnerships, clients]):
         return ExtractedFields()
 
-    resp = await (client or new_client()).aio.models.generate_content(
-        model=settings.gemini_model,
-        contents=_PROMPT.format(
-            company=company,
-            notes=notes or "(none)",
-            leadership=leadership or "(none)",
-            partnerships=partnerships or "(none)",
-            clients=clients or "(none)",
-        ),
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=ExtractedFields,
-            temperature=0,
-        ),
+    client = client or new_client()
+    contents = _PROMPT.format(
+        company=company,
+        notes=notes or "(none)",
+        leadership=leadership or "(none)",
+        partnerships=partnerships or "(none)",
+        clients=clients or "(none)",
     )
-    parsed = resp.parsed
-    return parsed if isinstance(parsed, ExtractedFields) else ExtractedFields()
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=ExtractedFields,
+        temperature=0,
+    )
+
+    # Retry transient 429/5xx with exponential backoff; Gemini's shared models
+    # throw 503 "high demand" often enough to sink a batch otherwise.
+    delay = 1.0
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            resp = await client.aio.models.generate_content(
+                model=settings.gemini_model, contents=contents, config=config
+            )
+            parsed = resp.parsed
+            return parsed if isinstance(parsed, ExtractedFields) else ExtractedFields()
+        except errors.APIError as exc:
+            if exc.code in _RETRYABLE and attempt < _MAX_ATTEMPTS - 1:
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 60.0)
+                continue
+            raise
+
+    return ExtractedFields()  # unreachable; keeps type checkers happy

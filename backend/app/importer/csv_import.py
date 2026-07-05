@@ -100,8 +100,25 @@ def build_record(
     )
 
 
+async def _already_imported(driver, topic: str | None) -> set[str]:
+    """Names of companies already tagged with this topic (i.e. fully imported)."""
+    if not topic:
+        return set()
+    async with driver.session() as session:
+        result = await session.run(
+            "MATCH (c:Company)-[:TAGGED_AS]->(:Topic {name: $topic}) RETURN c.name AS name",
+            topic=topic,
+        )
+        return {record["name"] async for record in result}
+
+
 async def run(
-    path: Path, topic: str | None, limit: int | None, dry_run: bool, use_llm: bool
+    path: Path,
+    topic: str | None,
+    limit: int | None,
+    dry_run: bool,
+    use_llm: bool,
+    skip_existing: bool = False,
 ) -> None:
     with path.open(newline="", encoding="utf-8-sig") as fh:
         rows = [_map_row(r) for r in csv.DictReader(fh)]
@@ -110,39 +127,53 @@ async def run(
 
     driver = None if dry_run else get_driver()
     client = new_client() if use_llm else None
+    # On a retry run, skip rows already imported so we only spend LLM calls on gaps.
+    done = await _already_imported(driver, topic) if (skip_existing and driver) else set()
     written = skipped = 0
+    failed: list[str] = []
     for i, row in enumerate(rows, 1):
         name = row.get("name", "").strip()
         if not name:
             skipped += 1
             continue
-        if use_llm:
-            ex = await extract_fields(
-                company=name,
-                notes=row.get("notes_raw", ""),
-                leadership=row.get("leadership_raw", ""),
-                partnerships=row.get("partnerships_raw", ""),
-                clients=row.get("clients_raw", ""),
-                client=client,
-            )
-        else:
-            ex = heuristic_extract(row)
-        record = build_record(row, topic, ex)
-        if record is None:
+        if name in done:
             skipped += 1
             continue
-        if dry_run:
-            print(f"[{i}/{len(rows)}] {record.model_dump_json(indent=2, exclude_none=True)}")
-        else:
-            await upsert_company(driver, record)
-            print(f"[{i}/{len(rows)}] upserted {record.name}")
-        written += 1
+        # Isolate each row: a row that fails extraction/upsert (e.g. Gemini still
+        # 5xx after retries) is logged and skipped, never sinking the whole batch.
+        # Re-running is idempotent, so a later pass fills any gaps in place.
+        try:
+            if use_llm:
+                ex = await extract_fields(
+                    company=name,
+                    notes=row.get("notes_raw", ""),
+                    leadership=row.get("leadership_raw", ""),
+                    partnerships=row.get("partnerships_raw", ""),
+                    clients=row.get("clients_raw", ""),
+                    client=client,
+                )
+            else:
+                ex = heuristic_extract(row)
+            record = build_record(row, topic, ex)
+            if record is None:
+                skipped += 1
+                continue
+            if dry_run:
+                print(f"[{i}/{len(rows)}] {record.model_dump_json(indent=2, exclude_none=True)}")
+            else:
+                await upsert_company(driver, record)
+                print(f"[{i}/{len(rows)}] upserted {record.name}")
+            written += 1
+        except Exception as exc:  # noqa: BLE001 — keep going, report at the end
+            failed.append(name)
+            print(f"[{i}/{len(rows)}] FAILED {name}: {exc}")
 
     if driver is not None:
         await close_driver()
-    print(
-        f"\nDone. {written} companies {'previewed' if dry_run else 'upserted'}, {skipped} skipped."
-    )
+    verb = "previewed" if dry_run else "upserted"
+    print(f"\nDone. {written} companies {verb}, {skipped} skipped, {len(failed)} failed.")
+    if failed:
+        print("Failed (re-run to retry): " + ", ".join(failed))
 
 
 def main() -> None:
@@ -156,12 +187,26 @@ def main() -> None:
     parser.add_argument(
         "--no-llm", action="store_true", help="Skip LLM extraction (heuristic only)"
     )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip rows already imported for this topic (retry runs)",
+    )
     args = parser.parse_args()
 
     if not args.csv.exists():
         parser.error(f"CSV not found: {args.csv}")
 
-    asyncio.run(run(args.csv, args.topic, args.limit, args.dry_run, not args.no_llm))
+    asyncio.run(
+        run(
+            args.csv,
+            args.topic,
+            args.limit,
+            args.dry_run,
+            not args.no_llm,
+            args.skip_existing,
+        )
+    )
 
 
 if __name__ == "__main__":
