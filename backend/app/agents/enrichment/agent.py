@@ -11,7 +11,7 @@ from google.adk.agents import Agent
 
 from app.config import settings
 from app.tools.graph_tools import save_company
-from app.tools.web import fetch_page, web_search
+from app.tools.web import fetch_page, identify_logos, web_search
 
 _INSTRUCTION = """You are the research agent for Nebula, a company-research graph.
 You are given a company's name, website, and a research topic. Gather factual
@@ -21,9 +21,22 @@ Process:
 1. First call fetch_page on the company's website for the basics (what they do,
    HQ, leadership, founding).
 2. Use web_search for anything still missing: HQ location, headcount, year
-   founded, funding/investors, notable partnerships, notable clients, leadership
-   (names + titles), and whether it is a B-Corp / ESOP / employee-owned /
-   co-operative / non-profit. fetch_page on the most promising results to confirm.
+   founded, funding/investors, notable partnerships, leadership (names + titles),
+   and whether it is a B-Corp / ESOP / employee-owned / co-operative / non-profit.
+   fetch_page on the most promising results to confirm.
+
+2b. CLIENTS & PARTNERS are usually shown as LOGOS, often on a dedicated page. From
+   fetch_page's `links`, open pages whose text/URL suggests clients — e.g.
+   "clients", "who we've helped", "customers", "case studies", "work", "customer
+   stories" — AND follow their sub-pages (e.g. per-sector pages like /defence/,
+   /healthcare/). On each such page:
+   - Read client names from `images`: logo filenames and alt text usually contain
+     the company (e.g. "logo-equifax.jpg" → Equifax).
+   - For logos whose company you can't tell from the filename/alt, collect their
+     image `src` URLs and call identify_logos to read them from the image.
+   - Also take names from the page text.
+   Be thorough: a firm may list 20+ clients across several sub-pages — gather them
+   all, don't stop at the first handful.
 3. Then call save_company EXACTLY ONCE with everything you found. Use "" for
    unknown text, 0 for unknown numbers, and [] for unknown lists. Format each
    leadership entry as "Name | Title". Pass the topic through unchanged.
@@ -47,5 +60,5 @@ root_agent = Agent(
     model=settings.agent_model,
     description="Researches a company from its name + website and saves structured facts to the Nebula graph.",
     instruction=_INSTRUCTION,
-    tools=[fetch_page, web_search, save_company],
+    tools=[fetch_page, web_search, identify_logos, save_company],
 )

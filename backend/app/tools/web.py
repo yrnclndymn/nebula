@@ -1,15 +1,29 @@
 """Web research tools for the enrichment agent.
 
-These are ADK function tools: plain functions with type hints + a docstring, from
-which ADK builds the function-calling schema the model sees. Keep signatures and
-return shapes simple — the return value is fed straight back to the model.
+ADK function tools: plain functions with type hints + a docstring, from which ADK
+builds the function-calling schema. `fetch_page` returns not just text but the
+page's internal links and images (src + alt) — so the agent can find client/case
+sub-pages and read logo filenames. `identify_logos` reads company names off logo
+images (multimodal) when the filename/alt don't reveal them.
 """
+
+import asyncio
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
 from ddgs import DDGS
+from google import genai
+from google.genai import types
+from pydantic import BaseModel
+
+from app.config import settings
+from app.genai_retry import generate_with_retry
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; NebulaResearchBot/0.1)"}
+_MAX_LINKS = 60
+_MAX_IMAGES = 60
+_MAX_LOGO_IMAGES = 16
 
 
 def web_search(query: str) -> dict:
@@ -29,10 +43,15 @@ def web_search(query: str) -> dict:
 
 
 def fetch_page(url: str) -> dict:
-    """Fetch a web page and return its readable text (truncated to ~5000 chars).
+    """Fetch a web page and return its readable text plus its internal links and
+    images. Use `links` to discover relevant sub-pages (e.g. "clients", "who we've
+    helped", "case studies", and their sector sub-pages) and `images` to spot
+    client logos — logo filenames/alt often contain the company name (e.g.
+    "logo-equifax.jpg"). For logos whose company isn't clear, pass their src URLs
+    to identify_logos.
 
-    Use this to read a company's website or a promising search result to confirm
-    facts. Returns {"url", "text"} on success or {"url", "error"} on failure.
+    Returns {url, text (~5000 chars), links:[{url,text}], images:[{src,alt}]} on
+    success, or {url, error} on failure.
     """
     try:
         resp = requests.get(url, timeout=15, headers=_HEADERS)
@@ -41,7 +60,82 @@ def fetch_page(url: str) -> dict:
         return {"url": url, "error": str(exc)}
 
     soup = BeautifulSoup(resp.text, "lxml")
+    domain = urlparse(url).netloc
+
+    links, seen_l = [], set()
+    for a in soup.find_all("a", href=True):
+        abs_url = urljoin(url, a["href"]).split("#")[0]
+        if urlparse(abs_url).netloc == domain and abs_url not in seen_l:
+            seen_l.add(abs_url)
+            links.append({"url": abs_url, "text": a.get_text(" ", strip=True)[:80]})
+            if len(links) >= _MAX_LINKS:
+                break
+
+    images, seen_i = [], set()
+    for im in soup.find_all("img"):
+        src = im.get("src") or im.get("data-src") or ""
+        if not src:
+            continue
+        abs_src = urljoin(url, src)
+        if abs_src not in seen_i:
+            seen_i.add(abs_src)
+            images.append({"src": abs_src, "alt": (im.get("alt") or "").strip()[:80]})
+            if len(images) >= _MAX_IMAGES:
+                break
+
     for tag in soup(["script", "style", "noscript", "svg"]):
         tag.decompose()
     text = " ".join(soup.get_text(" ").split())
-    return {"url": url, "text": text[:5000]}
+    return {"url": url, "text": text[:5000], "links": links, "images": images}
+
+
+class _LogoNames(BaseModel):
+    companies: list[str]
+
+
+def _download_image(image_url: str) -> tuple[bytes, str] | None:
+    try:
+        resp = requests.get(image_url, timeout=12, headers=_HEADERS)
+        resp.raise_for_status()
+    except Exception:  # noqa: BLE001
+        return None
+    mime = resp.headers.get("content-type", "").split(";")[0]
+    if not mime.startswith("image/"):
+        return None
+    return resp.content, mime
+
+
+async def identify_logos(image_urls: list[str]) -> dict:
+    """Look at logo images and identify the company/brand in each. Use for client
+    logos whose company name isn't clear from the filename or alt text. Pass the
+    image src URLs (up to ~16 are used). Returns {"companies": [names]}."""
+    parts: list[types.Part] = [
+        types.Part(
+            text=(
+                "Each image is a company logo (e.g. from a consultancy's client "
+                "page). Identify the company or brand shown in each. Skip any you "
+                "cannot confidently identify. Return the list of company names."
+            )
+        )
+    ]
+    for image_url in image_urls[:_MAX_LOGO_IMAGES]:
+        downloaded = await asyncio.to_thread(_download_image, image_url)
+        if downloaded:
+            data, mime = downloaded
+            parts.append(types.Part.from_bytes(data=data, mime_type=mime))
+
+    if len(parts) == 1:  # nothing downloaded
+        return {"companies": []}
+
+    resp = await generate_with_retry(
+        genai.Client(),
+        model=settings.gemini_model,
+        contents=[types.Content(role="user", parts=parts)],
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=_LogoNames,
+            temperature=0,
+        ),
+    )
+    parsed = resp.parsed
+    return {"companies": parsed.companies if isinstance(parsed, _LogoNames) else []}

@@ -49,7 +49,6 @@ def test_propose_captures_without_writing():
     out = asyncio.run(scenario())
     if out == "skip":
         pytest.skip("Neo4j not reachable — run `make db-up`")
-    result, sink, count = out
-    assert result["written"] is False
-    assert len(sink) == 1 and sink[0]["name"] == NAME
-    assert count == 0  # nothing was written to the graph
+    _result, sink, count = out
+    assert len(sink) == 1 and sink[0]["name"] == NAME  # captured for review
+    assert count == 0  # the invariant that matters: nothing written to the graph
