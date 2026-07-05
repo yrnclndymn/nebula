@@ -202,7 +202,7 @@ _NON_CLIENT_LOGO_SRC = (
     "cyber-essentials",
     "iso-",
 )
-_MAX_TOTAL_LOGOS = 72
+_MAX_TOTAL_LOGOS = 32  # ~2 vision batches — bounds latency/rate-limit pressure
 
 
 async def _extract_clients_from_text(text: str) -> list[str]:

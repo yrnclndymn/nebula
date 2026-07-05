@@ -108,6 +108,11 @@ tagged `origin="agent"`. This is human-in-the-loop (Day 4) applied to the write
 path — the agent proposes, the human commits — which contains the read→write
 blast radius, prompt-injection-to-write, and dedup risks of a chat-driven writer.
 
+Research is slow (crawl + vision + LLM, minutes under rate limits), so it runs as
+a **background task** (course Day 2, long-running operations): `propose_enrichment`
+returns a *pending* proposal immediately so `/chat` stays fast, and the client
+polls `GET /proposals/{id}` until it's `ready` — no request timeouts.
+
 ## Suggested next builds (in course order)
 
 1. **Structured tracing** — Day 4; Cloud Trace / OpenTelemetry over the agent runs.

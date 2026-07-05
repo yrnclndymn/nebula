@@ -11,23 +11,39 @@ process, so its session starts empty (short-term) but recalls graph memories.
 import asyncio
 import sys
 
+from app.agents.assistant.proposals import get_proposal
 from app.agents.assistant.service import respond
 from app.graph.driver import close_driver
 
 SESSION_ID = "cli"
 
 
-def _render(turn) -> str:
+async def _render(turn) -> str:
     out = turn.reply
-    for p in turn.proposals:
-        out += f"\n\n[proposal {p['proposal_id']}] {p['name']} — review and commit in the UI"
+    for pending in turn.proposals:
+        pid = pending["proposal_id"]
+        for _ in range(180):  # background research runs on this same loop
+            proposal = get_proposal(pid)
+            if proposal and proposal.get("status") != "pending":
+                break
+            await asyncio.sleep(1)
+        proposal = get_proposal(pid) or {}
+        if proposal.get("status") == "ready":
+            record = proposal.get("record", {})
+            out += (
+                f"\n\n[proposal {pid}] {proposal['name']} — "
+                f"{len(record.get('clients', []))} clients, "
+                f"{len(record.get('leadership', []))} leaders. Review/commit in the UI."
+            )
+        elif proposal.get("status") == "error":
+            out += f"\n\n[proposal {pid}] research failed: {proposal.get('error')}"
     return out
 
 
 async def chat(one_shot: str | None = None) -> None:
     try:
         if one_shot is not None:
-            print(_render(await respond(SESSION_ID, one_shot)))
+            print(await _render(await respond(SESSION_ID, one_shot)))
             return
 
         print("Nebula assistant — ask about the research graph. 'exit' to quit.")
@@ -39,7 +55,7 @@ async def chat(one_shot: str | None = None) -> None:
             if question.lower() in {"exit", "quit"}:
                 break
             if question:
-                print("\n" + _render(await respond(SESSION_ID, question)))
+                print("\n" + await _render(await respond(SESSION_ID, question)))
     finally:
         await close_driver()
 
