@@ -1,7 +1,15 @@
 """Unit tests for the deterministic CSV mapping (no LLM / no DB)."""
 
 from app.importer.csv_import import _int_or_none, _map_row, build_record, heuristic_extract
-from app.importer.extract import ExtractedFields
+from app.importer.extract import ExtractedFields, canonical_company_types
+
+
+def test_canonical_company_types_filters_and_normalizes():
+    raw = ["Privately held", "UK Ltd", "b corp", "ESOP", "employee owned", "LLC", "B-Corp"]
+    # generic legal forms dropped; casing normalized; deduped
+    assert canonical_company_types(raw) == ["B-Corp", "ESOP", "employee-owned"]
+    assert canonical_company_types([]) == []
+    assert canonical_company_types(["Pty Ltd", "privately held"]) == []
 
 
 def test_header_mapping_tolerates_sheet_variations():

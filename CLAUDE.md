@@ -83,7 +83,15 @@ Health wiring: `GET /health` (process up, no DB) and `GET /health/graph`
 5. **Auth + deploy** — Firebase Auth gate; Cloud Run (API) + Firebase Hosting (SPA).
 
 **Gemini auth:** `google-genai` reads `GEMINI_API_KEY` / `GOOGLE_API_KEY` from
-the env (already set in Andy's shell). Model in `app/config.py` (`gemini-2.5-flash`).
+the env (already set in Andy's shell). Model in `app/config.py`
+(`gemini-3.1-flash-lite`), overridable via `GEMINI_MODEL`.
+
+**Picking an LLM model — never choose from memory.** Model lineups move faster
+than any training cutoff (Gemini 3.x post-dates it). Before selecting or changing
+a Gemini model, list what's actually available to the key:
+`uv run python -c "import google.genai as g; [print(m.name) for m in g.Client().models.list()]"`.
+For Claude/Anthropic models, use the `claude-api` skill (kept current beyond
+training). Prefer the live list / skill over any hard-coded belief about versions.
 
 The graph write path is deliberately shared: the Sheet importer (step 2) and the
 agents (step 3) both build a `CompanyRecord` and call `upsert_company`.

@@ -30,8 +30,11 @@ structured fields. Rules:
 - year_founded: the 4-digit founding year as an integer, if stated.
 - funding: a short normalized summary of funding/investment if mentioned \
 (e.g. "Series B, $40M"), else null.
-- company_types: legal/structural classifications like "B-Corp", "ESOP", \
-"non-profit" — NOT industry descriptions.
+- company_types: ONLY notable ownership/structure certifications, from this \
+exact controlled list: "B-Corp", "ESOP", "employee-owned", "co-operative", \
+"non-profit", "PBC", "foundation-owned". Do NOT include generic incorporation or \
+legal forms (Ltd, LLC, Inc, GmbH, Pty Ltd), nor ownership status like "privately \
+held" or "public". If none of the controlled types clearly apply, return [].
 - notes: the residual notes text with the year/funding/company-type facts \
 removed, or null if nothing meaningful remains.
 - leadership: people with their title/role.
@@ -44,6 +47,41 @@ Leadership: {leadership}
 Partnerships: {partnerships}
 Clients: {clients}
 """
+
+
+# Canonical company types. Anything not mapping here is dropped, so the graph
+# only ever sees these labels (no casing dupes, no generic legal forms).
+_COMPANY_TYPE_CANON = {
+    "b-corp": "B-Corp",
+    "bcorp": "B-Corp",
+    "b corp": "B-Corp",
+    "certified b-corp": "B-Corp",
+    "esop": "ESOP",
+    "employee-owned": "employee-owned",
+    "employee owned": "employee-owned",
+    "co-op": "co-operative",
+    "coop": "co-operative",
+    "cooperative": "co-operative",
+    "co-operative": "co-operative",
+    "non-profit": "non-profit",
+    "nonprofit": "non-profit",
+    "not-for-profit": "non-profit",
+    "pbc": "PBC",
+    "public benefit corporation": "PBC",
+    "public benefit corp": "PBC",
+    "foundation-owned": "foundation-owned",
+    "foundation owned": "foundation-owned",
+}
+
+
+def canonical_company_types(raw: list[str]) -> list[str]:
+    """Map extracted types to the controlled vocabulary; drop everything else."""
+    out: list[str] = []
+    for value in raw:
+        canon = _COMPANY_TYPE_CANON.get(value.strip().lower())
+        if canon and canon not in out:
+            out.append(canon)
+    return out
 
 
 class ExtractedFields(BaseModel):
@@ -101,7 +139,10 @@ async def extract_fields(
                 model=settings.gemini_model, contents=contents, config=config
             )
             parsed = resp.parsed
-            return parsed if isinstance(parsed, ExtractedFields) else ExtractedFields()
+            if isinstance(parsed, ExtractedFields):
+                parsed.company_types = canonical_company_types(parsed.company_types)
+                return parsed
+            return ExtractedFields()
         except errors.APIError as exc:
             if exc.code in _RETRYABLE and attempt < _MAX_ATTEMPTS - 1:
                 await asyncio.sleep(delay)
