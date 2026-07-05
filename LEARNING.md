@@ -15,7 +15,7 @@ agent?*
 | Day | Concept | Where in the code | Status |
 | --- | ------- | ----------------- | ------ |
 | **1 — Agents** | reasoning loop, agent vs. one-shot call, agent components | `app/agents/enrichment/agent.py` (`root_agent`), run loop in `enrich.py`; baseline non-agent in `app/importer/extract.py` | ✅ done |
-| **2 — Tools / MCP** | function-calling, tool design, read vs. write tools, **MCP interoperability** | `app/tools/` (agent tools) + `app/mcp_server.py` (MCP server exposing the graph); registered in `.mcp.json` | ✅ done |
+| **2 — Tools / MCP** | function-calling, tool design, read vs. write tools, **multimodal tools**, **MCP interoperability** | `app/tools/` (agent tools incl. `fetch_page` link/image surfacing + `identify_logos` vision) + `app/mcp_server.py` (MCP server); `.mcp.json` | ✅ done |
 | **3 — Context / Memory** | sessions (short-term), **long-term memory**, stateful agents | `app/agents/assistant/`: chat agent + graph tools; session = multi-turn per run; `memory.py` = long-term memory as `(:Memory)` nodes | ✅ done (`make chat`) |
 | **4 — Quality** | observability, **LLM-as-Judge**, **trajectory eval**, field checks | `backend/evals/`: golden dataset, deterministic field checks, `judge.py` (LLM-as-Judge), trajectory checks; `enrich.py` captures the tool trajectory | ✅ eval done · ⬜ Cloud Trace / structured tracing |
 | **5 — Production** | deployment, A2A, security/governance | roadmap step 5 | ⬜ Cloud Run + Firebase Auth + (optionally) Vertex AI Agent Engine |
