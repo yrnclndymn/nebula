@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from app.agents.assistant.backfill import commit_backfill, get_backfill
 from app.agents.assistant.proposals import commit_proposal, get_proposal
 from app.agents.assistant.service import respond
 from app.graph import cache, queries
@@ -87,7 +88,7 @@ async def chat(req: ChatRequest) -> dict:
     session_id per client to keep multi-turn context. May return `proposals` —
     enrichment the assistant prepared for the user to review and commit."""
     turn = await respond(req.session_id, req.message)
-    return {"reply": turn.reply, "proposals": turn.proposals}
+    return {"reply": turn.reply, "proposals": turn.proposals, "backfills": turn.backfills}
 
 
 @router.get("/proposals/{proposal_id}")
@@ -108,6 +109,28 @@ async def commit(req: CommitRequest) -> dict:
     """Write a reviewed proposal to the graph (the user's approval of an
     agent-prepared enrichment)."""
     result = await commit_proposal(req.proposal_id)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.get("/backfill/{job_id}")
+async def backfill_status(job_id: str) -> dict:
+    """Poll a back-fill job; rows fill in as companies are researched."""
+    job = get_backfill(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="unknown back-fill job")
+    return job
+
+
+class BackfillCommitRequest(BaseModel):
+    companies: list[str] | None = None
+
+
+@router.post("/backfill/{job_id}/commit")
+async def backfill_commit(job_id: str, req: BackfillCommitRequest) -> dict:
+    """Write selected back-fill rows (companies=null commits all) with provenance."""
+    result = await commit_backfill(job_id, req.companies)
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
     return result

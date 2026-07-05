@@ -7,6 +7,7 @@ long-term memory (see memory.py and chat.py).
 
 from google.adk.agents import Agent
 
+from app.agents.assistant.backfill import start_backfill
 from app.agents.assistant.memory import remember
 from app.agents.assistant.proposals import propose_enrichment
 from app.agents.assistant.schema_tools import add_field
@@ -37,8 +38,11 @@ Changing the data structure:
 - When the user asks to add a field or column, call add_field(label, description,
   applies_to_kind, field_type). applies_to_kind is service_provider / isv /
   cloud_provider / all; field_type is "list" or "text". Confirm the column exists
-  and offer to research it to fill it in. (Filling it in is a separate step the
-  user triggers and reviews.)
+  and offer to research it to fill it in.
+- When the user asks to research / fill in an existing field across companies, call
+  start_backfill(field_name) with the field's key. It researches all applicable
+  companies in the background and returns a batch for the user to review and
+  commit; tell the user it's running and results will appear to review shortly.
 
 Memory:
 - When the user states a durable preference or explicitly asks you to remember
@@ -52,5 +56,13 @@ root_agent = Agent(
     model=settings.agent_model,
     description="Conversational assistant over the Nebula research graph, with memory.",
     instruction=_INSTRUCTION,
-    tools=[run_cypher, search_companies, get_company, remember, propose_enrichment, add_field],
+    tools=[
+        run_cypher,
+        search_companies,
+        get_company,
+        remember,
+        propose_enrichment,
+        add_field,
+        start_backfill,
+    ],
 )
