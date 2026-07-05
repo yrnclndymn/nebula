@@ -188,6 +188,48 @@ _BADGE_TERMS = (
 )
 
 
+# Logo src fragments that indicate a partner/badge/award, not a client.
+_NON_CLIENT_LOGO_SRC = (
+    "partner",
+    "award",
+    "badge",
+    "accredit",
+    "covenant",
+    "gdpr",
+    "lwe-",
+    "living-wage",
+    "great-place",
+    "cyber-essentials",
+    "iso-",
+)
+_MAX_TOTAL_LOGOS = 72
+
+
+async def _extract_clients_from_text(text: str) -> list[str]:
+    """Pull client/customer organisation names out of client-page text (case
+    studies etc.) — complements the logo reading."""
+    if not text.strip():
+        return []
+    prompt = (
+        "The text below is from a company's client / case-study / 'who we've "
+        "helped' pages. List the CLIENT or CUSTOMER organisations mentioned — the "
+        "companies and public bodies this firm has worked for. Exclude the firm "
+        "itself, technology vendors/partners, certifications, and generic terms.\n\n" + text
+    )
+    resp = await generate_with_retry(
+        genai.Client(),
+        model=settings.gemini_model,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=_LogoNames,
+            temperature=0,
+        ),
+    )
+    parsed = resp.parsed
+    return parsed.companies if isinstance(parsed, _LogoNames) else []
+
+
 def _is_noise(name: str, brand: str) -> bool:
     low = name.lower().strip()
     if not low:
@@ -217,11 +259,14 @@ async def find_clients(website: str) -> dict:
     crawled: list[str] = []
     logo_srcs: list[str] = []
     alt_names: list[str] = []
+    page_texts: list[str] = []
 
     def collect(page: dict) -> None:
         for im in page.get("images", []):
             src = im.get("src", "")
-            if "logo" in src.lower():
+            low = src.lower()
+            # Logo-ish image, but not a partner/certification/award badge.
+            if "logo" in low and not any(bad in low for bad in _NON_CLIENT_LOGO_SRC):
                 logo_srcs.append(src)
                 alt = im.get("alt", "").strip()
                 if alt and len(alt.split()) <= 5:
@@ -235,6 +280,7 @@ async def find_clients(website: str) -> dict:
             continue
         crawled.append(url)
         collect(page)
+        page_texts.append(page.get("text", ""))
         subs = [
             link["url"]
             for link in page.get("links", [])
@@ -245,16 +291,22 @@ async def find_clients(website: str) -> dict:
             if "error" not in sub_page:
                 crawled.append(sub)
                 collect(sub_page)
+                page_texts.append(sub_page.get("text", ""))
 
     # Read the logos with vision, in batches (cap total to bound cost).
-    logo_srcs = _dedup_names(logo_srcs)[:32]
+    logo_srcs = _dedup_names(logo_srcs)[:_MAX_TOTAL_LOGOS]
     companies: list[str] = []
     for i in range(0, len(logo_srcs), _MAX_LOGO_IMAGES):
         result = await identify_logos(logo_srcs[i : i + _MAX_LOGO_IMAGES])
         companies.extend(result["companies"])
 
+    # Also mine the page text for clients named in case studies (not just logos).
+    text_clients = await _extract_clients_from_text(" ".join(page_texts)[:16000])
+
     brand = urlparse(start).netloc.lower().removeprefix("www.").split(".")[0]
-    clients = [n for n in _dedup_names(companies + alt_names) if not _is_noise(n, brand)]
+    clients = [
+        n for n in _dedup_names(companies + alt_names + text_clients) if not _is_noise(n, brand)
+    ]
     return {
         "clients": clients,
         "pages_crawled": crawled[:12],

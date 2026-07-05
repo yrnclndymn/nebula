@@ -511,3 +511,16 @@ td.muted {
   margin-top: 0.4rem;
   font-size: 12px;
 }
+.name-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+}
+.name-chips .chip {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.1rem 0.45rem;
+  font-size: 12px;
+}

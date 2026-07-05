@@ -41,9 +41,12 @@ function ProposalCard({ p }: { p: Proposal }) {
     ["Funding", r.funding],
     ["Revenue", r.estimated_revenue],
     ["Types", r.company_types.join(", ") || null],
-    ["Partners", r.partnerships.length || null],
-    ["Clients", r.clients.length || null],
-    ["Leaders", r.leadership.length || null],
+  ];
+  const leaders = r.leadership.map((l) => (l.title ? `${l.name} — ${l.title}` : l.name));
+  const lists: [string, string[]][] = [
+    ["Clients", r.clients],
+    ["Partners", r.partnerships],
+    ["Leadership", leaders],
   ];
 
   return (
@@ -63,6 +66,22 @@ function ProposalCard({ p }: { p: Proposal }) {
             </div>
           ))}
       </div>
+      {lists
+        .filter(([, items]) => items.length > 0)
+        .map(([label, items]) => (
+          <details key={label} className="proposal-sources" open={label === "Clients"}>
+            <summary>
+              {items.length} {label.toLowerCase()}
+            </summary>
+            <div className="name-chips">
+              {items.map((name) => (
+                <span key={name} className="chip">
+                  {name}
+                </span>
+              ))}
+            </div>
+          </details>
+        ))}
       {r.citations.length > 0 && (
         <details className="proposal-sources">
           <summary>{r.citations.length} sources</summary>
