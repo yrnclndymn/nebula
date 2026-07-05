@@ -18,6 +18,7 @@ from pathlib import Path
 
 from app.agents.enrichment.enrich import enrich
 from app.graph.driver import close_driver
+from app.tools.graph_tools import _MUST_CITE
 from evals.dataset import DATASET
 from evals.judge import Judgement, judge_record
 
@@ -78,19 +79,20 @@ def trajectory_checks(tool_calls: list[str]) -> list[Check]:
 
 
 def provenance_checks(saved: dict | None) -> list[Check]:
-    """Every financial figure and headcount that was saved must carry a citation."""
+    """Every financial figure and headcount that was saved must carry a citation.
+
+    Uses the same field aliases as the save-time guardrail so the check agrees with
+    what was actually enforced.
+    """
     saved = saved or {}
-    cited = {c.split("|")[0].strip() for c in (saved.get("citations") or []) if "|" in c}
+    cited = {c.split("|")[0].strip().lower() for c in (saved.get("citations") or []) if "|" in c}
     checks: list[Check] = []
-    for fieldname in ("funding", "estimated_revenue", "headcount"):
+    for fieldname, aliases in _MUST_CITE.items():
         val = saved.get(fieldname)
         has_value = bool(val) and val != 0
+        is_cited = bool(aliases & cited)
         checks.append(
-            (
-                f"{fieldname} cited if set",
-                (not has_value) or (fieldname in cited),
-                f"cited={fieldname in cited}",
-            )
+            (f"{fieldname} cited if set", (not has_value) or is_cited, f"cited={is_cited}")
         )
     return checks
 
