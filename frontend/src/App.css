@@ -426,3 +426,88 @@ td.muted {
   opacity: 0.5;
   cursor: default;
 }
+
+/* Proposal review card */
+.proposal {
+  align-self: stretch;
+  margin: 0.2rem 0 0.4rem;
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  background: var(--accent-soft);
+  padding: 0.7rem 0.8rem;
+  font-size: 13px;
+}
+.proposal.committed {
+  border-color: var(--border);
+  background: var(--bg);
+}
+.proposal-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.proposal-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.15rem 0.75rem;
+  color: var(--text);
+}
+.pf-k {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.proposal-sources {
+  margin-top: 0.5rem;
+}
+.proposal-sources summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 12px;
+}
+.proposal-sources ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1rem;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.proposal-sources a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.proposal-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+.proposal-actions .commit {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+}
+.proposal-actions .discard {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+}
+.proposal-done {
+  margin-top: 0.5rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+.proposal-done.muted {
+  color: var(--muted);
+  font-weight: 400;
+}
+.proposal-err {
+  color: #b91c1c;
+  margin-top: 0.4rem;
+  font-size: 12px;
+}

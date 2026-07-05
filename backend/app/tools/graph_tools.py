@@ -7,10 +7,17 @@ agent passes "" / 0 / [] for anything it didn't find. This reuses the same
 enrichment and a sheet import land identically in the graph.
 """
 
+from contextvars import ContextVar
+
 from app.graph.driver import get_driver
 from app.graph.models import Citation, CompanyRecord, Leader
 from app.graph.repository import upsert_company
 from app.importer.extract import canonical_company_types
+
+# When set to a list (by the propose flow), save_company appends the record it
+# WOULD write and does not touch the graph — enabling propose→review→commit.
+# Default None means normal behaviour: write immediately.
+proposal_sink: ContextVar[list | None] = ContextVar("nebula_proposal_sink", default=None)
 
 
 def _parse_leaders(leadership: list[str]) -> list[Leader]:
@@ -122,8 +129,7 @@ async def save_company(
         citations=parsed_citations,
         origin="agent",
     )
-    await upsert_company(get_driver(), record)
-    return {
+    result = {
         "saved": record.name,
         "scalar_fields_set": len(record.scalar_props()),
         "partnerships": len(record.partnerships),
@@ -133,3 +139,12 @@ async def save_company(
         "dropped_uncited": dropped,
         "company_types": record.company_types,
     }
+
+    sink = proposal_sink.get()
+    if sink is not None:
+        # Propose mode: capture the record for review, do not write.
+        sink.append(record.model_dump())
+        return {**result, "written": False, "note": "proposed for review, not yet saved"}
+
+    await upsert_company(get_driver(), record)
+    return {**result, "written": True}

@@ -8,6 +8,7 @@ long-term memory (see memory.py and chat.py).
 from google.adk.agents import Agent
 
 from app.agents.assistant.memory import remember
+from app.agents.assistant.proposals import propose_enrichment
 from app.config import settings
 from app.tools.graph_query_tools import get_company, run_cypher, search_companies
 
@@ -22,6 +23,14 @@ search_companies for filtered lists, and get_company for one company's full deta
   graph doesn't have something, say so.
 - Be concise and concrete; name companies from the data.
 
+Adding / updating data (human-in-the-loop):
+- When the user asks to research, add, enrich, or update a company, call
+  propose_enrichment(name, website, topic). This does NOT save — it prepares a
+  proposal the user reviews and commits themselves in the UI.
+- After proposing, tell the user you've prepared a proposal for review. NEVER say
+  you saved, added, or updated anything — you cannot write; only the user's commit
+  does. If you don't have the website, ask for it before proposing.
+
 Memory:
 - When the user states a durable preference or explicitly asks you to remember
   something, call remember(fact) with a short third-person statement.
@@ -34,5 +43,5 @@ root_agent = Agent(
     model=settings.agent_model,
     description="Conversational assistant over the Nebula research graph, with memory.",
     instruction=_INSTRUCTION,
-    tools=[run_cypher, search_companies, get_company, remember],
+    tools=[run_cypher, search_companies, get_company, remember, propose_enrichment],
 )

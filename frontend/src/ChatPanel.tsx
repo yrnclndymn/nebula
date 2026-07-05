@@ -1,16 +1,101 @@
 import { useEffect, useRef, useState } from "react";
-import { sendChat } from "./api";
+import { commitProposal, sendChat } from "./api";
+import type { Proposal } from "./types";
 
 interface Msg {
   role: "user" | "assistant";
   text: string;
+  proposals?: Proposal[];
 }
 
 const SUGGESTIONS = [
   "Which companies partner with Anthropic?",
   "List employee-owned companies under 200 people.",
-  "Who leads Moderne?",
+  "Research Cursor (cursor.com) and prepare it to add.",
 ];
+
+type PropStatus = "pending" | "committing" | "committed" | "discarded";
+
+function ProposalCard({ p }: { p: Proposal }) {
+  const [status, setStatus] = useState<PropStatus>("pending");
+  const [error, setError] = useState<string | null>(null);
+  const r = p.record;
+
+  async function commit() {
+    setStatus("committing");
+    setError(null);
+    try {
+      const res = await commitProposal(p.proposal_id);
+      if (res.error) throw new Error(res.error);
+      setStatus("committed");
+    } catch (e) {
+      setError(String(e));
+      setStatus("pending");
+    }
+  }
+
+  const facts: [string, unknown][] = [
+    ["HQ", r.hq_location],
+    ["Founded", r.year_founded],
+    ["Headcount", r.headcount],
+    ["Funding", r.funding],
+    ["Revenue", r.estimated_revenue],
+    ["Types", r.company_types.join(", ") || null],
+    ["Partners", r.partnerships.length || null],
+    ["Clients", r.clients.length || null],
+    ["Leaders", r.leadership.length || null],
+  ];
+
+  return (
+    <div className={`proposal ${status}`}>
+      <div className="proposal-head">
+        <strong>{p.name}</strong>
+        <span className={`origin ${p.exists ? "" : "origin-agent"}`}>
+          {p.exists ? "updates existing" : "new"}
+        </span>
+      </div>
+      <div className="proposal-facts">
+        {facts
+          .filter(([, v]) => v !== null && v !== undefined && v !== "")
+          .map(([k, v]) => (
+            <div key={k}>
+              <span className="pf-k">{k}</span> {String(v)}
+            </div>
+          ))}
+      </div>
+      {r.citations.length > 0 && (
+        <details className="proposal-sources">
+          <summary>{r.citations.length} sources</summary>
+          <ul>
+            {r.citations.map((c, i) => (
+              <li key={i}>
+                <span className="src-field">{c.field}</span>: {c.value}{" "}
+                <a href={c.source} target="_blank" rel="noreferrer">
+                  ↗
+                </a>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {error && <div className="proposal-err">{error}</div>}
+      {status === "committed" ? (
+        <div className="proposal-done">✓ committed to the graph</div>
+      ) : status === "discarded" ? (
+        <div className="proposal-done muted">discarded</div>
+      ) : (
+        <div className="proposal-actions">
+          <button className="commit" onClick={commit} disabled={status === "committing"}>
+            {status === "committing" ? "committing…" : "Commit"}
+          </button>
+          <button className="discard" onClick={() => setStatus("discarded")}>
+            Discard
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function ChatPanel({ onClose }: { onClose: () => void }) {
   const [sessionId] = useState(() => crypto.randomUUID());
@@ -30,8 +115,8 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
     setMessages((m) => [...m, { role: "user", text: q }]);
     setLoading(true);
     try {
-      const { reply } = await sendChat(sessionId, q);
-      setMessages((m) => [...m, { role: "assistant", text: reply }]);
+      const res = await sendChat(sessionId, q);
+      setMessages((m) => [...m, { role: "assistant", text: res.reply, proposals: res.proposals }]);
     } catch (e) {
       setMessages((m) => [...m, { role: "assistant", text: "⚠ " + String(e) }]);
     } finally {
@@ -51,7 +136,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
       <div className="chat-body">
         {messages.length === 0 && (
           <div className="chat-hint">
-            <p>Ask about the research graph. It queries the same graph you see in the table.</p>
+            <p>Ask about the research graph, or ask me to research and add a company.</p>
             <div className="suggestions">
               {SUGGESTIONS.map((s) => (
                 <button key={s} onClick={() => send(s)}>
@@ -62,8 +147,11 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
           </div>
         )}
         {messages.map((m, i) => (
-          <div key={i} className={`msg msg-${m.role}`}>
-            {m.text}
+          <div key={i}>
+            <div className={`msg msg-${m.role}`}>{m.text}</div>
+            {m.proposals?.map((p) => (
+              <ProposalCard key={p.proposal_id} p={p} />
+            ))}
           </div>
         ))}
         {loading && <div className="msg msg-assistant thinking">thinking…</div>}

@@ -30,6 +30,31 @@ export interface Citation {
   sourceDate: string | null;
 }
 
+// A proposed enrichment record (snake_case — it's the backend CompanyRecord).
+export interface ProposalRecord {
+  name: string;
+  hq_location: string | null;
+  year_founded: number | null;
+  headcount: number | null;
+  funding: string | null;
+  estimated_revenue: string | null;
+  about: string | null;
+  origin: string | null;
+  company_types: string[];
+  partnerships: string[];
+  clients: string[];
+  leadership: { name: string; title: string | null }[];
+  citations: { field: string; value: string; source: string; source_date: string | null }[];
+}
+
+export interface Proposal {
+  proposal_id: string;
+  name: string;
+  exists: boolean;
+  summary: string;
+  record: ProposalRecord;
+}
+
 export interface CompanyDetail {
   name: string;
   priority: string | null;

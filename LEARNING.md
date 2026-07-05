@@ -98,6 +98,16 @@ both backed by `app/agents/assistant/service.py` (a shared Runner + a session pe
 client) behind a `POST /chat` endpoint. So you can browse the table and converse
 over the same graph in one app.
 
+**Propose → review → commit (safe writes).** The assistant can *research and
+prepare* an enrichment but cannot write — it calls `propose_enrichment`, which
+runs the enrichment agent with `graph_tools.proposal_sink` set so `save_company`
+*captures* the record instead of writing. The proposal (fields + citations, and
+whether it updates an existing company) is returned to the chat panel as a review
+card; only the user's **Commit** button (`POST /proposals/commit`) writes it,
+tagged `origin="agent"`. This is human-in-the-loop (Day 4) applied to the write
+path — the agent proposes, the human commits — which contains the read→write
+blast radius, prompt-injection-to-write, and dedup risks of a chat-driven writer.
+
 ## Suggested next builds (in course order)
 
 1. **Structured tracing** — Day 4; Cloud Trace / OpenTelemetry over the agent runs.

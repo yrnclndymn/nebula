@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from app.agents.assistant.proposals import commit_proposal
 from app.agents.assistant.service import respond
 from app.graph import queries
 from app.graph.driver import check_connectivity, get_driver
@@ -66,9 +67,24 @@ class ChatRequest(BaseModel):
 @router.post("/chat")
 async def chat(req: ChatRequest) -> dict:
     """One conversational turn with the research assistant. Pass a stable
-    session_id per client to keep multi-turn context."""
-    reply = await respond(req.session_id, req.message)
-    return {"reply": reply}
+    session_id per client to keep multi-turn context. May return `proposals` —
+    enrichment the assistant prepared for the user to review and commit."""
+    turn = await respond(req.session_id, req.message)
+    return {"reply": turn.reply, "proposals": turn.proposals}
+
+
+class CommitRequest(BaseModel):
+    proposal_id: str
+
+
+@router.post("/proposals/commit")
+async def commit(req: CommitRequest) -> dict:
+    """Write a reviewed proposal to the graph (the user's approval of an
+    agent-prepared enrichment)."""
+    result = await commit_proposal(req.proposal_id)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
 
 
 @router.get("/topics")

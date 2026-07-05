@@ -17,10 +17,17 @@ from app.graph.driver import close_driver
 SESSION_ID = "cli"
 
 
+def _render(turn) -> str:
+    out = turn.reply
+    for p in turn.proposals:
+        out += f"\n\n[proposal {p['proposal_id']}] {p['name']} — review and commit in the UI"
+    return out
+
+
 async def chat(one_shot: str | None = None) -> None:
     try:
         if one_shot is not None:
-            print(await respond(SESSION_ID, one_shot))
+            print(_render(await respond(SESSION_ID, one_shot)))
             return
 
         print("Nebula assistant — ask about the research graph. 'exit' to quit.")
@@ -32,7 +39,7 @@ async def chat(one_shot: str | None = None) -> None:
             if question.lower() in {"exit", "quit"}:
                 break
             if question:
-                print("\n" + await respond(SESSION_ID, question))
+                print("\n" + _render(await respond(SESSION_ID, question)))
     finally:
         await close_driver()
 

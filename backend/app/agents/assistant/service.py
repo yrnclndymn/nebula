@@ -6,16 +6,26 @@ Long-term memory (graph `(:Memory)` nodes) is seeded into a session the first ti
 it's used.
 """
 
+from dataclasses import dataclass, field
+
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
 from app.agents.assistant.agent import root_agent
 from app.agents.assistant.memory import load_memories
+from app.agents.assistant.proposals import turn_proposals
 from app.config import ensure_gemini_env
 
 APP_NAME = "nebula-assistant"
 USER_ID = "andy"
+
+
+@dataclass
+class ChatTurn:
+    reply: str
+    proposals: list[dict] = field(default_factory=list)
+
 
 _sessions: InMemorySessionService | None = None
 _runner: Runner | None = None
@@ -30,8 +40,9 @@ def _runner_singleton() -> Runner:
     return _runner
 
 
-async def respond(session_id: str, message: str) -> str:
-    """Run one conversational turn for the given session; return the reply."""
+async def respond(session_id: str, message: str) -> ChatTurn:
+    """Run one conversational turn; return the reply and any enrichment proposals
+    the assistant prepared during it."""
     runner = _runner_singleton()
     assert _sessions is not None
 
@@ -50,11 +61,16 @@ async def respond(session_id: str, message: str) -> str:
                 + message
             )
 
+    proposals: list[dict] = []
+    token = turn_proposals.set(proposals)
     content = types.Content(role="user", parts=[types.Part(text=text)])
     reply = ""
-    async for event in runner.run_async(
-        user_id=USER_ID, session_id=session_id, new_message=content
-    ):
-        if event.is_final_response() and event.content and event.content.parts:
-            reply = "".join(p.text for p in event.content.parts if p.text)
-    return reply
+    try:
+        async for event in runner.run_async(
+            user_id=USER_ID, session_id=session_id, new_message=content
+        ):
+            if event.is_final_response() and event.content and event.content.parts:
+                reply = "".join(p.text for p in event.content.parts if p.text)
+    finally:
+        turn_proposals.reset(token)
+    return ChatTurn(reply=reply, proposals=proposals)

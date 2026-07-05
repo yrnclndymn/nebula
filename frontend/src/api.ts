@@ -1,4 +1,4 @@
-import type { CompanyDetail, CompanyRow } from "./types";
+import type { CompanyDetail, CompanyRow, Proposal } from "./types";
 
 // Backend base URL. Override in production via VITE_API_BASE.
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8080";
@@ -20,7 +20,15 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 export const sendChat = (sessionId: string, message: string) =>
-  postJson<{ reply: string }>("/chat", { session_id: sessionId, message });
+  postJson<{ reply: string; proposals: Proposal[] }>("/chat", {
+    session_id: sessionId,
+    message,
+  });
+
+export const commitProposal = (proposalId: string) =>
+  postJson<{ committed?: string; error?: string }>("/proposals/commit", {
+    proposal_id: proposalId,
+  });
 
 export const fetchCompanies = () => getJson<CompanyRow[]>("/companies");
 export const fetchCompany = (name: string) =>
