@@ -93,6 +93,11 @@ research assistant over the graph. Two kinds of memory, which is the lesson:
   recalled by a fresh process.) Mirrors an ADK MemoryService, kept in the graph so
   it's persistent + inspectable.
 
+Surfaces: the CLI (`make chat`) and a **chat panel in the SPA** (💬 Assistant),
+both backed by `app/agents/assistant/service.py` (a shared Runner + a session per
+client) behind a `POST /chat` endpoint. So you can browse the table and converse
+over the same graph in one app.
+
 ## Suggested next builds (in course order)
 
 1. **Structured tracing** — Day 4; Cloud Trace / OpenTelemetry over the agent runs.

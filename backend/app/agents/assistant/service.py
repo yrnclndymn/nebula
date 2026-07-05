@@ -1,0 +1,60 @@
+"""Assistant service — one persistent Runner shared by the CLI and the /chat API.
+
+A process-wide InMemorySessionService keeps a session per `session_id` (e.g. one
+per browser tab), so multi-turn context works across separate HTTP requests.
+Long-term memory (graph `(:Memory)` nodes) is seeded into a session the first time
+it's used.
+"""
+
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai import types
+
+from app.agents.assistant.agent import root_agent
+from app.agents.assistant.memory import load_memories
+from app.config import ensure_gemini_env
+
+APP_NAME = "nebula-assistant"
+USER_ID = "andy"
+
+_sessions: InMemorySessionService | None = None
+_runner: Runner | None = None
+
+
+def _runner_singleton() -> Runner:
+    global _sessions, _runner
+    if _runner is None:
+        ensure_gemini_env()
+        _sessions = InMemorySessionService()
+        _runner = Runner(agent=root_agent, app_name=APP_NAME, session_service=_sessions)
+    return _runner
+
+
+async def respond(session_id: str, message: str) -> str:
+    """Run one conversational turn for the given session; return the reply."""
+    runner = _runner_singleton()
+    assert _sessions is not None
+
+    existing = await _sessions.get_session(
+        app_name=APP_NAME, user_id=USER_ID, session_id=session_id
+    )
+    text = message
+    if existing is None:
+        await _sessions.create_session(app_name=APP_NAME, user_id=USER_ID, session_id=session_id)
+        memories = await load_memories()
+        if memories:
+            text = (
+                "Known facts from earlier sessions:\n"
+                + "\n".join(f"- {m}" for m in memories)
+                + "\n\n"
+                + message
+            )
+
+    content = types.Content(role="user", parts=[types.Part(text=text)])
+    reply = ""
+    async for event in runner.run_async(
+        user_id=USER_ID, session_id=session_id, new_message=content
+    ):
+        if event.is_final_response() and event.content and event.content.parts:
+            reply = "".join(p.text for p in event.content.parts if p.text)
+    return reply

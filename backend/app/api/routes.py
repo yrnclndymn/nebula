@@ -1,8 +1,10 @@
-"""HTTP routes: health checks + graph read endpoints for the table UI."""
+"""HTTP routes: health checks, graph read endpoints, and the assistant chat."""
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
+from app.agents.assistant.service import respond
 from app.graph import queries
 from app.graph.driver import check_connectivity, get_driver
 
@@ -54,6 +56,19 @@ async def company_detail(name: str) -> dict:
     if company is None:
         raise HTTPException(status_code=404, detail=f"No company named {name!r}")
     return company
+
+
+class ChatRequest(BaseModel):
+    session_id: str
+    message: str
+
+
+@router.post("/chat")
+async def chat(req: ChatRequest) -> dict:
+    """One conversational turn with the research assistant. Pass a stable
+    session_id per client to keep multi-turn context."""
+    reply = await respond(req.session_id, req.message)
+    return {"reply": reply}
 
 
 @router.get("/topics")

@@ -9,6 +9,19 @@ async function getJson<T>(path: string): Promise<T> {
   return resp.json() as Promise<T>;
 }
 
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const resp = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) throw new Error(`${path} → ${resp.status}`);
+  return resp.json() as Promise<T>;
+}
+
+export const sendChat = (sessionId: string, message: string) =>
+  postJson<{ reply: string }>("/chat", { session_id: sessionId, message });
+
 export const fetchCompanies = () => getJson<CompanyRow[]>("/companies");
 export const fetchCompany = (name: string) =>
   getJson<CompanyDetail>(`/companies/${encodeURIComponent(name)}`);

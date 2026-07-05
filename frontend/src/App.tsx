@@ -3,6 +3,7 @@ import "./App.css";
 import { fetchCompanies, fetchCompanyTypes, fetchCompany, fetchTopics } from "./api";
 import type { CompanyDetail, CompanyRow } from "./types";
 import { CompanyDrawer } from "./CompanyDrawer";
+import { ChatPanel } from "./ChatPanel";
 
 type SortKey = "name" | "headcount" | "yearFounded" | "partnerCount" | "clientCount";
 
@@ -38,6 +39,7 @@ export default function App() {
   const [sortAsc, setSortAsc] = useState(true);
 
   const [selected, setSelected] = useState<CompanyDetail | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
 
   useEffect(() => {
     Promise.all([fetchCompanies(), fetchTopics(), fetchCompanyTypes()])
@@ -78,13 +80,18 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className={chatOpen ? "app chat-open" : "app"}>
       <header className="topbar">
         <h1>
           Nebula <span className="sub">research graph</span>
         </h1>
-        <div className="count">
-          {loading ? "loading…" : `${rows.length} / ${companies.length} companies`}
+        <div className="topbar-right">
+          <span className="count">
+            {loading ? "loading…" : `${rows.length} / ${companies.length} companies`}
+          </span>
+          <button className="chat-toggle" onClick={() => setChatOpen((v) => !v)}>
+            💬 Assistant
+          </button>
         </div>
       </header>
 
@@ -173,6 +180,7 @@ export default function App() {
       </div>
 
       {selected && <CompanyDrawer company={selected} onClose={() => setSelected(null)} />}
+      {chatOpen && <ChatPanel onClose={() => setChatOpen(false)} />}
     </div>
   );
 }

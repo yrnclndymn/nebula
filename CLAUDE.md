@@ -27,8 +27,9 @@ funded that partner with Anthropic and have headcount < 100*).
 - **MCP server** — `app/mcp_server.py` (FastMCP, stdio) exposes the graph to MCP
   clients (Claude Code/Desktop); read tools + guarded read-only `run_cypher` +
   `enrich_company`. Registered in `.mcp.json`. Reuses `app/graph/queries.py`.
-- **Chat assistant** — `app/agents/assistant/` (`make chat`): conversational ADK
-  agent over the graph with session memory (per-run) + long-term memory as
+- **Chat assistant** — `app/agents/assistant/` (`make chat` CLI + a `POST /chat`
+  endpoint via `service.py`, surfaced as the SPA's 💬 chat panel): conversational
+  ADK agent over the graph with session memory (per client) + long-term memory as
   `(:Memory)` nodes. See `LEARNING.md` (course Day 3).
 - **Auth — Firebase Auth (Google provider)**, restricted to the owner. SPA gates
   on sign-in; the backend verifies the Firebase ID token. *(Not yet built.)*
