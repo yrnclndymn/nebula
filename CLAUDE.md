@@ -79,8 +79,17 @@ Health wiring: `GET /health` (process up, no DB) and `GET /health/graph`
 3. **Enrichment agent** ← next — `{name, website}` → ADK agent with search/scrape
    tools → structured `CompanyRecord` → `upsert_company`. Reuse the `extract.py`
    schema and `../adk-workspace/company_linkedin_profile_agent/`.
-4. **API + SPA tables** — query endpoints and curated table views.
+4. ~~**API + SPA tables**~~ — done. Read queries in `app/graph/queries.py`;
+   endpoints in `app/api/routes.py` (`/companies` with topic/search/type/headcount
+   filters, `/companies/{name}` detail, `/topics`, `/company-types`). Frontend
+   (`frontend/src/`): `App.tsx` filterable+sortable table, `CompanyDrawer.tsx`
+   detail panel, `api.ts`/`types.ts`. Fetches all rows once, filters client-side
+   (dataset is small). Run both: `make dev` + `make frontend-dev`.
 5. **Auth + deploy** — Firebase Auth gate; Cloud Run (API) + Firebase Hosting (SPA).
+
+**Model note:** the LLM extractor now uses **Gemini** (`gemini-3.1-flash-lite`),
+but the provider is a live decision (see the `model-picker` skill / the "never
+choose from memory" rule above) — moving the LLM layer to Claude is on the table.
 
 **Gemini auth:** `google-genai` reads `GEMINI_API_KEY` / `GOOGLE_API_KEY` from
 the env (already set in Andy's shell). Model in `app/config.py`
