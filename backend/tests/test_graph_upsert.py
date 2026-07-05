@@ -14,6 +14,9 @@ from app.graph.schema import apply_schema
 
 TEST_COMPANY = "Nebula Test Co __pytest__"
 TEST_PARTNER = "Nebula Test Partner __pytest__"
+TEST_TOPIC = "__pytest_topic__"
+TEST_TYPE = "__pytest_type__"
+TEST_PERSON = "Ada Test __pytest__"
 
 
 @pytest.fixture(scope="module")
@@ -41,10 +44,10 @@ def test_upsert_company_roundtrip(event_loop):
         record = CompanyRecord(
             name=TEST_COMPANY,
             headcount=42,
-            topics=["AI-native engineering"],
-            company_types=["B-Corp"],
+            topics=[TEST_TOPIC],
+            company_types=[TEST_TYPE],
             partnerships=[TEST_PARTNER],
-            leadership=[Leader(name="Ada Test", title="CEO")],
+            leadership=[Leader(name=TEST_PERSON, title="CEO")],
         )
         await upsert_company(driver, record)
 
@@ -62,13 +65,18 @@ def test_upsert_company_roundtrip(event_loop):
             )
             row = await result.single()
 
-        # Clean up both nodes we created.
+        # Clean up every node we created — including the sentinel tag nodes, so
+        # the test never touches or leaves behind real data.
         async with driver.session() as session:
             await session.run(
                 "MATCH (c:Company) WHERE c.name IN $names DETACH DELETE c",
                 names=[TEST_COMPANY, TEST_PARTNER],
             )
-            await session.run("MATCH (p:Person {name: 'Ada Test'}) DETACH DELETE p")
+            await session.run("MATCH (p:Person {name: $name}) DETACH DELETE p", name=TEST_PERSON)
+            await session.run("MATCH (t:Topic {name: $name}) DETACH DELETE t", name=TEST_TOPIC)
+            await session.run(
+                "MATCH (ct:CompanyType {name: $name}) DETACH DELETE ct", name=TEST_TYPE
+            )
 
         await close_driver()
         return row
@@ -76,6 +84,6 @@ def test_upsert_company_roundtrip(event_loop):
     row = event_loop.run_until_complete(scenario())
     assert row["headcount"] == 42
     assert row["partner"] == TEST_PARTNER
-    assert row["topic"] == "AI-native engineering"
-    assert row["leader"] == "Ada Test"
+    assert row["topic"] == TEST_TOPIC
+    assert row["leader"] == TEST_PERSON
     assert row["title"] == "CEO"

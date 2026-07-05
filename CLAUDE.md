@@ -69,13 +69,21 @@ Health wiring: `GET /health` (process up, no DB) and `GET /health/graph`
    `CompanyRecord` → `upsert_company` write path live in `app/graph/`
    (`schema.py`, `models.py`, `repository.py`; see `app/graph/README.md`).
    `make db-init` applies constraints.
-2. **Seed import** ← next — pull the existing Google Sheet into the graph,
-   producing `CompanyRecord`s and calling `upsert_company`. Column→graph mapping
-   is in `app/graph/README.md`; reuse `../adk-workspace/google_sheets_agent/`.
-3. **Enrichment agent** — `{name, website}` → search/scrape → structured
-   `CompanyRecord` → `upsert_company`.
+2. ~~**Seed import**~~ — done. `app/importer/` reads a CSV export of the sheet:
+   deterministic columns map straight through; freeform columns (Notes,
+   Leadership, Partnerships, Clients) go through a Gemini structured-output
+   extractor (`extract.py`) that splits year-founded / funding / company-type /
+   residual notes and parses people+titles. Run: `make import CSV=data/x.csv
+   TOPIC="SAP ecosystem"` (`--dry-run` to preview, `--no-llm` for a cheap
+   heuristic pass). Verified end-to-end against local Neo4j.
+3. **Enrichment agent** ← next — `{name, website}` → ADK agent with search/scrape
+   tools → structured `CompanyRecord` → `upsert_company`. Reuse the `extract.py`
+   schema and `../adk-workspace/company_linkedin_profile_agent/`.
 4. **API + SPA tables** — query endpoints and curated table views.
 5. **Auth + deploy** — Firebase Auth gate; Cloud Run (API) + Firebase Hosting (SPA).
+
+**Gemini auth:** `google-genai` reads `GEMINI_API_KEY` / `GOOGLE_API_KEY` from
+the env (already set in Andy's shell). Model in `app/config.py` (`gemini-2.5-flash`).
 
 The graph write path is deliberately shared: the Sheet importer (step 2) and the
 agents (step 3) both build a `CompanyRecord` and call `upsert_company`.

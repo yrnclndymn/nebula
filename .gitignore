@@ -19,3 +19,6 @@ frontend/dist/
 # Firebase
 .firebase/
 firebase-debug*.log
+
+# Private sheet exports — never commit research data (CSV) anywhere in the repo
+*.csv

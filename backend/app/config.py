@@ -14,5 +14,8 @@ class Settings(BaseSettings):
     # CORS origin for the Vite dev server.
     frontend_origin: str = "http://localhost:5173"
 
+    # Gemini (google-genai reads GEMINI_API_KEY / GOOGLE_API_KEY from the env).
+    gemini_model: str = "gemini-2.5-flash"
+
 
 settings = Settings()
