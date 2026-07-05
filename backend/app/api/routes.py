@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from app.agents.assistant.proposals import commit_proposal, get_proposal
 from app.agents.assistant.service import respond
-from app.graph import queries
+from app.graph import cache, queries
 from app.graph.driver import check_connectivity, get_driver
 
 router = APIRouter()
@@ -94,6 +94,17 @@ async def commit(req: CommitRequest) -> dict:
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
     return result
+
+
+class RefreshRequest(BaseModel):
+    domain: str
+
+
+@router.post("/cache/refresh")
+async def refresh_cache(req: RefreshRequest) -> dict:
+    """Drop the cached page snapshots + client list for a domain so the next
+    research re-crawls it (e.g. "example.com")."""
+    return await cache.clear_domain(get_driver(), cache.domain_of(req.domain))
 
 
 @router.get("/topics")

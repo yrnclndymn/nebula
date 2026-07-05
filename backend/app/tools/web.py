@@ -19,6 +19,8 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.genai_retry import generate_with_retry
+from app.graph import cache
+from app.graph.driver import get_driver
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; NebulaResearchBot/0.1)"}
 _MAX_LINKS = 60
@@ -42,15 +44,8 @@ def web_search(query: str) -> dict:
     }
 
 
-def fetch_page(url: str) -> dict:
-    """Fetch a web page and return its readable text plus its internal links and
-    images (src + alt). Use `links` to find relevant sub-pages and `images` when a
-    page shows information as logos. To gather a company's client list, prefer the
-    find_clients tool over crawling by hand.
-
-    Returns {url, text (~5000 chars), links:[{url,text}], images:[{src,alt}]} on
-    success, or {url, error} on failure.
-    """
+def _fetch_page_live(url: str) -> dict:
+    """Blocking fetch + parse of one page (run off-loop via a thread)."""
     try:
         resp = requests.get(url, timeout=15, headers=_HEADERS)
         resp.raise_for_status()
@@ -85,6 +80,26 @@ def fetch_page(url: str) -> dict:
         tag.decompose()
     text = " ".join(soup.get_text(" ").split())
     return {"url": url, "text": text[:5000], "links": links, "images": images}
+
+
+async def fetch_page(url: str) -> dict:
+    """Fetch a web page and return its readable text plus its internal links and
+    images (src + alt). Use `links` to find relevant sub-pages and `images` when a
+    page shows information as logos. To gather a company's client list, prefer the
+    find_clients tool over crawling by hand. Results are cached, so re-reading a
+    page is cheap.
+
+    Returns {url, text (~5000 chars), links:[{url,text}], images:[{src,alt}]} on
+    success, or {url, error} on failure.
+    """
+    driver = get_driver()
+    cached = await cache.get_cached_page(driver, url)
+    if cached is not None:
+        return cached
+    page = await asyncio.to_thread(_fetch_page_live, url)
+    if "error" not in page:
+        await cache.store_page(driver, page)
+    return page
 
 
 class _LogoNames(BaseModel):
@@ -247,7 +262,14 @@ async def find_clients(website: str) -> dict:
     the company's website. Returns {"clients": [names], "pages_crawled": [...]}.
     """
     start = website if website.startswith("http") else "https://" + website
-    home = fetch_page(start)
+    domain = cache.domain_of(start)
+
+    # Cached client list for this company? (refresh via POST /cache/refresh.)
+    cached_clients = await cache.get_cached_clients(get_driver(), domain)
+    if cached_clients is not None:
+        return {"clients": cached_clients, "pages_crawled": [], "cached": True}
+
+    home = await fetch_page(start)
     if "error" in home:
         return {"clients": [], "error": home["error"], "pages_crawled": []}
 
@@ -275,7 +297,7 @@ async def find_clients(website: str) -> dict:
     collect(home)
     crawled.append(start)
     for url in to_crawl[1:]:
-        page = fetch_page(url)
+        page = await fetch_page(url)
         if "error" in page:
             continue
         crawled.append(url)
@@ -287,7 +309,7 @@ async def find_clients(website: str) -> dict:
             if link["url"].startswith(url.rstrip("/") + "/") and link["url"] != url
         ][:6]
         for sub in subs:
-            sub_page = fetch_page(sub)
+            sub_page = await fetch_page(sub)
             if "error" not in sub_page:
                 crawled.append(sub)
                 collect(sub_page)
@@ -303,10 +325,11 @@ async def find_clients(website: str) -> dict:
     # Also mine the page text for clients named in case studies (not just logos).
     text_clients = await _extract_clients_from_text(" ".join(page_texts)[:16000])
 
-    brand = urlparse(start).netloc.lower().removeprefix("www.").split(".")[0]
+    brand = domain.split(".")[0]
     clients = [
         n for n in _dedup_names(companies + alt_names + text_clients) if not _is_noise(n, brand)
     ]
+    await cache.store_clients(get_driver(), domain, clients)
     return {
         "clients": clients,
         "pages_crawled": crawled[:12],
