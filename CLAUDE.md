@@ -63,12 +63,19 @@ Health wiring: `GET /health` (process up, no DB) and `GET /health/graph`
   `google_sheets_agent/` (import the seed Sheet). Its deps show the research
   toolkit: `ddgs`, `beautifulsoup4`, `lxml`, `playwright`.
 
-## Build sequence (status: skeleton)
+## Build sequence
 
-Health checks + Neo4j connection are wired. Remaining, in order:
-
-1. **Graph model** — node/edge types + uniqueness constraints in `app/graph/`.
-2. **Seed import** — pull the existing Google Sheet into the graph.
-3. **Enrichment agent** — `{name, website}` → search/scrape → structured output → upsert.
+1. ~~**Graph model**~~ — done. Node/edge types, constraints, and the
+   `CompanyRecord` → `upsert_company` write path live in `app/graph/`
+   (`schema.py`, `models.py`, `repository.py`; see `app/graph/README.md`).
+   `make db-init` applies constraints.
+2. **Seed import** ← next — pull the existing Google Sheet into the graph,
+   producing `CompanyRecord`s and calling `upsert_company`. Column→graph mapping
+   is in `app/graph/README.md`; reuse `../adk-workspace/google_sheets_agent/`.
+3. **Enrichment agent** — `{name, website}` → search/scrape → structured
+   `CompanyRecord` → `upsert_company`.
 4. **API + SPA tables** — query endpoints and curated table views.
 5. **Auth + deploy** — Firebase Auth gate; Cloud Run (API) + Firebase Hosting (SPA).
+
+The graph write path is deliberately shared: the Sheet importer (step 2) and the
+agents (step 3) both build a `CompanyRecord` and call `upsert_company`.

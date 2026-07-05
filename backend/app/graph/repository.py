@@ -1,0 +1,92 @@
+"""Graph writes. `upsert_company` is the single entry point for getting a
+`CompanyRecord` into Neo4j — used by both the Sheet importer and the agents.
+
+The write runs as one transaction of a few MERGE statements rather than one
+giant query, to avoid Cartesian-product row blow-ups when a company has, say,
+several partners AND several leaders. Each MERGE is idempotent, so re-running an
+enrichment updates in place instead of duplicating.
+"""
+
+from neo4j import AsyncDriver, AsyncManagedTransaction
+
+from app.graph.models import CompanyRecord
+
+
+async def upsert_company(driver: AsyncDriver, record: CompanyRecord) -> None:
+    async with driver.session() as session:
+        await session.execute_write(_upsert_tx, record)
+
+
+async def _upsert_tx(tx: AsyncManagedTransaction, record: CompanyRecord) -> None:
+    # 1. The company itself + flat properties.
+    await tx.run(
+        """
+        MERGE (c:Company {name: $name})
+        SET c += $props, c.updatedAt = datetime()
+        """,
+        name=record.name,
+        props=record.scalar_props(),
+    )
+
+    # 2. Tags: research topics and company types.
+    if record.topics:
+        await tx.run(
+            """
+            MATCH (c:Company {name: $name})
+            UNWIND $topics AS topic
+              MERGE (t:Topic {name: topic})
+              MERGE (c)-[:TAGGED_AS]->(t)
+            """,
+            name=record.name,
+            topics=record.topics,
+        )
+    if record.company_types:
+        await tx.run(
+            """
+            MATCH (c:Company {name: $name})
+            UNWIND $types AS ctype
+              MERGE (ct:CompanyType {name: ctype})
+              MERGE (c)-[:CLASSIFIED_AS]->(ct)
+            """,
+            name=record.name,
+            types=record.company_types,
+        )
+
+    # 3. Org-to-org edges. Partners/clients become :Company stubs if new.
+    if record.partnerships:
+        await tx.run(
+            """
+            MATCH (c:Company {name: $name})
+            UNWIND $partners AS partner
+              MERGE (p:Company {name: partner})
+              MERGE (c)-[:PARTNERS_WITH]->(p)
+            """,
+            name=record.name,
+            partners=record.partnerships,
+        )
+    if record.clients:
+        await tx.run(
+            """
+            MATCH (c:Company {name: $name})
+            UNWIND $clients AS client
+              MERGE (cl:Company {name: client})
+              MERGE (c)-[:HAS_CLIENT]->(cl)
+            """,
+            name=record.name,
+            clients=record.clients,
+        )
+
+    # 4. Leadership. Title lives on the relationship (a person may lead more than
+    #    one company, in different roles).
+    if record.leadership:
+        await tx.run(
+            """
+            MATCH (c:Company {name: $name})
+            UNWIND $leaders AS leader
+              MERGE (person:Person {name: leader.name})
+              MERGE (person)-[r:LEADS]->(c)
+              SET r.title = leader.title
+            """,
+            name=record.name,
+            leaders=[leader.model_dump() for leader in record.leadership],
+        )

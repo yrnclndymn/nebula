@@ -11,6 +11,9 @@ db-down:          ## Stop local Neo4j
 install:          ## Install backend dependencies
 	cd backend && uv sync
 
+db-init:          ## Create Neo4j constraints + indexes (idempotent)
+	cd backend && uv run python -m app.graph.schema
+
 dev:              ## Run the API with reload on :8080
 	cd backend && uv run uvicorn app.main:app --reload --port 8080
 
@@ -27,4 +30,4 @@ frontend-install: ## Install frontend dependencies
 frontend-dev:     ## Run the Vite dev server on :5173
 	cd frontend && npm run dev
 
-.PHONY: db-up db-down install dev test lint frontend-install frontend-dev
+.PHONY: db-up db-down install db-init dev test lint frontend-install frontend-dev

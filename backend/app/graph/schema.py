@@ -1,0 +1,41 @@
+"""Graph schema: uniqueness constraints and indexes.
+
+Idempotent (every statement is IF NOT EXISTS). Apply with:
+
+    make db-init            # or: uv run python -m app.graph.schema
+"""
+
+import asyncio
+
+from neo4j import AsyncDriver
+
+# Controlled-vocabulary nodes get a UNIQUE constraint so MERGE-by-name dedupes.
+# Company is the human key from the sheet; Topic/CompanyType/Tool are tags.
+# Person is only INDEXed (not unique): people are deduped by name for now, which
+# is imperfect — the enrichment agent will re-key them by LinkedIn URL later.
+SCHEMA_STATEMENTS = [
+    "CREATE CONSTRAINT company_name IF NOT EXISTS FOR (c:Company) REQUIRE c.name IS UNIQUE",
+    "CREATE CONSTRAINT topic_name IF NOT EXISTS FOR (t:Topic) REQUIRE t.name IS UNIQUE",
+    "CREATE CONSTRAINT companytype_name IF NOT EXISTS FOR (ct:CompanyType) REQUIRE ct.name IS UNIQUE",
+    "CREATE CONSTRAINT tool_name IF NOT EXISTS FOR (t:Tool) REQUIRE t.name IS UNIQUE",
+    "CREATE INDEX company_website IF NOT EXISTS FOR (c:Company) ON (c.website)",
+    "CREATE INDEX person_name IF NOT EXISTS FOR (p:Person) ON (p.name)",
+]
+
+
+async def apply_schema(driver: AsyncDriver) -> None:
+    async with driver.session() as session:
+        for stmt in SCHEMA_STATEMENTS:
+            await session.run(stmt)
+
+
+async def _main() -> None:
+    from app.graph.driver import close_driver, get_driver
+
+    await apply_schema(get_driver())
+    print(f"Applied {len(SCHEMA_STATEMENTS)} schema statements.")
+    await close_driver()
+
+
+if __name__ == "__main__":
+    asyncio.run(_main())
