@@ -8,7 +8,7 @@ from app.agents.assistant.proposals import commit_proposal, get_proposal
 from app.agents.assistant.service import respond
 from app.graph import cache, queries
 from app.graph.driver import check_connectivity, get_driver
-from app.graph.models import KINDS
+from app.graph.models import APPLIES_TO, KINDS, field_key
 
 router = APIRouter()
 
@@ -122,6 +122,36 @@ async def refresh_cache(req: RefreshRequest) -> dict:
     """Drop the cached page snapshots + client list for a domain so the next
     research re-crawls it (e.g. "example.com")."""
     return await cache.clear_domain(get_driver(), cache.domain_of(req.domain))
+
+
+@router.get("/fields")
+async def fields() -> list[dict]:
+    """Custom field definitions (registry)."""
+    return await queries.list_field_defs(get_driver())
+
+
+class FieldRequest(BaseModel):
+    label: str
+    description: str
+    applies_to_kind: str = "all"
+    type: str = "list"
+
+
+@router.post("/fields")
+async def add_field(req: FieldRequest) -> dict:
+    """Register a custom field (e.g. 'Service Lines' for service_provider)."""
+    if req.applies_to_kind not in APPLIES_TO:
+        raise HTTPException(status_code=422, detail=f"applies_to_kind must be one of {APPLIES_TO}")
+    if req.type not in ("list", "text"):
+        raise HTTPException(status_code=422, detail="type must be 'list' or 'text'")
+    return await queries.add_field_def(
+        get_driver(),
+        field_key(req.label),
+        req.label,
+        req.description,
+        req.applies_to_kind,
+        req.type,
+    )
 
 
 @router.get("/topics")

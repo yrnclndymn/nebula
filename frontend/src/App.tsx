@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
-import { fetchCompanies, fetchCompanyTypes, fetchCompany, fetchTopics } from "./api";
-import type { CompanyDetail, CompanyRow } from "./types";
-import { KINDS, kindLabel } from "./types";
+import { fetchCompanies, fetchCompanyTypes, fetchCompany, fetchFields, fetchTopics } from "./api";
+import type { CompanyDetail, CompanyRow, FieldDef } from "./types";
+import { fieldApplies, formatCustom, KINDS, kindLabel } from "./types";
 import { CompanyDrawer } from "./CompanyDrawer";
 import { ChatPanel } from "./ChatPanel";
 
@@ -30,6 +30,7 @@ export default function App() {
   const [companies, setCompanies] = useState<CompanyRow[]>([]);
   const [topics, setTopics] = useState<string[]>([]);
   const [types, setTypes] = useState<string[]>([]);
+  const [fields, setFields] = useState<FieldDef[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -44,11 +45,12 @@ export default function App() {
   const [chatOpen, setChatOpen] = useState(false);
 
   useEffect(() => {
-    Promise.all([fetchCompanies(), fetchTopics(), fetchCompanyTypes()])
-      .then(([c, t, ct]) => {
+    Promise.all([fetchCompanies(), fetchTopics(), fetchCompanyTypes(), fetchFields()])
+      .then(([c, t, ct, f]) => {
         setCompanies(c);
         setTopics(t);
         setTypes(ct);
+        setFields(f);
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
@@ -165,6 +167,9 @@ export default function App() {
               <th>HQ</th>
               <th>Types</th>
               <th>Funding</th>
+              {fields.map((f) => (
+                <th key={f.name}>{f.label}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -185,11 +190,16 @@ export default function App() {
                   ))}
                 </td>
                 <td className="muted">{c.funding ?? "—"}</td>
+                {fields.map((f) => (
+                  <td key={f.name} className="muted">
+                    {fieldApplies(f, c.kind) ? formatCustom(c.custom?.[f.name]) : "—"}
+                  </td>
+                ))}
               </tr>
             ))}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="empty">
+                <td colSpan={9 + fields.length} className="empty">
                   No companies match these filters.
                 </td>
               </tr>
@@ -201,6 +211,7 @@ export default function App() {
       {selected && (
         <CompanyDrawer
           company={selected}
+          fields={fields}
           onClose={() => setSelected(null)}
           onKindChange={updateCompanyKind}
         />

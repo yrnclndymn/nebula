@@ -49,6 +49,7 @@ async def list_companies(
         conditions.append("c.headcount <= $hmax")
         params["hmax"] = headcount_max
 
+    params["customKeys"] = await _custom_keys(driver)
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     cypher = f"""
         MATCH (c:Company)-[:TAGGED_AS]->(t0:Topic)
@@ -64,7 +65,8 @@ async def list_companies(
                collect(DISTINCT ct.name) AS companyTypes,
                count(DISTINCT p) AS partnerCount,
                count(DISTINCT cl) AS clientCount,
-               count(DISTINCT pe) AS leaderCount
+               count(DISTINCT pe) AS leaderCount,
+               [k IN $customKeys | {{key: k, value: c[k]}}] AS customFields
         ORDER BY toLower(company.name)
     """
     async with driver.session() as session:
@@ -79,12 +81,14 @@ async def list_companies(
             "partnerCount": r["partnerCount"],
             "clientCount": r["clientCount"],
             "leaderCount": r["leaderCount"],
+            "custom": {cf["key"]: cf["value"] for cf in r["customFields"]},
         }
         for r in rows
     ]
 
 
 async def get_company(driver: AsyncDriver, name: str) -> dict | None:
+    custom_keys = await _custom_keys(driver)
     cypher = f"""
         MATCH (c:Company {{name: $name}})
         OPTIONAL MATCH (c)-[:TAGGED_AS]->(t:Topic)
@@ -100,10 +104,11 @@ async def get_company(driver: AsyncDriver, name: str) -> dict | None:
                collect(DISTINCT cl.name) AS clients,
                collect(DISTINCT {{name: pe.name, title: lr.title}}) AS leadership,
                collect(DISTINCT {{field: cit.field, value: cit.value,
-                                  source: src.url, sourceDate: cit.sourceDate}}) AS citations
+                                  source: src.url, sourceDate: cit.sourceDate}}) AS citations,
+               [k IN $customKeys | {{key: k, value: c[k]}}] AS customFields
     """
     async with driver.session() as session:
-        result = await session.run(cypher, name=name)
+        result = await session.run(cypher, name=name, customKeys=custom_keys)
         record = await result.single()
     if record is None or record["company"] is None:
         return None
@@ -118,7 +123,58 @@ async def get_company(driver: AsyncDriver, name: str) -> dict | None:
         "clients": sorted(data["clients"]),
         "leadership": leadership,
         "citations": citations,
+        "custom": {cf["key"]: cf["value"] for cf in data["customFields"]},
     }
+
+
+async def list_field_defs(driver: AsyncDriver) -> list[dict]:
+    """Custom field definitions (registry)."""
+    async with driver.session() as session:
+        result = await session.run(
+            "MATCH (fd:FieldDef) RETURN fd{.name, .label, .description, .appliesToKind, .type} AS fd "
+            "ORDER BY fd.label"
+        )
+        return [record["fd"] async for record in result]
+
+
+async def add_field_def(
+    driver: AsyncDriver,
+    name: str,
+    label: str,
+    description: str,
+    applies_to_kind: str,
+    field_type: str,
+) -> dict:
+    async with driver.session() as session:
+        await session.run(
+            "MERGE (fd:FieldDef {name: $name}) "
+            "SET fd.label = $label, fd.description = $description, "
+            "    fd.appliesToKind = $applies, fd.type = $type",
+            name=name,
+            label=label,
+            description=description,
+            applies=applies_to_kind,
+            type=field_type,
+        )
+    return {"name": name, "label": label, "appliesToKind": applies_to_kind, "type": field_type}
+
+
+async def _custom_keys(driver: AsyncDriver) -> list[str]:
+    async with driver.session() as session:
+        result = await session.run("MATCH (fd:FieldDef) RETURN fd.name AS name")
+        return [record["name"] async for record in result]
+
+
+async def set_custom_field(driver: AsyncDriver, company_name: str, key: str, value) -> bool:
+    """Set a custom field value on a company (dynamic property via SET c += map)."""
+    async with driver.session() as session:
+        result = await session.run(
+            "MATCH (c:Company {name: $name}) SET c += $props, c.updatedAt = datetime() "
+            "RETURN c.name AS name",
+            name=company_name,
+            props={key: value},
+        )
+        return await result.single() is not None
 
 
 async def set_company_kind(driver: AsyncDriver, name: str, kind: str | None) -> bool:

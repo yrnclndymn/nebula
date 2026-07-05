@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { setKind } from "./api";
-import type { CompanyDetail } from "./types";
-import { KINDS, kindLabel } from "./types";
+import type { CompanyDetail, FieldDef } from "./types";
+import { fieldApplies, formatCustom, KINDS, kindLabel } from "./types";
 
 function Field({ label, value }: { label: string; value: ReactNode }) {
   if (value == null || value === "") return null;
@@ -33,13 +33,16 @@ function Chips({ label, items }: { label: string; items: string[] }) {
 
 export function CompanyDrawer({
   company,
+  fields,
   onClose,
   onKindChange,
 }: {
   company: CompanyDetail;
+  fields: FieldDef[];
   onClose: () => void;
   onKindChange: (name: string, kind: string | null) => void;
 }) {
+  const customFields = fields.filter((f) => fieldApplies(f, company.kind));
   async function changeKind(value: string) {
     const kind = value || null;
     onKindChange(company.name, kind); // optimistic
@@ -99,6 +102,9 @@ export function CompanyDrawer({
           <Field label="Priority" value={company.priority} />
           <Field label="Topics" value={company.topics.join(", ")} />
           <Field label="Type" value={company.companyTypes.join(", ")} />
+          {customFields.map((f) => (
+            <Field key={f.name} label={f.label} value={formatCustom(company.custom?.[f.name])} />
+          ))}
         </div>
 
         {company.leadership.length > 0 && (
