@@ -37,6 +37,11 @@ async def _render(turn) -> str:
             )
         elif proposal.get("status") == "error":
             out += f"\n\n[proposal {pid}] research failed: {proposal.get('error')}"
+    for bf in turn.backfills:
+        out += (
+            f"\n\n[backfill {bf['job_id']}] researching {bf['field']} for "
+            f"{bf['total']} companies — review/commit in the app."
+        )
     return out
 
 

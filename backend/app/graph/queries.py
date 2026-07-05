@@ -177,6 +177,20 @@ async def set_custom_field(driver: AsyncDriver, company_name: str, key: str, val
         return await result.single() is not None
 
 
+async def cite(driver: AsyncDriver, company_name: str, field: str, value: str, source: str) -> None:
+    """Attach a provenance citation for a field value on a company."""
+    async with driver.session() as session:
+        await session.run(
+            "MATCH (c:Company {name: $name}) MERGE (src:Source {url: $source}) "
+            "MERGE (c)-[r:CITES {field: $field}]->(src) "
+            "SET r.value = $value, r.capturedAt = datetime()",
+            name=company_name,
+            field=field,
+            value=value,
+            source=source,
+        )
+
+
 async def set_company_kind(driver: AsyncDriver, name: str, kind: str | None) -> bool:
     """Set (or clear, with None) a company's kind. Returns False if not found."""
     async with driver.session() as session:

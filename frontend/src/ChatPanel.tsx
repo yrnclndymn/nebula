@@ -1,11 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { commitProposal, getProposal, sendChat } from "./api";
-import type { Proposal } from "./types";
+import type { Backfill, Proposal } from "./types";
+import { BackfillCard, BackfillModal } from "./BackfillReview";
+
+interface JobRef {
+  job_id: string;
+  field: string;
+  total: number;
+}
 
 interface Msg {
   role: "user" | "assistant";
   text: string;
   proposals?: Proposal[];
+  backfills?: JobRef[];
 }
 
 const SUGGESTIONS = [
@@ -153,6 +161,8 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [reviewJob, setReviewJob] = useState<Backfill | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -167,7 +177,10 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
     setLoading(true);
     try {
       const res = await sendChat(sessionId, q);
-      setMessages((m) => [...m, { role: "assistant", text: res.reply, proposals: res.proposals }]);
+      setMessages((m) => [
+        ...m,
+        { role: "assistant", text: res.reply, proposals: res.proposals, backfills: res.backfills },
+      ]);
     } catch (e) {
       setMessages((m) => [...m, { role: "assistant", text: "⚠ " + String(e) }]);
     } finally {
@@ -197,11 +210,15 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
             </div>
           </div>
         )}
+        {flash && <div className="chat-flash">{flash}</div>}
         {messages.map((m, i) => (
           <div key={i}>
             <div className={`msg msg-${m.role}`}>{m.text}</div>
             {m.proposals?.map((p) => (
               <ProposalCard key={p.proposal_id} p={p} />
+            ))}
+            {m.backfills?.map((b) => (
+              <BackfillCard key={b.job_id} job={b} onReview={setReviewJob} />
             ))}
           </div>
         ))}
@@ -226,6 +243,17 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
           Send
         </button>
       </div>
+
+      {reviewJob && (
+        <BackfillModal
+          job={reviewJob}
+          onClose={() => setReviewJob(null)}
+          onCommitted={(n) => {
+            setReviewJob(null);
+            setFlash(`✓ committed ${n} ${reviewJob.field.label} values — refresh the table to see them.`);
+          }}
+        />
+      )}
     </aside>
   );
 }

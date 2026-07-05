@@ -538,3 +538,87 @@ td.muted {
   padding: 0.1rem 0.45rem;
   font-size: 12px;
 }
+
+/* Back-fill review modal */
+.chat-flash {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+  font-size: 13px;
+}
+.backfill-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 18, 30, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+}
+.backfill-modal {
+  background: var(--panel);
+  border-radius: 12px;
+  width: min(760px, 94vw);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+.backfill-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.backfill-table-wrap {
+  overflow: auto;
+  padding: 0 1.25rem;
+}
+.backfill-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.backfill-table-wrap th {
+  text-align: left;
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.backfill-table-wrap td {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.backfill-foot {
+  display: flex;
+  gap: 0.5rem;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid var(--border);
+}
+.backfill-foot .commit {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+.backfill-foot .commit:disabled {
+  opacity: 0.5;
+}
+.backfill-foot .discard {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+  color: var(--muted);
+}

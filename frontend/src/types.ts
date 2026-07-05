@@ -76,6 +76,22 @@ export interface ProposalRecord {
   citations: { field: string; value: string; source: string; source_date: string | null }[];
 }
 
+export interface BackfillRow {
+  company: string;
+  value: unknown;
+  source: string;
+  committed: boolean;
+}
+
+export interface Backfill {
+  job_id: string;
+  status: "pending" | "ready";
+  field: { name: string; label: string; type: string };
+  total: number;
+  done: number;
+  rows: BackfillRow[];
+}
+
 export interface Proposal {
   proposal_id: string;
   name: string;
