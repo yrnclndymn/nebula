@@ -11,8 +11,8 @@ import re
 from neo4j import AsyncDriver
 
 _COMPANY_PROPS = (
-    "c{.name,.priority,.about,.website,.linkedin,.hqLocation,.headcount,"
-    ".estimatedRevenue,.yearFounded,.funding,.notes,.origin,.kind}"
+    "c{.name,.priority,.about,.website,.linkedin,.hqLocation,.hqCountry,.hqCity,.hqState,"
+    ".headcount,.estimatedRevenue,.yearFounded,.funding,.notes,.origin,.kind}"
 )
 
 
@@ -23,6 +23,7 @@ async def list_companies(
     q: str | None = None,
     company_type: str | None = None,
     kind: str | None = None,
+    country: str | None = None,
     headcount_min: int | None = None,
     headcount_max: int | None = None,
 ) -> list[dict]:
@@ -34,6 +35,9 @@ async def list_companies(
     if kind:
         conditions.append("c.kind = $kind")
         params["kind"] = kind
+    if country:
+        conditions.append("c.hqCountry = $country")
+        params["country"] = country
     if q:
         conditions.append(
             "(toLower(c.name) CONTAINS toLower($q) OR toLower(coalesce(c.about,'')) CONTAINS toLower($q))"
@@ -189,6 +193,39 @@ async def cite(driver: AsyncDriver, company_name: str, field: str, value: str, s
             value=value,
             source=source,
         )
+
+
+async def companies_with_hq(driver: AsyncDriver) -> list[dict]:
+    """Researched companies that have a free-text HQ (for the tidy-up)."""
+    async with driver.session() as session:
+        result = await session.run(
+            "MATCH (c:Company)-[:TAGGED_AS]->(:Topic) WHERE c.hqLocation IS NOT NULL "
+            "RETURN c.name AS name, c.hqLocation AS hq ORDER BY name"
+        )
+        return [dict(record) async for record in result]
+
+
+async def set_hq(
+    driver: AsyncDriver, name: str, country: str | None, city: str | None, state: str | None
+) -> None:
+    async with driver.session() as session:
+        await session.run(
+            "MATCH (c:Company {name: $name}) "
+            "SET c.hqCountry = $country, c.hqCity = $city, c.hqState = $state",
+            name=name,
+            country=country,
+            city=city,
+            state=state,
+        )
+
+
+async def list_countries(driver: AsyncDriver) -> list[str]:
+    async with driver.session() as session:
+        result = await session.run(
+            "MATCH (c:Company) WHERE c.hqCountry IS NOT NULL "
+            "RETURN DISTINCT c.hqCountry AS country ORDER BY country"
+        )
+        return [record["country"] async for record in result]
 
 
 async def set_company_kind(driver: AsyncDriver, name: str, kind: str | None) -> bool:

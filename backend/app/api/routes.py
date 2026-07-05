@@ -39,6 +39,7 @@ async def companies(
     q: str | None = None,
     company_type: str | None = None,
     kind: str | None = None,
+    country: str | None = None,
     headcount_min: int | None = Query(default=None, ge=0),
     headcount_max: int | None = Query(default=None, ge=0),
 ) -> list[dict]:
@@ -49,6 +50,7 @@ async def companies(
         q=q,
         company_type=company_type,
         kind=kind,
+        country=country,
         headcount_min=headcount_min,
         headcount_max=headcount_max,
     )
@@ -185,3 +187,8 @@ async def topics() -> list[str]:
 @router.get("/company-types")
 async def company_types() -> list[str]:
     return await queries.list_company_types(get_driver())
+
+
+@router.get("/countries")
+async def countries() -> list[str]:
+    return await queries.list_countries(get_driver())

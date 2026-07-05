@@ -10,22 +10,30 @@ from app.graph.driver import get_driver
 
 
 async def search_companies(
-    topic: str = "", text: str = "", company_type: str = "", headcount_max: int = 0
+    topic: str = "",
+    text: str = "",
+    company_type: str = "",
+    country: str = "",
+    headcount_max: int = 0,
 ) -> list[dict]:
-    """List researched companies. Empty strings and 0 mean "no filter". Returns a
-    compact row per company (name, hq, headcount, topics, types, partner/client
-    counts) — use get_company for full detail."""
+    """List researched companies. Empty strings and 0 mean "no filter". `country`
+    filters by structured HQ country (full name, e.g. "United Kingdom"). Returns a
+    compact row per company (name, hq, kind, country, headcount, topics, types,
+    partner/client counts) — use get_company for full detail."""
     rows = await queries.list_companies(
         get_driver(),
         topic=topic or None,
         q=text or None,
         company_type=company_type or None,
+        country=country or None,
         headcount_max=headcount_max or None,
     )
     return [
         {
             "name": r["name"],
             "hq": r.get("hqLocation"),
+            "kind": r.get("kind"),
+            "country": r.get("hqCountry"),
             "headcount": r.get("headcount"),
             "topics": r.get("topics"),
             "types": r.get("companyTypes"),

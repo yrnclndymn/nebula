@@ -94,7 +94,10 @@ export function CompanyDrawer({
         {company.about && <p className="about">{company.about}</p>}
 
         <div className="fields">
-          <Field label="HQ" value={company.hqLocation} />
+          <Field label="Country" value={company.hqCountry} />
+          <Field label="City" value={company.hqCity} />
+          <Field label="State" value={company.hqState} />
+          {!company.hqCountry && <Field label="HQ" value={company.hqLocation} />}
           <Field label="Headcount" value={company.headcount} />
           <Field label="Founded" value={company.yearFounded} />
           <Field label="Revenue (est.)" value={company.estimatedRevenue} />
