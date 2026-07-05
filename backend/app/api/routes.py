@@ -8,6 +8,7 @@ from app.agents.assistant.proposals import commit_proposal, get_proposal
 from app.agents.assistant.service import respond
 from app.graph import cache, queries
 from app.graph.driver import check_connectivity, get_driver
+from app.graph.models import KINDS
 
 router = APIRouter()
 
@@ -36,6 +37,7 @@ async def companies(
     topic: str | None = None,
     q: str | None = None,
     company_type: str | None = None,
+    kind: str | None = None,
     headcount_min: int | None = Query(default=None, ge=0),
     headcount_max: int | None = Query(default=None, ge=0),
 ) -> list[dict]:
@@ -45,9 +47,24 @@ async def companies(
         topic=topic,
         q=q,
         company_type=company_type,
+        kind=kind,
         headcount_min=headcount_min,
         headcount_max=headcount_max,
     )
+
+
+class KindRequest(BaseModel):
+    kind: str | None
+
+
+@router.patch("/companies/{name}/kind")
+async def set_kind(name: str, req: KindRequest) -> dict:
+    """Set a company's kind (service_provider / isv / cloud_provider), or null."""
+    if req.kind is not None and req.kind not in KINDS:
+        raise HTTPException(status_code=422, detail=f"kind must be one of {KINDS}")
+    if not await queries.set_company_kind(get_driver(), name, req.kind):
+        raise HTTPException(status_code=404, detail=f"No company named {name!r}")
+    return {"name": name, "kind": req.kind}
 
 
 @router.get("/companies/{name}")

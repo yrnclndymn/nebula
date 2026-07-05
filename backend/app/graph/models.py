@@ -8,6 +8,9 @@ deterministic.
 
 from pydantic import BaseModel, Field
 
+# What kind of business a company is (distinct from ownership CompanyType).
+KINDS = ("service_provider", "isv", "cloud_provider")
+
 
 class Leader(BaseModel):
     name: str
@@ -42,6 +45,7 @@ class CompanyRecord(BaseModel):
     funding: str | None = None  # raw text for now; structured into :INVESTED_IN later
     notes: str | None = None
     origin: str | None = None  # who produced this record: "agent" | "sheet" | "manual"
+    kind: str | None = None  # service_provider | isv | cloud_provider
 
     # Tags (→ nodes MERGE'd by name)
     topics: list[str] = Field(default_factory=list)  # research domains
@@ -72,5 +76,6 @@ class CompanyRecord(BaseModel):
             "funding": self.funding,
             "notes": self.notes,
             "origin": self.origin,
+            "kind": self.kind,
         }
         return {k: v for k, v in props.items() if v is not None}

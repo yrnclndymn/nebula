@@ -25,6 +25,16 @@ export const sendChat = (sessionId: string, message: string) =>
     message,
   });
 
+export const setKind = (name: string, kind: string | null) =>
+  fetch(`${API_BASE}/companies/${encodeURIComponent(name)}/kind`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind }),
+  }).then((r) => {
+    if (!r.ok) throw new Error(`kind → ${r.status}`);
+    return r.json() as Promise<{ name: string; kind: string | null }>;
+  });
+
 export const getProposal = (proposalId: string) =>
   getJson<Proposal>(`/proposals/${encodeURIComponent(proposalId)}`);
 
