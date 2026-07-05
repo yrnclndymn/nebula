@@ -48,3 +48,4 @@ export const fetchCompany = (name: string) =>
   getJson<CompanyDetail>(`/companies/${encodeURIComponent(name)}`);
 export const fetchTopics = () => getJson<string[]>("/topics");
 export const fetchCompanyTypes = () => getJson<string[]>("/company-types");
+export const fetchFields = () => getJson<import("./types").FieldDef[]>("/fields");

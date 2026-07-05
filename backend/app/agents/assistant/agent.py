@@ -9,6 +9,7 @@ from google.adk.agents import Agent
 
 from app.agents.assistant.memory import remember
 from app.agents.assistant.proposals import propose_enrichment
+from app.agents.assistant.schema_tools import add_field
 from app.config import settings
 from app.tools.graph_query_tools import get_company, run_cypher, search_companies
 
@@ -32,6 +33,13 @@ Adding / updating data (human-in-the-loop):
   say you saved, added, or updated anything — only the user's commit writes. If you
   don't have the website, ask for it before proposing.
 
+Changing the data structure:
+- When the user asks to add a field or column, call add_field(label, description,
+  applies_to_kind, field_type). applies_to_kind is service_provider / isv /
+  cloud_provider / all; field_type is "list" or "text". Confirm the column exists
+  and offer to research it to fill it in. (Filling it in is a separate step the
+  user triggers and reviews.)
+
 Memory:
 - When the user states a durable preference or explicitly asks you to remember
   something, call remember(fact) with a short third-person statement.
@@ -44,5 +52,5 @@ root_agent = Agent(
     model=settings.agent_model,
     description="Conversational assistant over the Nebula research graph, with memory.",
     instruction=_INSTRUCTION,
-    tools=[run_cypher, search_companies, get_company, remember, propose_enrichment],
+    tools=[run_cypher, search_companies, get_company, remember, propose_enrichment, add_field],
 )

@@ -6,10 +6,32 @@ this one shape between "data in" and "graph write" is what keeps the pipeline
 deterministic.
 """
 
+import re
+
 from pydantic import BaseModel, Field
 
 # What kind of business a company is (distinct from ownership CompanyType).
 KINDS = ("service_provider", "isv", "cloud_provider")
+# A custom field applies to one kind, or to every company.
+APPLIES_TO = KINDS + ("all",)
+
+
+def field_key(label: str) -> str:
+    """Slug a field label into a graph property key, e.g. 'Service Lines' -> 'serviceLines'."""
+    words = [w for w in re.split(r"[^a-zA-Z0-9]+", label) if w]
+    if not words:
+        return "field"
+    return words[0].lower() + "".join(w.capitalize() for w in words[1:])
+
+
+class FieldDef(BaseModel):
+    """A user-defined custom field (e.g. service lines for service providers)."""
+
+    name: str  # property key on Company
+    label: str  # display label
+    description: str  # what to research (used by the back-fill extractor)
+    applies_to_kind: str = "all"  # a kind, or "all"
+    type: str = "list"  # "list" | "text"
 
 
 class Leader(BaseModel):

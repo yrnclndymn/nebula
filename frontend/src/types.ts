@@ -17,6 +17,7 @@ export interface CompanyRow {
   partnerCount: number;
   clientCount: number;
   leaderCount: number;
+  custom: Record<string, unknown>;
 }
 
 export const KINDS = ["service_provider", "isv", "cloud_provider"] as const;
@@ -26,6 +27,24 @@ export function kindLabel(kind: string | null): string {
   if (kind === "isv") return "ISV";
   if (kind === "cloud_provider") return "Cloud provider";
   return "—";
+}
+
+export interface FieldDef {
+  name: string;
+  label: string;
+  description: string;
+  appliesToKind: string; // a kind, or "all"
+  type: string; // "list" | "text"
+}
+
+export function fieldApplies(fd: FieldDef, kind: string | null): boolean {
+  return fd.appliesToKind === "all" || fd.appliesToKind === kind;
+}
+
+export function formatCustom(v: unknown): string {
+  if (Array.isArray(v)) return v.length ? v.join(", ") : "—";
+  if (v == null || v === "") return "—";
+  return String(v);
 }
 
 export interface Leader {
@@ -87,4 +106,5 @@ export interface CompanyDetail {
   clients: string[];
   leadership: Leader[];
   citations: Citation[];
+  custom: Record<string, unknown>;
 }
