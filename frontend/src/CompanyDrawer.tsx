@@ -42,7 +42,14 @@ export function CompanyDrawer({
         <button className="drawer-close" onClick={onClose} aria-label="Close">
           ×
         </button>
-        <h2>{company.name}</h2>
+        <h2>
+          {company.name}
+          {company.origin && (
+            <span className={`origin origin-${company.origin}`}>
+              {company.origin === "agent" ? "🤖 agent" : company.origin === "sheet" ? "📄 sheet" : company.origin}
+            </span>
+          )}
+        </h2>
         <div className="drawer-links">
           {company.website && (
             <a href={company.website} target="_blank" rel="noreferrer">
@@ -89,6 +96,25 @@ export function CompanyDrawer({
         <Chips label="Clients" items={company.clients} />
 
         {company.notes && <Field label="Notes" value={company.notes} />}
+
+        {company.citations.length > 0 && (
+          <div className="chips-block">
+            <span className="field-label">
+              Sources <span className="muted">({company.citations.length})</span>
+            </span>
+            <ul className="sources">
+              {company.citations.map((c) => (
+                <li key={`${c.field}-${c.source}`}>
+                  <span className="src-field">{c.field}</span>: {c.value}{" "}
+                  <a href={c.source} target="_blank" rel="noreferrer">
+                    source ↗
+                  </a>
+                  {c.sourceDate && <span className="muted"> · {c.sourceDate}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </aside>
     </div>
   );

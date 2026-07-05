@@ -8,7 +8,7 @@ enrichment and a sheet import land identically in the graph.
 """
 
 from app.graph.driver import get_driver
-from app.graph.models import CompanyRecord, Leader
+from app.graph.models import Citation, CompanyRecord, Leader
 from app.graph.repository import upsert_company
 from app.importer.extract import canonical_company_types
 
@@ -21,6 +21,25 @@ def _parse_leaders(leadership: list[str]) -> list[Leader]:
         if name:
             leaders.append(Leader(name=name, title=title.strip() or None))
     return leaders
+
+
+def _parse_citations(citations: list[str]) -> list[Citation]:
+    """Each item is "field | value | source_url | source_date" (date optional).
+
+    Locates the URL by content, not slot, so an extra pipe in the value doesn't
+    misalign the source/date (the model occasionally adds one).
+    """
+    parsed: list[Citation] = []
+    for item in citations:
+        parts = [p.strip() for p in item.split("|")]
+        if len(parts) < 3 or not parts[0]:
+            continue
+        url = next((p for p in parts[2:] if p.startswith("http")), None)
+        if not url:
+            continue
+        date = next((p for p in parts[2:] if p != url and not p.startswith("http")), None)
+        parsed.append(Citation(field=parts[0], value=parts[1], source=url, source_date=date))
+    return parsed
 
 
 async def save_company(
@@ -38,6 +57,7 @@ async def save_company(
     partnerships: list[str],
     clients: list[str],
     leadership: list[str],
+    citations: list[str],
 ) -> dict:
     """Save or update a researched company in the Nebula graph.
 
@@ -45,6 +65,12 @@ async def save_company(
     unknown numbers, and [] for unknown lists — never invent values. Format each
     leadership entry as "Name | Title" (title may be empty). company_types should
     only be ownership/structure labels like "B-Corp", "ESOP", "employee-owned".
+
+    citations: provenance for the facts you save — one entry per checkable fact,
+    formatted "field | value | source_url | source_date". `field` matches a saved
+    field (e.g. funding, headcount, year_founded, hq_location); `source_url` is the
+    page you got it from; `source_date` is when the info is from (e.g. "2025-09" or
+    "as of 2024"). REQUIRED for every financial figure and headcount you save.
     """
     record = CompanyRecord(
         name=name,
@@ -61,6 +87,8 @@ async def save_company(
         partnerships=partnerships,
         clients=clients,
         leadership=_parse_leaders(leadership),
+        citations=_parse_citations(citations),
+        origin="agent",
     )
     await upsert_company(get_driver(), record)
     return {
@@ -69,5 +97,6 @@ async def save_company(
         "partnerships": len(record.partnerships),
         "clients": len(record.clients),
         "leaders": len(record.leadership),
+        "citations": len(record.citations),
         "company_types": record.company_types,
     }

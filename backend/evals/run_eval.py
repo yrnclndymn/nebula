@@ -77,9 +77,34 @@ def trajectory_checks(tool_calls: list[str]) -> list[Check]:
     ]
 
 
+def provenance_checks(saved: dict | None) -> list[Check]:
+    """Every financial figure and headcount that was saved must carry a citation."""
+    saved = saved or {}
+    cited = {c.split("|")[0].strip() for c in (saved.get("citations") or []) if "|" in c}
+    checks: list[Check] = []
+    for fieldname in ("funding", "estimated_revenue", "headcount"):
+        val = saved.get(fieldname)
+        has_value = bool(val) and val != 0
+        checks.append(
+            (
+                f"{fieldname} cited if set",
+                (not has_value) or (fieldname in cited),
+                f"cited={fieldname in cited}",
+            )
+        )
+    return checks
+
+
+# Each agent run makes several model calls; pause between companies to stay under
+# the free-tier per-minute limit (flash-lite ≈ 15 rpm).
+_PAUSE_SECONDS = 20
+
+
 async def generate_traces(items: list[dict]) -> list[dict]:
     traces = []
     for i, item in enumerate(items, 1):
+        if i > 1:
+            await asyncio.sleep(_PAUSE_SECONDS)
         print(f"[{i}/{len(items)}] enriching {item['name']}…")
         result = await enrich(item["name"], item["website"], item["topic"], verbose=False)
         traces.append(
@@ -87,6 +112,7 @@ async def generate_traces(items: list[dict]) -> list[dict]:
                 "item": item,
                 "saved": result.saved,
                 "tool_calls": result.tool_calls,
+                "evidence": result.evidence,
                 "summary": result.summary,
             }
         )
@@ -98,15 +124,14 @@ async def grade(traces: list[dict]) -> list[dict]:
     for trace in traces:
         item, saved = trace["item"], trace["saved"]
         if saved:
-            judgement = await judge_record(item["name"], saved)
+            judgement = await judge_record(item["name"], saved, trace.get("evidence", []))
         else:
-            judgement = Judgement(
-                accuracy=1, faithfulness=1, completeness=1, rationale="agent saved nothing"
-            )
+            judgement = Judgement(faithfulness=1, completeness=1, rationale="agent saved nothing")
         field = check_expectations(saved, item["expected"])
         traj = trajectory_checks(trace["tool_calls"])
+        prov = provenance_checks(saved)
         passed = (
-            all(c[1] for c in field) and judgement.accuracy >= 4 and judgement.faithfulness >= 4
+            all(c[1] for c in field) and all(c[1] for c in prov) and judgement.faithfulness >= 4
         )
         graded.append(
             {
@@ -114,6 +139,7 @@ async def grade(traces: list[dict]) -> list[dict]:
                 "passed": passed,
                 "field": field,
                 "trajectory": traj,
+                "provenance": prov,
                 "judge": judgement.model_dump(),
             }
         )
@@ -128,25 +154,28 @@ def report(graded: list[dict]) -> None:
     for g in graded:
         j = g["judge"]
         print(f"\n{'PASS' if g['passed'] else 'FAIL'}  {g['name']}")
-        print(
-            f"   scores: accuracy={j['accuracy']} faithfulness={j['faithfulness']} completeness={j['completeness']}"
-        )
+        print(f"   scores: faithfulness={j['faithfulness']} completeness={j['completeness']}")
         print(f"   fields: {fmt(g['field'])}")
+        print(f"   provn:  {fmt(g['provenance'])}")
         print(f"   trajct: {fmt(g['trajectory'])}")
-        if j["likely_hallucinations"]:
-            print(f"   ⚠ possible hallucinations: {j['likely_hallucinations']}")
+        unsupported = [
+            f"{c['field']}={c['value']!r}" for c in j["claim_checks"] if not c["supported"]
+        ]
+        if unsupported:
+            print(f"   ⚠ unsupported by evidence: {unsupported}")
         print(f"   judge:  {j['rationale']}")
 
     n = len(graded)
     if n:
         avg = lambda k: sum(g["judge"][k] for g in graded) / n  # noqa: E731
         field_rate = sum(all(c[1] for c in g["field"]) for g in graded) / n
+        prov_rate = sum(all(c[1] for c in g["provenance"]) for g in graded) / n
         print("\n" + "-" * 70)
         print(f"OVERALL  {sum(g['passed'] for g in graded)}/{n} passed")
         print(
-            f"  avg accuracy={avg('accuracy'):.1f}  faithfulness={avg('faithfulness'):.1f}  completeness={avg('completeness'):.1f}"
+            f"  avg faithfulness={avg('faithfulness'):.1f}  completeness={avg('completeness'):.1f}"
         )
-        print(f"  field-check pass rate: {field_rate:.0%}")
+        print(f"  field-check pass rate: {field_rate:.0%}  provenance pass rate: {prov_rate:.0%}")
 
 
 async def _run(grade_only: bool, limit: int | None) -> None:

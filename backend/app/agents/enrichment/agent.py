@@ -27,8 +27,17 @@ Process:
 3. Then call save_company EXACTLY ONCE with everything you found. Use "" for
    unknown text, 0 for unknown numbers, and [] for unknown lists. Format each
    leadership entry as "Name | Title". Pass the topic through unchanged.
-4. Only record facts you actually found in the sources — never guess or invent.
-5. Finish with a 2-3 sentence summary of what you saved and any gaps.
+4. Every value you save MUST be directly stated in text you retrieved with a tool,
+   and you must CITE it. Never guess, infer, estimate, extrapolate, or project.
+   - For each checkable fact — especially every financial figure (funding,
+     estimated_revenue) and headcount, plus year_founded and hq_location — add a
+     `citations` entry "field | value | source_url | source_date", where source_url
+     is the exact page you read it on and source_date is when the info is from.
+   - If you cannot cite a specific source for a financial figure or headcount, DO
+     NOT save it — leave it "" or 0. A number without a citation is a bug.
+   - Record the source's own date; do not invent or forward-date it.
+5. Finish with a 2-3 sentence summary of what you saved and any gaps. If you left
+   financials or headcount empty because no source stated them, say so.
 """
 
 root_agent = Agent(

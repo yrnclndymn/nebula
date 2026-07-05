@@ -10,6 +10,7 @@ export interface CompanyRow {
   yearFounded: number | null;
   funding: string | null;
   notes: string | null;
+  origin: string | null;
   topics: string[];
   companyTypes: string[];
   partnerCount: number;
@@ -20,6 +21,13 @@ export interface CompanyRow {
 export interface Leader {
   name: string;
   title: string | null;
+}
+
+export interface Citation {
+  field: string;
+  value: string;
+  source: string;
+  sourceDate: string | null;
 }
 
 export interface CompanyDetail {
@@ -34,9 +42,11 @@ export interface CompanyDetail {
   yearFounded: number | null;
   funding: string | null;
   notes: string | null;
+  origin: string | null;
   topics: string[];
   companyTypes: string[];
   partners: string[];
   clients: string[];
   leadership: Leader[];
+  citations: Citation[];
 }

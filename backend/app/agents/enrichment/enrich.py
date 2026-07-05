@@ -27,6 +27,7 @@ class EnrichResult:
     summary: str = ""
     saved: dict | None = None  # the save_company args the agent produced
     tool_calls: list[str] = field(default_factory=list)  # names, in order
+    evidence: list[str] = field(default_factory=list)  # tool results the agent read
 
 
 async def enrich(name: str, website: str, topic: str, *, verbose: bool = True) -> EnrichResult:
@@ -50,8 +51,13 @@ async def enrich(name: str, website: str, topic: str, *, verbose: bool = True) -
                         result.saved = args
                     if verbose:
                         print(f"  → {part.function_call.name}({args})"[:220])
-                elif part.function_response and verbose:
-                    print(f"  ← {str(part.function_response.response)[:180]}")
+                elif part.function_response:
+                    fname = part.function_response.name
+                    response = part.function_response.response
+                    if fname in ("fetch_page", "web_search"):
+                        result.evidence.append(f"[{fname}] {str(response)[:1800]}")
+                    if verbose:
+                        print(f"  ← {str(response)[:180]}")
         if event.is_final_response() and event.content and event.content.parts:
             result.summary = "".join(p.text for p in event.content.parts if p.text)
     return result

@@ -1,6 +1,11 @@
-"""LLM-as-Judge: score an agent's saved record on accuracy / faithfulness /
-completeness (course Day 4). A separate model call assesses quality that
-deterministic checks can't — is the data actually correct and un-hallucinated?
+"""LLM-as-Judge, evidence-grounded (course Day 4).
+
+The earlier judge scored against its own knowledge, which is stale and produced
+false hallucination flags. This version judges *faithfulness to evidence*: given
+the agent's citations and the text it actually retrieved, does each cited value
+appear in / follow from that evidence? That's the right hallucination test and
+mirrors what provenance is for in production — checking a number against its
+source.
 """
 
 import json
@@ -12,38 +17,53 @@ from pydantic import BaseModel, Field
 from app.config import settings
 from app.genai_retry import generate_with_retry
 
-_PROMPT = """You are grading a research agent that gathered facts about a real \
-company and saved them. Using your own knowledge of this company, score the saved \
-record on a 1-5 scale (5 = best):
+_PROMPT = """You are validating a research agent. You are given the record it \
+saved (including a `citations` list of "field | value | source | date") and the \
+EVIDENCE text it actually retrieved from the web.
 
-- accuracy: are the saved facts correct for this company?
-- faithfulness: does it avoid fabricated or hallucinated specifics (wrong numbers, \
-invented people/partners)?
-- completeness: did it capture the key findable facts (what they do, HQ, founding \
-year, leadership)?
+Judge ONLY against the provided evidence — do NOT use outside knowledge.
 
-List any fields that look hallucinated or wrong. Give a one-sentence rationale.
+For EACH citation, decide whether the evidence supports that value (supported = \
+true/false) with a short note (quote/paraphrase the supporting text, or say "not \
+in evidence"). Then score:
+- faithfulness (1-5): are the cited values supported by the evidence? 5 = all \
+supported; 1 = mostly unsupported or contradicted.
+- completeness (1-5): did it cite the key checkable facts that appear in the \
+evidence (HQ, founding year, funding, headcount)?
 
 Company: {name}
-Saved record (JSON):
+
+Saved record:
 {record}
+
+Evidence:
+{evidence}
 """
 
 
+class ClaimCheck(BaseModel):
+    field: str
+    value: str
+    supported: bool
+    note: str = ""
+
+
 class Judgement(BaseModel):
-    accuracy: int = Field(ge=1, le=5)
     faithfulness: int = Field(ge=1, le=5)
     completeness: int = Field(ge=1, le=5)
-    likely_hallucinations: list[str] = Field(default_factory=list)
+    claim_checks: list[ClaimCheck] = Field(default_factory=list)
     rationale: str = ""
 
 
-async def judge_record(name: str, saved: dict) -> Judgement:
+async def judge_record(name: str, saved: dict, evidence: list[str]) -> Judgement:
+    evidence_text = "\n\n".join(evidence)[:9000] or "(no evidence captured)"
     client = genai.Client()
     resp = await generate_with_retry(
         client,
         model=settings.gemini_model,
-        contents=_PROMPT.format(name=name, record=json.dumps(saved, indent=2)),
+        contents=_PROMPT.format(
+            name=name, record=json.dumps(saved, indent=2), evidence=evidence_text
+        ),
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=Judgement,
@@ -51,8 +71,4 @@ async def judge_record(name: str, saved: dict) -> Judgement:
         ),
     )
     parsed = resp.parsed
-    return (
-        parsed
-        if isinstance(parsed, Judgement)
-        else Judgement(accuracy=1, faithfulness=1, completeness=1)
-    )
+    return parsed if isinstance(parsed, Judgement) else Judgement(faithfulness=1, completeness=1)

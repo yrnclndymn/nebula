@@ -97,6 +97,7 @@ def build_record(
         partnerships=ex.partnerships,
         clients=ex.clients,
         topics=[topic] if topic else [],
+        origin="sheet",
     )
 
 

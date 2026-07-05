@@ -1,6 +1,6 @@
 """Agent wiring + tool-helper tests (no network / no model calls)."""
 
-from app.tools.graph_tools import _parse_leaders
+from app.tools.graph_tools import _parse_citations, _parse_leaders
 
 
 def test_root_agent_wires_up_with_tools():
@@ -17,4 +17,20 @@ def test_parse_leaders_handles_name_title_and_bare_names():
         ("Jane Roe", "CEO"),
         ("John Doe", None),
         ("Amy Ng", "CTO"),
+    ]
+
+
+def test_parse_citations_finds_url_by_content():
+    cites = _parse_citations(
+        [
+            "funding | $250M Series C | https://example.com/news | 2025-09",
+            "year_founded | 2021 | https://example.com/about",  # no date
+            "leadership | Ben Mann | Co-Founder | https://example.com/team",  # extra pipe
+            "headcount | 500 | not-a-url",  # no URL → dropped
+        ]
+    )
+    assert [(c.field, c.source, c.source_date) for c in cites] == [
+        ("funding", "https://example.com/news", "2025-09"),
+        ("year_founded", "https://example.com/about", None),
+        ("leadership", "https://example.com/team", "Co-Founder"),
     ]

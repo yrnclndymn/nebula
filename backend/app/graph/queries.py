@@ -12,7 +12,7 @@ from neo4j import AsyncDriver
 
 _COMPANY_PROPS = (
     "c{.name,.priority,.about,.website,.linkedin,.hqLocation,.headcount,"
-    ".estimatedRevenue,.yearFounded,.funding,.notes}"
+    ".estimatedRevenue,.yearFounded,.funding,.notes,.origin}"
 )
 
 
@@ -88,12 +88,15 @@ async def get_company(driver: AsyncDriver, name: str) -> dict | None:
         OPTIONAL MATCH (c)-[:PARTNERS_WITH]-(p:Company)
         OPTIONAL MATCH (c)-[:HAS_CLIENT]->(cl:Company)
         OPTIONAL MATCH (pe:Person)-[lr:LEADS]->(c)
+        OPTIONAL MATCH (c)-[cit:CITES]->(src:Source)
         RETURN {_COMPANY_PROPS} AS company,
                collect(DISTINCT t.name) AS topics,
                collect(DISTINCT ct.name) AS companyTypes,
                collect(DISTINCT p.name) AS partners,
                collect(DISTINCT cl.name) AS clients,
-               collect(DISTINCT {{name: pe.name, title: lr.title}}) AS leadership
+               collect(DISTINCT {{name: pe.name, title: lr.title}}) AS leadership,
+               collect(DISTINCT {{field: cit.field, value: cit.value,
+                                  source: src.url, sourceDate: cit.sourceDate}}) AS citations
     """
     async with driver.session() as session:
         result = await session.run(cypher, name=name)
@@ -102,6 +105,7 @@ async def get_company(driver: AsyncDriver, name: str) -> dict | None:
         return None
     data = record.data()
     leadership = [leader for leader in data["leadership"] if leader.get("name")]
+    citations = [c for c in data["citations"] if c.get("source")]
     return {
         **data["company"],
         "topics": data["topics"],
@@ -109,6 +113,7 @@ async def get_company(driver: AsyncDriver, name: str) -> dict | None:
         "partners": sorted(data["partners"]),
         "clients": sorted(data["clients"]),
         "leadership": leadership,
+        "citations": citations,
     }
 
 

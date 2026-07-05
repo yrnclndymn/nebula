@@ -14,6 +14,19 @@ class Leader(BaseModel):
     title: str | None = None
 
 
+class Citation(BaseModel):
+    """Provenance for one fact: which source justifies a value, and its timeliness.
+
+    Stored as (Company)-[:CITES {field, value, sourceDate}]->(Source {url}) so any
+    figure — especially financials — can be checked back to its source later.
+    """
+
+    field: str  # which CompanyRecord field this justifies, e.g. "funding"
+    value: str  # the value as stated by the source
+    source: str  # source URL
+    source_date: str | None = None  # when the info is from (timeliness), free text
+
+
 class CompanyRecord(BaseModel):
     # Identity / flat facts (→ :Company properties)
     name: str
@@ -28,6 +41,7 @@ class CompanyRecord(BaseModel):
     year_founded: int | None = None
     funding: str | None = None  # raw text for now; structured into :INVESTED_IN later
     notes: str | None = None
+    origin: str | None = None  # who produced this record: "agent" | "sheet" | "manual"
 
     # Tags (→ nodes MERGE'd by name)
     topics: list[str] = Field(default_factory=list)  # research domains
@@ -39,6 +53,9 @@ class CompanyRecord(BaseModel):
 
     # People
     leadership: list[Leader] = Field(default_factory=list)
+
+    # Provenance — source + timeliness for individual facts (agent-produced).
+    citations: list[Citation] = Field(default_factory=list)
 
     def scalar_props(self) -> dict:
         """Non-null flat properties, keyed as they appear on the graph node."""
@@ -54,5 +71,6 @@ class CompanyRecord(BaseModel):
             "yearFounded": self.year_founded,
             "funding": self.funding,
             "notes": self.notes,
+            "origin": self.origin,
         }
         return {k: v for k, v in props.items() if v is not None}

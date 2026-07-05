@@ -59,12 +59,23 @@ Requires local Neo4j running (`make db-up`).
 ## Eval harness
 
 `backend/evals/` grades the enrichment agent (`make eval`; `ARGS=--grade-only`
-re-grades cached traces without re-running the agent). Three scorers, which is the
-lesson: deterministic **field checks** (known values), **trajectory checks** (did
-it search + fetch before saving, save exactly once), and **LLM-as-Judge**
-(accuracy / faithfulness / completeness). The judge earns its place — in the first
-run field checks passed 100% but the judge caught the agent hallucinating Replit's
-financials, which no reference check would have.
+re-grades cached traces without re-running the agent). Four scorers: deterministic
+**field checks** (known values), **trajectory checks** (searched + fetched, saved
+once), **provenance checks** (every financial figure / headcount saved must carry
+a citation), and an **evidence-grounded LLM-as-Judge**.
+
+Key lesson learned the hard way: the *first* judge scored against its own
+knowledge and produced false hallucination flags (stale model calling real 2026
+figures "overstated", past dates "future projections"). The fix was **provenance
++ evidence-grounded judging**: the agent now cites a source URL + date for each
+fact (stored as `(:Company)-[:CITES]->(:Source)`), and the judge validates *"is
+this value supported by the evidence the agent actually retrieved?"* rather than
+its memory. Faithfulness went from avg 3.3 → 4.7 and the flags became trustworthy
+(it still catches Replit citing an unsupported headcount). The provenance check
+immediately surfaced that the agent sets `funding` without citing it. This is the
+deepest Day-4 lesson: **you have to eval your eval**, and provenance is what makes
+faithfulness checkable — in the eval and in production (`origin` + Sources show in
+the company drawer).
 
 Free-tier note: flash-lite is ~15 req/min, so the harness bursts into 429s; the
 generate/grade split + `app/genai_retry.py` handle it.

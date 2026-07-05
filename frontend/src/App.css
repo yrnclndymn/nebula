@@ -257,3 +257,34 @@ td.muted {
 .muted {
   color: var(--muted);
 }
+
+/* Provenance */
+.origin {
+  font-size: 11px;
+  font-weight: 500;
+  vertical-align: middle;
+  margin-left: 0.6rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.origin-agent {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+}
+.sources {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+  line-height: 1.7;
+  font-size: 13px;
+}
+.sources .src-field {
+  font-weight: 600;
+}
+.sources a {
+  color: var(--accent);
+  text-decoration: none;
+}

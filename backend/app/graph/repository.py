@@ -90,3 +90,20 @@ async def _upsert_tx(tx: AsyncManagedTransaction, record: CompanyRecord) -> None
             name=record.name,
             leaders=[leader.model_dump() for leader in record.leadership],
         )
+
+    # 5. Provenance. Each citation ties a field's value to a Source (+ its date),
+    #    so a figure can be checked back to where the agent found it.
+    if record.citations:
+        await tx.run(
+            """
+            MATCH (c:Company {name: $name})
+            UNWIND $citations AS cit
+              MERGE (s:Source {url: cit.source})
+              MERGE (c)-[r:CITES {field: cit.field}]->(s)
+              SET r.value = cit.value,
+                  r.sourceDate = cit.source_date,
+                  r.capturedAt = datetime()
+            """,
+            name=record.name,
+            citations=[c.model_dump() for c in record.citations],
+        )
