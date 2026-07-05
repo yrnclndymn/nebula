@@ -1,0 +1,21 @@
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Env / secrets
+.env
+*.local
+
+# Node / Vite
+node_modules/
+frontend/dist/
+
+# OS
+.DS_Store
+
+# Firebase
+.firebase/
+firebase-debug*.log

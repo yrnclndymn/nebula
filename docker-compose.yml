@@ -1,0 +1,17 @@
+# Local Neo4j for development. Production uses Neo4j Aura (managed) instead.
+# Browser UI: http://localhost:7474   Bolt: bolt://localhost:7687
+services:
+  neo4j:
+    image: neo4j:5
+    container_name: nebula-neo4j
+    ports:
+      - "7474:7474" # HTTP / Neo4j Browser
+      - "7687:7687" # Bolt (driver)
+    environment:
+      # Must match NEO4J_USER / NEO4J_PASSWORD in backend/.env
+      NEO4J_AUTH: neo4j/nebula-local-dev
+    volumes:
+      - neo4j-data:/data
+
+volumes:
+  neo4j-data:
