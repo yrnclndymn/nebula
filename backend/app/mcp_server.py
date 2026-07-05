@@ -93,7 +93,8 @@ async def enrich_company(name: str, website: str, topic: str = "AI-native engine
     """Research a company from its name + website using the Nebula agent and SAVE
     it to the graph. Slow (web search + fetch + LLM, ~30-60s) and writes data.
     Returns the agent's summary of what was saved."""
-    return await enrich(name, website, topic, verbose=False)
+    result = await enrich(name, website, topic, verbose=False)
+    return result.summary
 
 
 def main() -> None:

@@ -17,7 +17,7 @@ agent?*
 | **1 — Agents** | reasoning loop, agent vs. one-shot call, agent components | `app/agents/enrichment/agent.py` (`root_agent`), run loop in `enrich.py`; baseline non-agent in `app/importer/extract.py` | ✅ done |
 | **2 — Tools / MCP** | function-calling, tool design, read vs. write tools, **MCP interoperability** | `app/tools/` (agent tools) + `app/mcp_server.py` (MCP server exposing the graph); registered in `.mcp.json` | ✅ done |
 | **3 — Context / Memory** | sessions (short-term), long-term memory, stateful agents | `enrich.py` uses `InMemorySessionService` (ephemeral) | ⬜ persistent sessions + a chat-over-graph assistant |
-| **4 — Quality** | observability (traces), LLM-as-Judge, trajectory eval | `enrich.py` prints the tool-call trajectory (first observability taste) | ⬜ eval harness + tracing (copy `../../agy2-projects/ambient-expense-agent` eval setup) |
+| **4 — Quality** | observability, **LLM-as-Judge**, **trajectory eval**, field checks | `backend/evals/`: golden dataset, deterministic field checks, `judge.py` (LLM-as-Judge), trajectory checks; `enrich.py` captures the tool trajectory | ✅ eval done · ⬜ Cloud Trace / structured tracing |
 | **5 — Production** | deployment, A2A, security/governance | roadmap step 5 | ⬜ Cloud Run + Firebase Auth + (optionally) Vertex AI Agent Engine |
 
 ## Try it
@@ -56,9 +56,21 @@ Use it from Claude Code: `claude mcp list` to confirm `nebula` is connected, the
 ask e.g. *"using nebula, which employee-owned companies partner with Anthropic?"*
 Requires local Neo4j running (`make db-up`).
 
+## Eval harness
+
+`backend/evals/` grades the enrichment agent (`make eval`; `ARGS=--grade-only`
+re-grades cached traces without re-running the agent). Three scorers, which is the
+lesson: deterministic **field checks** (known values), **trajectory checks** (did
+it search + fetch before saving, save exactly once), and **LLM-as-Judge**
+(accuracy / faithfulness / completeness). The judge earns its place — in the first
+run field checks passed 100% but the judge caught the agent hallucinating Replit's
+financials, which no reference check would have.
+
+Free-tier note: flash-lite is ~15 req/min, so the harness bursts into 429s; the
+generate/grade split + `app/genai_retry.py` handle it.
+
 ## Suggested next builds (in course order)
 
-1. **Eval harness** — Day 4; an evalset of known companies + LLM-as-Judge scoring of
-   enrichment accuracy, wired to `make eval`. Real regression insurance.
-2. **Memory + chat assistant** over the graph — Day 3.
+1. **Memory + chat assistant** over the graph — Day 3 (sessions + long-term memory).
+2. **Structured tracing** — Day 4; Cloud Trace / OpenTelemetry over the agent runs.
 3. **Multi-agent** decomposition (basics / funding / partnerships sub-agents) — Day 1/5.

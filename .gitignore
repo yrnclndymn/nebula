@@ -22,3 +22,6 @@ firebase-debug*.log
 
 # Private sheet exports — never commit research data (CSV) anywhere in the repo
 *.csv
+
+# Eval artifacts (generated traces + results)
+backend/evals/artifacts/
