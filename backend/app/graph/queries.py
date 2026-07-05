@@ -6,6 +6,8 @@ relationships. Aggregates (partner/client/leader counts) come back per row so th
 table can show connection density without a second round-trip.
 """
 
+import re
+
 from neo4j import AsyncDriver
 
 _COMPANY_PROPS = (
@@ -120,3 +122,41 @@ async def list_company_types(driver: AsyncDriver) -> list[str]:
     async with driver.session() as session:
         result = await session.run("MATCH (ct:CompanyType) RETURN ct.name AS name ORDER BY name")
         return [record["name"] async for record in result]
+
+
+async def graph_overview(driver: AsyncDriver) -> dict:
+    """Node/edge counts — a quick orientation for a caller (or the MCP client)."""
+    async with driver.session() as session:
+        nodes = {}
+        for label in ["Company", "Person", "Topic", "CompanyType", "Tool"]:
+            result = await session.run(f"MATCH (n:{label}) RETURN count(n) AS n")
+            nodes[label] = (await result.single())["n"]
+        result = await session.run(
+            "MATCH ()-[r]->() RETURN type(r) AS t, count(*) AS n ORDER BY n DESC"
+        )
+        edges = {record["t"]: record["n"] async for record in result}
+    return {"nodes": nodes, "edges": edges}
+
+
+# Reject anything that could mutate the graph; run_read_cypher is read-only.
+_WRITE_KEYWORDS = re.compile(
+    r"\b(CREATE|MERGE|DELETE|SET|REMOVE|DROP|FOREACH|LOAD\s+CSV|CALL\s*\{)\b",
+    re.IGNORECASE,
+)
+
+
+async def run_read_cypher(driver: AsyncDriver, query: str, limit: int = 200) -> list[dict]:
+    """Run a READ-ONLY Cypher query and return up to `limit` rows as dicts.
+
+    Rejects any query containing a write clause. Runs in a read transaction as a
+    second line of defence. Intended for ad-hoc multi-hop exploration.
+    """
+    if _WRITE_KEYWORDS.search(query):
+        raise ValueError("Only read-only queries are allowed (no CREATE/MERGE/DELETE/SET/…).")
+
+    async def _work(tx):
+        result = await tx.run(query)
+        return [record.data() async for record in result][:limit]
+
+    async with driver.session() as session:
+        return await session.execute_read(_work)

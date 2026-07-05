@@ -15,7 +15,7 @@ agent?*
 | Day | Concept | Where in the code | Status |
 | --- | ------- | ----------------- | ------ |
 | **1 — Agents** | reasoning loop, agent vs. one-shot call, agent components | `app/agents/enrichment/agent.py` (`root_agent`), run loop in `enrich.py`; baseline non-agent in `app/importer/extract.py` | ✅ done |
-| **2 — Tools / MCP** | function-calling, tool design, read vs. write tools | `app/tools/web.py` (`web_search`, `fetch_page`), `app/tools/graph_tools.py` (`save_company`) | ✅ tools done · ⬜ MCP server (expose the graph) next |
+| **2 — Tools / MCP** | function-calling, tool design, read vs. write tools, **MCP interoperability** | `app/tools/` (agent tools) + `app/mcp_server.py` (MCP server exposing the graph); registered in `.mcp.json` | ✅ done |
 | **3 — Context / Memory** | sessions (short-term), long-term memory, stateful agents | `enrich.py` uses `InMemorySessionService` (ephemeral) | ⬜ persistent sessions + a chat-over-graph assistant |
 | **4 — Quality** | observability (traces), LLM-as-Judge, trajectory eval | `enrich.py` prints the tool-call trajectory (first observability taste) | ⬜ eval harness + tracing (copy `../../agy2-projects/ambient-expense-agent` eval setup) |
 | **5 — Production** | deployment, A2A, security/governance | roadmap step 5 | ⬜ Cloud Run + Firebase Auth + (optionally) Vertex AI Agent Engine |
@@ -44,11 +44,21 @@ what Day 4's observability is about.
   and call `upsert_company`, so a sheet import and an agent enrichment land
   identically in the graph.
 
+## MCP server
+
+`app/mcp_server.py` (FastMCP, stdio) exposes the graph to any MCP client — Claude
+Code, Claude Desktop, or an agent. Tools: `search_companies`, `get_company`,
+`list_topics`, `list_company_types`, `graph_overview`, `run_cypher` (READ-ONLY,
+write clauses rejected — a guardrail is the security cross-cutting theme), and
+`enrich_company` (runs the agent; slow, writes). Registered in `.mcp.json`.
+
+Use it from Claude Code: `claude mcp list` to confirm `nebula` is connected, then
+ask e.g. *"using nebula, which employee-owned companies partner with Anthropic?"*
+Requires local Neo4j running (`make db-up`).
+
 ## Suggested next builds (in course order)
 
-1. **MCP server** exposing the graph (`query`, `companies`, `upsert`) — Day 2; also
-   usable from Claude Code/Desktop.
-2. **Eval harness** — Day 4; an evalset of known companies + LLM-as-Judge scoring of
+1. **Eval harness** — Day 4; an evalset of known companies + LLM-as-Judge scoring of
    enrichment accuracy, wired to `make eval`. Real regression insurance.
-3. **Memory + chat assistant** over the graph — Day 3.
-4. **Multi-agent** decomposition (basics / funding / partnerships sub-agents) — Day 1/5.
+2. **Memory + chat assistant** over the graph — Day 3.
+3. **Multi-agent** decomposition (basics / funding / partnerships sub-agents) — Day 1/5.

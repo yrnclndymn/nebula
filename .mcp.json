@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "nebula": {
+      "command": "uv",
+      "args": ["run", "--directory", "backend", "python", "-m", "app.mcp_server"]
+    }
+  }
+}

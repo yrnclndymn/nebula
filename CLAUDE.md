@@ -24,6 +24,9 @@ funded that partner with Anthropic and have headcount < 100*).
 - **Backend API — FastAPI** (`backend/app/`), async `neo4j` driver held for the
   app lifetime (`app/graph/driver.py`), deployed to **Cloud Run**.
 - **Frontend — React + Vite SPA** (`frontend/`), deployed to **Firebase Hosting**.
+- **MCP server** — `app/mcp_server.py` (FastMCP, stdio) exposes the graph to MCP
+  clients (Claude Code/Desktop); read tools + guarded read-only `run_cypher` +
+  `enrich_company`. Registered in `.mcp.json`. Reuses `app/graph/queries.py`.
 - **Auth — Firebase Auth (Google provider)**, restricted to the owner. SPA gates
   on sign-in; the backend verifies the Firebase ID token. *(Not yet built.)*
 - Deploys into the **same Firebase/GCP project as `emergent-strategies`** (the
