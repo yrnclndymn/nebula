@@ -18,14 +18,16 @@ BACKFILLS: dict[str, dict] = {}
 turn_backfills: ContextVar[list | None] = ContextVar("nebula_turn_backfills", default=None)
 
 
-async def _applicable_companies(driver, applies_to_kind: str) -> list[dict]:
+async def _applicable_companies(driver, applies_to_kind: str, country: str | None) -> list[dict]:
     kind_clause = "" if applies_to_kind == "all" else "AND c.kind = $kind"
+    country_clause = "AND c.hqCountry = $country" if country else ""
     async with driver.session() as session:
         result = await session.run(
             f"MATCH (c:Company)-[:TAGGED_AS]->(:Topic) "
-            f"WHERE c.website IS NOT NULL {kind_clause} "
+            f"WHERE c.website IS NOT NULL {kind_clause} {country_clause} "
             f"RETURN DISTINCT c.name AS name, c.website AS website ORDER BY name",
             kind=applies_to_kind,
+            country=country,
         )
         return [dict(record) async for record in result]
 
@@ -55,19 +57,20 @@ async def _run_backfill(job_id: str, field_def: dict, companies: list[dict]) -> 
     job["status"] = "ready"
 
 
-async def start_backfill(field_name: str) -> dict:
-    """Research a custom field for all companies of its kind and prepare a batch for
-    the user to review and commit. Returns immediately; runs in the background. Use
-    when the user asks to fill in / research an existing field across companies. The
-    field_name is the field's key (e.g. 'serviceLines'); if unsure, it's the slug of
-    the field label."""
+async def start_backfill(field_name: str, country: str = "") -> dict:
+    """Research a custom field for companies of its kind and prepare a batch for the
+    user to review and commit. Returns immediately; runs in the background. Use when
+    the user asks to fill in / research an existing field across companies. The
+    field_name is the field's key (e.g. 'serviceLines'). Optionally scope to a
+    country (e.g. 'United Kingdom') to only research companies headquartered there —
+    use the full country name."""
     driver = get_driver()
     field_defs = {f["name"]: f for f in await queries.list_field_defs(driver)}
     field_def = field_defs.get(field_name)
     if field_def is None:
         return {"error": f"no field named {field_name!r}; add it first with add_field"}
 
-    companies = await _applicable_companies(driver, field_def["appliesToKind"])
+    companies = await _applicable_companies(driver, field_def["appliesToKind"], country or None)
     job_id = uuid.uuid4().hex[:8]
     BACKFILLS[job_id] = {
         "job_id": job_id,

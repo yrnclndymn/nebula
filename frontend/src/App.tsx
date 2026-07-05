@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
-import { fetchCompanies, fetchCompanyTypes, fetchCompany, fetchFields, fetchTopics } from "./api";
+import {
+  fetchCompanies,
+  fetchCompanyTypes,
+  fetchCompany,
+  fetchCountries,
+  fetchFields,
+  fetchTopics,
+} from "./api";
 import type { CompanyDetail, CompanyRow, FieldDef } from "./types";
 import { fieldApplies, formatCustom, KINDS, kindLabel } from "./types";
 import { CompanyDrawer } from "./CompanyDrawer";
@@ -31,6 +38,7 @@ export default function App() {
   const [topics, setTopics] = useState<string[]>([]);
   const [types, setTypes] = useState<string[]>([]);
   const [fields, setFields] = useState<FieldDef[]>([]);
+  const [countries, setCountries] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -38,6 +46,7 @@ export default function App() {
   const [topic, setTopic] = useState("");
   const [companyType, setCompanyType] = useState("");
   const [kind, setKind] = useState("");
+  const [country, setCountry] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortAsc, setSortAsc] = useState(true);
 
@@ -45,12 +54,19 @@ export default function App() {
   const [chatOpen, setChatOpen] = useState(false);
 
   useEffect(() => {
-    Promise.all([fetchCompanies(), fetchTopics(), fetchCompanyTypes(), fetchFields()])
-      .then(([c, t, ct, f]) => {
+    Promise.all([
+      fetchCompanies(),
+      fetchTopics(),
+      fetchCompanyTypes(),
+      fetchFields(),
+      fetchCountries(),
+    ])
+      .then(([c, t, ct, f, co]) => {
         setCompanies(c);
         setTopics(t);
         setTypes(ct);
         setFields(f);
+        setCountries(co);
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
@@ -62,6 +78,7 @@ export default function App() {
       if (topic && !c.topics.includes(topic)) return false;
       if (companyType && !c.companyTypes.includes(companyType)) return false;
       if (kind && c.kind !== kind) return false;
+      if (country && c.hqCountry !== country) return false;
       if (needle) {
         const hay = `${c.name} ${c.about ?? ""} ${c.hqLocation ?? ""}`.toLowerCase();
         if (!hay.includes(needle)) return false;
@@ -70,7 +87,7 @@ export default function App() {
     });
     filtered.sort((a, b) => (sortAsc ? 1 : -1) * compare(a, b, sortKey));
     return filtered;
-  }, [companies, search, topic, companyType, kind, sortKey, sortAsc]);
+  }, [companies, search, topic, companyType, kind, country, sortKey, sortAsc]);
 
   function updateCompanyKind(name: string, newKind: string | null) {
     setCompanies((cs) => cs.map((c) => (c.name === name ? { ...c, kind: newKind } : c)));
@@ -126,13 +143,19 @@ export default function App() {
             </option>
           ))}
         </select>
+        <select value={country} onChange={(e) => setCountry(e.target.value)}>
+          <option value="">All countries</option>
+          {countries.map((co) => (
+            <option key={co}>{co}</option>
+          ))}
+        </select>
         <select value={companyType} onChange={(e) => setCompanyType(e.target.value)}>
           <option value="">All types</option>
           {types.map((t) => (
             <option key={t}>{t}</option>
           ))}
         </select>
-        {(search || topic || companyType || kind) && (
+        {(search || topic || companyType || kind || country) && (
           <button
             className="clear"
             onClick={() => {
@@ -140,6 +163,7 @@ export default function App() {
               setTopic("");
               setCompanyType("");
               setKind("");
+              setCountry("");
             }}
           >
             Clear
@@ -181,7 +205,9 @@ export default function App() {
                 <td className="num">{c.partnerCount || "—"}</td>
                 <td className="num">{c.clientCount || "—"}</td>
                 <td className="muted">{c.kind ? kindLabel(c.kind) : "—"}</td>
-                <td className="muted">{c.hqLocation ?? "—"}</td>
+                <td className="muted">
+                  {[c.hqCity, c.hqCountry].filter(Boolean).join(", ") || c.hqLocation || "—"}
+                </td>
                 <td>
                   {c.companyTypes.map((t) => (
                     <span key={t} className="tag">

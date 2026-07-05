@@ -5,6 +5,9 @@ export interface CompanyRow {
   website: string | null;
   linkedin: string | null;
   hqLocation: string | null;
+  hqCountry: string | null;
+  hqCity: string | null;
+  hqState: string | null;
   headcount: number | null;
   estimatedRevenue: string | null;
   yearFounded: number | null;
@@ -109,6 +112,9 @@ export interface CompanyDetail {
   website: string | null;
   linkedin: string | null;
   hqLocation: string | null;
+  hqCountry: string | null;
+  hqCity: string | null;
+  hqState: string | null;
   headcount: number | null;
   estimatedRevenue: string | null;
   yearFounded: number | null;

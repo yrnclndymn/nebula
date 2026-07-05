@@ -11,6 +11,7 @@ from app.agents.assistant.backfill import start_backfill
 from app.agents.assistant.memory import remember
 from app.agents.assistant.proposals import propose_enrichment
 from app.agents.assistant.schema_tools import add_field
+from app.agents.assistant.tidy_hq import tidy_hq
 from app.config import settings
 from app.tools.graph_query_tools import get_company, run_cypher, search_companies
 
@@ -42,7 +43,11 @@ Changing the data structure:
 - When the user asks to research / fill in an existing field across companies, call
   start_backfill(field_name) with the field's key. It researches all applicable
   companies in the background and returns a batch for the user to review and
-  commit; tell the user it's running and results will appear to review shortly.
+  commit; tell the user it's running and results will appear to review shortly. If
+  the user scopes by country ("for the UK companies"), pass country (full name,
+  e.g. "United Kingdom") to start_backfill.
+- When the user asks to tidy / clean up the HQ field, call tidy_hq() — it parses
+  the free-text HQ into structured country/city/state and applies automatically.
 
 Memory:
 - When the user states a durable preference or explicitly asks you to remember
@@ -64,5 +69,6 @@ root_agent = Agent(
         propose_enrichment,
         add_field,
         start_backfill,
+        tidy_hq,
     ],
 )

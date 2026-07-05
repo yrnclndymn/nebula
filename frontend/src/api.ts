@@ -54,3 +54,4 @@ export const fetchCompany = (name: string) =>
 export const fetchTopics = () => getJson<string[]>("/topics");
 export const fetchCompanyTypes = () => getJson<string[]>("/company-types");
 export const fetchFields = () => getJson<import("./types").FieldDef[]>("/fields");
+export const fetchCountries = () => getJson<string[]>("/countries");
