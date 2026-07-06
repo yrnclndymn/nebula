@@ -25,3 +25,6 @@ firebase-debug*.log
 
 # Eval artifacts (generated traces + results)
 backend/evals/artifacts/
+
+# Neo4j dump for migration (data)
+*.dump

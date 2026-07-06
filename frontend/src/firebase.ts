@@ -4,9 +4,11 @@
 import { initializeApp } from "firebase/app";
 import {
   getAuth,
+  getRedirectResult,
   GoogleAuthProvider,
   onAuthStateChanged,
   signInWithPopup,
+  signInWithRedirect,
   signOut as fbSignOut,
   type Auth,
   type User,
@@ -34,8 +36,32 @@ export function onAuthChange(cb: (user: User | null) => void): () => void {
   return onAuthStateChanged(auth, cb);
 }
 
-export function signIn(): void {
-  if (auth) signInWithPopup(auth, new GoogleAuthProvider());
+/** Sign in with Google. Surfaces errors (caller shows them); falls back to a
+ * full-page redirect if the popup is blocked. */
+export async function signIn(): Promise<void> {
+  if (!auth) return;
+  const provider = new GoogleAuthProvider();
+  try {
+    await signInWithPopup(auth, provider);
+  } catch (err) {
+    const code = (err as { code?: string })?.code ?? "";
+    if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request") {
+      await signInWithRedirect(auth, provider);
+      return;
+    }
+    throw err;
+  }
+}
+
+/** After a redirect sign-in, surface any error (e.g. unauthorized-domain). */
+export async function redirectError(): Promise<string | null> {
+  if (!auth) return null;
+  try {
+    await getRedirectResult(auth);
+    return null;
+  } catch (err) {
+    return (err as { message?: string })?.message ?? String(err);
+  }
 }
 
 export function signOutUser(): void {
