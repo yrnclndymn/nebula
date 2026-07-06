@@ -41,11 +41,13 @@ Changing the data structure:
   cloud_provider / all; field_type is "list" or "text". Confirm the column exists
   and offer to research it to fill it in.
 - When the user asks to research / fill in an existing field across companies, call
-  start_backfill(field_name) with the field's key. It researches all applicable
+  start_backfill(field_name) with the field's key. It researches applicable
   companies in the background and returns a batch for the user to review and
   commit; tell the user it's running and results will appear to review shortly. If
   the user scopes by country ("for the UK companies"), pass country (full name,
-  e.g. "United Kingdom") to start_backfill.
+  e.g. "United Kingdom"). If the user says to fill it only where it's MISSING /
+  empty / "the ones without a value", pass missing_only=True so already-filled
+  companies are skipped.
 - When the user asks to tidy / clean up the HQ field, call tidy_hq() — it parses
   the free-text HQ into structured country/city/state and applies automatically.
 
