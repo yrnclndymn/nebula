@@ -1,5 +1,7 @@
 # Nebula
 
+[![CI](https://github.com/yrnclndymn/nebula/actions/workflows/ci.yml/badge.svg)](https://github.com/yrnclndymn/nebula/actions/workflows/ci.yml)
+
 A private, agentic research tool that replaces a manual spreadsheet for tracking
 different company and tool landscapes - in particular, those in the **AI-native engineering** space.
 
