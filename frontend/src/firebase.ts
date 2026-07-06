@@ -41,6 +41,9 @@ export function onAuthChange(cb: (user: User | null) => void): () => void {
 export async function signIn(): Promise<void> {
   if (!auth) return;
   const provider = new GoogleAuthProvider();
+  // Always show the account chooser, so a signed-out user can pick a different
+  // account instead of being silently re-authed into the same one.
+  provider.setCustomParameters({ prompt: "select_account" });
   try {
     await signInWithPopup(auth, provider);
   } catch (err) {
