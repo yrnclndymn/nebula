@@ -23,7 +23,7 @@ async def _render(turn) -> str:
     for pending in turn.proposals:
         pid = pending["proposal_id"]
         for _ in range(180):  # background research runs on this same loop
-            proposal = get_proposal(pid)
+            proposal = await get_proposal(pid)
             if proposal and proposal.get("status") != "pending":
                 break
             await asyncio.sleep(1)

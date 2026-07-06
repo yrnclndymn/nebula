@@ -109,9 +109,13 @@ Cloud Tasks is free at this scale and keeps `min-instances=0`.
 
 ### Phase A — backend on Cloud Run + Aura + secrets
 1. **Aura:** create a Free instance; note `neo4j+s://…`, user, password.
-2. **Seed data:** point `NEO4J_URI` at Aura locally, then `make db-init` and re-run
-   the seed (CSV import → tidy HQ → set kinds → any enrichments), or `neo4j-admin
-   database dump/load` from local. One-time.
+2. **Migrate data (dump/load — keeps the research we've already run):**
+   - Dump the local Docker DB:
+     `docker exec nebula-neo4j neo4j-admin database dump neo4j --to-path=/data` then
+     `docker cp nebula-neo4j:/data/neo4j.dump ./neo4j.dump`.
+   - Push to Aura: `neo4j-admin database upload neo4j --from-path=. --to-uri=<aura>`
+     (or the Aura console's "Import database" → upload the `.dump`). One-time; re-run
+     if you want to refresh prod from local.
 3. **Secrets:**
    `printf '%s' "$KEY" | gcloud secrets create GEMINI_API_KEY --data-file=-` (repeat
    for NEO4J_URI / NEO4J_USER / NEO4J_PASSWORD).
@@ -123,18 +127,26 @@ Cloud Tasks is free at this scale and keeps `min-instances=0`.
      --set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest,NEO4J_URI=NEO4J_URI:latest,\
 NEO4J_USER=NEO4J_USER:latest,NEO4J_PASSWORD=NEO4J_PASSWORD:latest \
      --set-env-vars=GEMINI_MODEL=gemini-3.1-flash-lite,AGENT_MODEL=gemini-3.1-flash-lite \
-     --service-account=nebula-run@<project>.iam.gserviceaccount.com \
-     --allow-unauthenticated
+     --service-account=nebula-run@emergent-strategies.iam.gserviceaccount.com \
+     --project=emergent-strategies --allow-unauthenticated
    ```
    Grant the SA `roles/secretmanager.secretAccessor`. Verify `/health`.
 
-### Phase B — durable jobs (Cloud Tasks)
-1. `gcloud tasks queues create nebula-jobs --location=europe-west2`.
-2. Refactor `proposals.py` / `backfill.py`: job state → graph; `start_*` enqueues a
-   task; add `/jobs/run/{id}` runner endpoints (OIDC-verified).
-3. Grant Cloud Run SA `roles/cloudtasks.enqueuer`; create a tasks-invoker SA with
-   `roles/run.invoker` for the OIDC callback.
-4. Verify: start a propose → task runs → graph updates → poll shows ready.
+### Phase B — durable jobs (Cloud Tasks) ✅ code done
+- Job state is in the graph (`(:Job {id,type,status,dataJson})`, `app/graph/jobs.py`);
+  `proposals.py` / `backfill.py` create+enqueue jobs and expose `run_*_job` runners;
+  poll/commit read the graph. Verified locally (`job_mode=local` runs inline).
+- **Remaining GCP wiring:**
+  1. `gcloud tasks queues create nebula-jobs --location=europe-west2 --project=emergent-strategies`.
+  2. Cloud Run env: `JOB_MODE=cloudtasks`, `GCP_PROJECT=emergent-strategies`,
+     `CLOUD_TASKS_LOCATION=europe-west2`, `SERVICE_URL=<cloud run url>`,
+     `TASKS_SERVICE_ACCOUNT=<tasks-invoker SA>`.
+  3. Grant the Cloud Run SA `roles/cloudtasks.enqueuer`; give the tasks-invoker SA
+     `roles/run.invoker`.
+  4. **TODO:** verify the Cloud Tasks OIDC token in `POST /jobs/run/{id}` (folded
+     into the Phase C auth dependency — that route uses OIDC, not the Firebase token).
+- Note: `:Job` nodes persist; add a periodic cleanup (e.g. delete jobs older than N
+  days) later if they pile up.
 
 ### Phase C — auth + Firebase Hosting (nebula subdomain)
 1. Enable **Google** provider in Firebase Auth; set `ALLOWED_EMAILS` env on Cloud Run.
@@ -159,8 +171,8 @@ Scale-to-zero Cloud Run + Aura Free + Firebase Hosting + Cloud Tasks all sit wit
 free tiers for personal use → **~$0/month idle**, plus Gemini API usage. (First
 request after Aura auto-pause or a Cloud Run cold start has a few-second delay.)
 
-## Open items
+## Settled
 
-- Confirm GCP region (assumed `europe-west2`) and the emergent-strategies project id.
-- Data seed vs dump/load choice for the Aura migration.
-- Email allowlist values.
+- **GCP project:** `emergent-strategies` (region assumed `europe-west2` — confirm).
+- **Migration:** `neo4j-admin` **dump/load** (keeps existing research).
+- **Allowlist:** `yrnclndymn@gmail.com`, `andy@emergentstrategies.tech`.

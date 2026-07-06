@@ -22,6 +22,7 @@ SCHEMA_STATEMENTS = [
     "CREATE CONSTRAINT page_url IF NOT EXISTS FOR (p:Page) REQUIRE p.url IS UNIQUE",
     "CREATE CONSTRAINT siteclients_domain IF NOT EXISTS FOR (sc:SiteClients) REQUIRE sc.domain IS UNIQUE",
     "CREATE CONSTRAINT fielddef_name IF NOT EXISTS FOR (fd:FieldDef) REQUIRE fd.name IS UNIQUE",
+    "CREATE CONSTRAINT job_id IF NOT EXISTS FOR (j:Job) REQUIRE j.id IS UNIQUE",
     "CREATE INDEX company_website IF NOT EXISTS FOR (c:Company) ON (c.website)",
     "CREATE INDEX company_hqcountry IF NOT EXISTS FOR (c:Company) ON (c.hqCountry)",
     "CREATE INDEX person_name IF NOT EXISTS FOR (p:Person) ON (p.name)",

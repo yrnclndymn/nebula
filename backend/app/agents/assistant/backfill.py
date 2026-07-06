@@ -1,20 +1,18 @@
 """Back-fill a custom field across companies of its kind, with batch review.
 
-Like proposals, it runs in the BACKGROUND (research is slow) and the user reviews
-+ commits. `start_backfill` kicks off extraction for every applicable company;
-the client polls `get_backfill` (rows fill in progressively), then commits the
-selected rows, which writes the custom field value + a provenance citation.
+Durable (graph-backed job via `app.graph.jobs`) so it survives scale-to-zero.
+`start_backfill` creates a job + enqueues it; the runner researches each company
+and updates the job progressively; the user reviews and commits selected rows,
+which writes the value + a provenance citation.
 """
 
-import asyncio
 import uuid
 from contextvars import ContextVar
 
-from app.graph import queries
+from app.graph import jobs, queries
 from app.graph.driver import get_driver
 from app.tools.field_extract import extract_field
 
-BACKFILLS: dict[str, dict] = {}
 turn_backfills: ContextVar[list | None] = ContextVar("nebula_turn_backfills", default=None)
 
 
@@ -32,38 +30,12 @@ async def _applicable_companies(driver, applies_to_kind: str, country: str | Non
         return [dict(record) async for record in result]
 
 
-async def _run_backfill(job_id: str, field_def: dict, companies: list[dict]) -> None:
-    job = BACKFILLS[job_id]
-    for company in companies:
-        try:
-            result = await extract_field(
-                company["website"], field_def["label"], field_def["description"], field_def["type"]
-            )
-        except Exception as exc:  # noqa: BLE001
-            result = {
-                "value": [] if field_def["type"] == "list" else "",
-                "source": "",
-                "error": str(exc),
-            }
-        job["rows"].append(
-            {
-                "company": company["name"],
-                "value": result["value"],
-                "source": result.get("source", ""),
-                "committed": False,
-            }
-        )
-        job["done"] = len(job["rows"])
-    job["status"] = "ready"
-
-
 async def start_backfill(field_name: str, country: str = "") -> dict:
     """Research a custom field for companies of its kind and prepare a batch for the
     user to review and commit. Returns immediately; runs in the background. Use when
     the user asks to fill in / research an existing field across companies. The
     field_name is the field's key (e.g. 'serviceLines'). Optionally scope to a
-    country (e.g. 'United Kingdom') to only research companies headquartered there —
-    use the full country name."""
+    country (full name, e.g. 'United Kingdom') to only research companies HQ'd there."""
     driver = get_driver()
     field_defs = {f["name"]: f for f in await queries.list_field_defs(driver)}
     field_def = field_defs.get(field_name)
@@ -72,15 +44,21 @@ async def start_backfill(field_name: str, country: str = "") -> dict:
 
     companies = await _applicable_companies(driver, field_def["appliesToKind"], country or None)
     job_id = uuid.uuid4().hex[:8]
-    BACKFILLS[job_id] = {
-        "job_id": job_id,
-        "status": "pending",
-        "field": {k: field_def[k] for k in ("name", "label", "type")},
-        "total": len(companies),
-        "done": 0,
-        "rows": [],
-    }
-    asyncio.create_task(_run_backfill(job_id, field_def, companies))
+    await jobs.create_job(
+        job_id,
+        "backfill",
+        {
+            "job_id": job_id,
+            "status": "pending",
+            "field": {k: field_def[k] for k in ("name", "label", "type")},
+            "field_name": field_name,
+            "country": country or "",
+            "total": len(companies),
+            "done": 0,
+            "rows": [],
+        },
+    )
+    await jobs.enqueue(job_id)
 
     collected = turn_backfills.get()
     if collected is not None:
@@ -95,19 +73,59 @@ async def start_backfill(field_name: str, country: str = "") -> dict:
     return {"job_id": job_id, "field": field_def["label"], "companies": len(companies)}
 
 
-def get_backfill(job_id: str) -> dict | None:
-    return BACKFILLS.get(job_id)
+async def run_backfill_job(job_id: str) -> None:
+    """Job runner: research each applicable company, updating the job progressively."""
+    job = await jobs.get_job(job_id)
+    if job is None:
+        return
+    driver = get_driver()
+    field_defs = {f["name"]: f for f in await queries.list_field_defs(driver)}
+    field_def = field_defs.get(job["field_name"])
+    if field_def is None:
+        await jobs.update_job(job_id, {**job, "error": "field was removed"}, status="error")
+        return
+
+    companies = await _applicable_companies(
+        driver, field_def["appliesToKind"], job.get("country") or None
+    )
+    rows: list[dict] = []
+    for company in companies:
+        try:
+            result = await extract_field(
+                company["website"], field_def["label"], field_def["description"], field_def["type"]
+            )
+        except Exception as exc:  # noqa: BLE001
+            result = {
+                "value": [] if field_def["type"] == "list" else "",
+                "source": "",
+                "error": str(exc),
+            }
+        rows.append(
+            {
+                "company": company["name"],
+                "value": result["value"],
+                "source": result.get("source", ""),
+                "committed": False,
+            }
+        )
+        await jobs.update_job(job_id, {**job, "rows": rows, "done": len(rows)})
+    await jobs.update_job(job_id, {**job, "rows": rows, "done": len(rows)}, status="ready")
+
+
+async def get_backfill(job_id: str) -> dict | None:
+    return await jobs.get_job(job_id)
 
 
 async def commit_backfill(job_id: str, companies: list[str] | None = None) -> dict:
     """Write selected back-fill rows (all if companies is None) with provenance."""
-    job = BACKFILLS.get(job_id)
+    job = await jobs.get_job(job_id)
     if job is None:
         return {"error": "unknown job"}
     driver = get_driver()
     field = job["field"]
+    rows = job["rows"]
     written = 0
-    for row in job["rows"]:
+    for row in rows:
         if companies is not None and row["company"] not in companies:
             continue
         if not row["value"]:
@@ -119,4 +137,5 @@ async def commit_backfill(job_id: str, companies: list[str] | None = None) -> di
             )
         row["committed"] = True
         written += 1
+    await jobs.update_job(job_id, {**job, "rows": rows})
     return {"committed": written}

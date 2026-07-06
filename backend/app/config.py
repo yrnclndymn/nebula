@@ -26,6 +26,16 @@ class Settings(BaseSettings):
     # site copy changes slowly, so weeks is fine.
     cache_ttl_days: int = 21
 
+    # Long jobs (propose / back-fill). "local" runs them inline (dev, single
+    # long-lived process); "cloudtasks" enqueues to Cloud Tasks so they survive
+    # Cloud Run scale-to-zero. The cloudtasks fields are only read in that mode.
+    job_mode: str = "local"
+    cloud_tasks_queue: str = "nebula-jobs"
+    cloud_tasks_location: str = "europe-west2"
+    gcp_project: str = ""
+    service_url: str = ""  # this Cloud Run service's base URL (for the task target)
+    tasks_service_account: str = ""  # SA whose OIDC token authorizes /jobs/run
+
 
 settings = Settings()
 
