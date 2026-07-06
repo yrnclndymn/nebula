@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     # CORS origin for the Vite dev server (set to the prod SPA origin in prod).
     frontend_origin: str = "http://localhost:5173"
 
+    # Prefix for user routes. Empty locally; "/api" in prod so the same-origin
+    # Firebase Hosting rewrite (/api/** → Cloud Run, path passed through) matches.
+    # /health and /jobs/run stay at the root (Cloud Run + Cloud Tasks hit them direct).
+    api_prefix: str = ""
+
     # Auth: off locally, on in prod. When on, every route except /health requires a
     # Firebase ID token whose (verified) email is in allowed_emails; /jobs/run
     # requires a Cloud Tasks OIDC token from tasks_service_account.
