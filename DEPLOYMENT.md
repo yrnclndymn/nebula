@@ -5,7 +5,7 @@ $0/month idle, keys never leave the server.
 
 ## Decisions (locked)
 
-- **Frontend** → Firebase Hosting at **`nebula.emergentstrategies.com`**.
+- **Frontend** → Firebase Hosting at **`nebula.emergentstrategies.tech`**.
 - **Backend** → Cloud Run, **scale-to-zero** (`min-instances=0`).
 - **Graph** → **Neo4j Aura Free** (auto-pauses after ~3 days idle; resumes on next
   connection).
@@ -19,7 +19,7 @@ $0/month idle, keys never leave the server.
 ## Architecture
 
 ```
- Browser ──HTTPS──► Firebase Hosting (nebula.emergentstrategies.com)
+ Browser ──HTTPS──► Firebase Hosting (nebula.emergentstrategies.tech)
                       │  static SPA (Vite build)
                       │  rewrite  /api/**  ──► Cloud Run  nebula-api  (scale-to-zero)
                       │                           │  FastAPI + ADK agents
@@ -166,7 +166,7 @@ andy@emergentstrategies.tech`, plus the Phase B job vars. Cloud Run's default SA
 4. `firebase.json`: hosting target `nebula`, rewrites `/api/**` → Cloud Run
    `nebula-api`, else → `/index.html`. `firebase target:apply hosting nebula …`;
    build Vite; `firebase deploy --only hosting:nebula`.
-5. Add `nebula.emergentstrategies.com` as a custom domain in Firebase Hosting; DNS.
+5. Add `nebula.emergentstrategies.tech` as a custom domain in Firebase Hosting; DNS.
 
 ### Phase D — MCP (local)
 - Local `backend/.env` → Aura creds + `GEMINI_API_KEY`. Run `.mcp.json` as today; it
