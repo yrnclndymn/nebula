@@ -106,14 +106,28 @@ class _LogoNames(BaseModel):
     companies: list[str]
 
 
+# Gemini's image API accepts only these raster types; SVG/GIF/ICO give a 400.
+_GEMINI_IMAGE_MIMES = {"image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"}
+
+
+def _gemini_image_mime(content_type: str, data: bytes) -> str | None:
+    """The MIME to hand Gemini, or None if it can't accept this image (e.g. SVG)."""
+    mime = content_type.split(";")[0].strip().lower()
+    if mime not in _GEMINI_IMAGE_MIMES:
+        return None
+    if data[:1] == b"<":  # SVG/XML/HTML mislabeled as a raster image
+        return None
+    return mime
+
+
 def _download_image(image_url: str) -> tuple[bytes, str] | None:
     try:
         resp = requests.get(image_url, timeout=12, headers=_HEADERS)
         resp.raise_for_status()
     except Exception:  # noqa: BLE001
         return None
-    mime = resp.headers.get("content-type", "").split(";")[0]
-    if not mime.startswith("image/"):
+    mime = _gemini_image_mime(resp.headers.get("content-type", ""), resp.content)
+    if mime is None:
         return None
     return resp.content, mime
 
