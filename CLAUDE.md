@@ -4,8 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What Nebula is
 
-An agentic research tool that replaces a manual Google Sheet. The user tracks two
-domains — the **SAP ecosystem** (companies) and **AI-native engineering**
+An agentic research tool that replaces a manual Google Sheet. The user tracks different domains — but primarily focuses on those in the **AI-native engineering** space
 (companies + tools, later techniques). Flow: add a company `{name, website}` →
 research agents enrich it → store in a **Neo4j graph** → browse/query via a React
 SPA. The graph (not tables) is the deliberate core: dimensions and relationship

@@ -1,7 +1,7 @@
 # Nebula
 
 A private, agentic research tool that replaces a manual spreadsheet for tracking
-two company/tool landscapes: the **SAP ecosystem** and **AI-native engineering**.
+different company and tool landscapes - in particular, those in the **AI-native engineering** space.
 
 You add a company as `{name, website}`. Research agents enrich it — HQ, headcount,
 leadership, partners, clients, investors — with a **source citation attached to

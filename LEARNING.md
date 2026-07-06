@@ -1,6 +1,6 @@
 # Learning agentic development with Nebula
 
-This project doubles as a hands-on lab for the
+This project doubles as a hands-on lab following the
 [Kaggle × Google 5-Day AI Agents Intensive](https://www.kaggle.com/learn-guide/5-day-agents).
 The course is built around five agent components — **Models, Tools, Orchestration,
 Memory, Evaluation** — plus **AgentOps** (reliability, governance, security). Each
@@ -36,9 +36,8 @@ what Day 4's observability is about.
 - **Provider.** The course is ADK + Gemini native, so the agent uses ADK; concepts
   (tools, memory, eval, MCP, multi-agent) are provider-agnostic and portable to
   Claude's Agent SDK later. See the `model-picker` skill and `CLAUDE.md`.
-- **Free-tier quota is tight.** `gemini-2.5-flash` free tier is ~20 requests/day;
-  an agent makes several calls per run, so the agent uses `gemini-3.1-flash-lite`
-  (far more headroom). For sustained agent + eval work, consider a paid Gemini tier
+- **Free-tier quota is tight.** an agent makes several calls per run, so the agent uses `gemini-3.1-flash-lite`
+  (which has enough headroom to start). For sustained agent + eval work, consider a paid Gemini tier
   or the Claude route.
 - **Shared write path.** Both the importer and the agent produce a `CompanyRecord`
   and call `upsert_company`, so a sheet import and an agent enrichment land
