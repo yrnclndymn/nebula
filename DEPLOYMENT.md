@@ -158,8 +158,8 @@ NEO4J_USER=NEO4J_USER:latest,NEO4J_PASSWORD=NEO4J_PASSWORD:latest \
 
 **Deploy wiring:**
 1. Firebase console: enable the **Google** sign-in provider.
-2. Cloud Run env: `REQUIRE_AUTH=true`, `ALLOWED_EMAILS=yrnclndymn@gmail.com,\
-andy@emergentstrategies.tech`, plus the Phase B job vars. Cloud Run's default SA is
+2. Cloud Run env: `REQUIRE_AUTH=true`, `ALLOWED_EMAILS=you@example.com,\
+teammate@example.com`, plus the Phase B job vars. Cloud Run's default SA is
    the Firebase Admin identity (grant it token-verify via project membership).
 3. Frontend build env: `VITE_AUTH_ENABLED=true`, `VITE_API_BASE=/api`, and the
    `VITE_FIREBASE_*` values (apiKey/authDomain/projectId/appId) from the console.
@@ -186,4 +186,4 @@ request after Aura auto-pause or a Cloud Run cold start has a few-second delay.)
 
 - **GCP project:** `emergent-strategies` (region assumed `europe-west2` — confirm).
 - **Migration:** `neo4j-admin` **dump/load** (keeps existing research).
-- **Allowlist:** `yrnclndymn@gmail.com`, `andy@emergentstrategies.tech`.
+- **Allowlist:** `you@example.com`, `teammate@example.com`.
