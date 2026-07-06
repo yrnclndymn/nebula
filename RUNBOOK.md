@@ -45,6 +45,8 @@ TASK_SA=nebula-tasks@$PROJECT.iam.gserviceaccount.com
 gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:$RUN_SA --role=roles/secretmanager.secretAccessor
 gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:$RUN_SA --role=roles/cloudtasks.enqueuer
 gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:$RUN_SA --role=roles/firebaseauth.viewer
+# Let the Cloud Run SA attach an OIDC token *as* the tasks SA when creating a task:
+gcloud iam service-accounts add-iam-policy-binding $TASK_SA --member=serviceAccount:$RUN_SA --role=roles/iam.serviceAccountUser
 ```
 
 ## 4. Cloud Tasks queue
