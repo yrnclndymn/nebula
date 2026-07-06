@@ -13,9 +13,12 @@ imports avoid an import cycle). Poll/commit read the job from the graph.
 
 import asyncio
 import json
+import logging
 
 from app.config import settings
 from app.graph.driver import get_driver
+
+logger = logging.getLogger("nebula.jobs")
 
 
 async def create_job(job_id: str, job_type: str, data: dict) -> None:
@@ -72,11 +75,20 @@ async def run_job(job_id: str) -> None:
 
 
 async def enqueue(job_id: str) -> None:
-    """Trigger a created job. Inline locally; via Cloud Tasks in prod."""
-    if settings.job_mode == "cloudtasks":
-        await _enqueue_cloud_task(job_id)
-    else:
+    """Trigger a created job. Inline locally; via Cloud Tasks in prod. A failed
+    enqueue must not be silent: log it and mark the job errored so the UI shows it
+    (rather than a proposal that hangs 'pending' forever)."""
+    if settings.job_mode != "cloudtasks":
         asyncio.create_task(run_job(job_id))
+        return
+    try:
+        await _enqueue_cloud_task(job_id)
+        logger.info("enqueued Cloud Task for job %s", job_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Cloud Tasks enqueue failed for job %s", job_id)
+        job = await get_job(job_id)
+        if job is not None:
+            await update_job(job_id, {**job, "error": f"could not start: {exc}"}, status="error")
 
 
 async def _enqueue_cloud_task(job_id: str) -> None:
@@ -87,10 +99,12 @@ async def _enqueue_cloud_task(job_id: str) -> None:
     parent = client.queue_path(
         settings.gcp_project, settings.cloud_tasks_location, settings.cloud_tasks_queue
     )
+    url = f"{settings.service_url}/jobs/run/{job_id}"
+    logger.info("creating Cloud Task -> %s (queue %s)", url, parent)
     task = {
         "http_request": {
             "http_method": tasks_v2.HttpMethod.POST,
-            "url": f"{settings.service_url}/jobs/run/{job_id}",
+            "url": url,
             "oidc_token": {"service_account_email": settings.tasks_service_account},
         }
     }
