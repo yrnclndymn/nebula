@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import "./App.css";
 import {
   fetchCompanies,
@@ -16,13 +17,25 @@ import { AUTH_ENABLED, signOutUser } from "./firebase";
 
 type SortKey = "name" | "headcount" | "yearFounded" | "partnerCount" | "clientCount";
 
-const COLUMNS: { key: SortKey; label: string; numeric?: boolean }[] = [
-  { key: "name", label: "Company" },
-  { key: "headcount", label: "Headcount", numeric: true },
-  { key: "yearFounded", label: "Founded", numeric: true },
-  { key: "partnerCount", label: "Partners", numeric: true },
-  { key: "clientCount", label: "Clients", numeric: true },
-];
+type Column = {
+  id: string;
+  label: string;
+  sortKey?: SortKey; // sortable when set
+  numeric?: boolean;
+  cellClass?: string;
+  render: (c: CompanyRow) => ReactNode;
+};
+
+const ORDER_KEY = "nebula.columnOrder";
+
+function loadOrder(): string[] {
+  try {
+    const raw = localStorage.getItem(ORDER_KEY);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 function compare(a: CompanyRow, b: CompanyRow, key: SortKey): number {
   const av = a[key];
@@ -50,6 +63,10 @@ export default function App() {
   const [country, setCountry] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortAsc, setSortAsc] = useState(true);
+
+  const [order, setOrder] = useState<string[]>(loadOrder);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
 
   const [selected, setSelected] = useState<CompanyDetail | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
@@ -90,6 +107,71 @@ export default function App() {
     return filtered;
   }, [companies, search, topic, companyType, kind, country, sortKey, sortAsc]);
 
+  // Every column is one config object, so header and body render from the same list.
+  const allColumns: Column[] = useMemo(
+    () => [
+      { id: "name", label: "Company", sortKey: "name", cellClass: "name", render: (c) => c.name },
+      { id: "headcount", label: "Headcount", sortKey: "headcount", numeric: true, cellClass: "num", render: (c) => c.headcount ?? "—" },
+      { id: "yearFounded", label: "Founded", sortKey: "yearFounded", numeric: true, cellClass: "num", render: (c) => c.yearFounded ?? "—" },
+      { id: "partnerCount", label: "Partners", sortKey: "partnerCount", numeric: true, cellClass: "num", render: (c) => c.partnerCount || "—" },
+      { id: "clientCount", label: "Clients", sortKey: "clientCount", numeric: true, cellClass: "num", render: (c) => c.clientCount || "—" },
+      { id: "kind", label: "Kind", cellClass: "muted", render: (c) => (c.kind ? kindLabel(c.kind) : "—") },
+      {
+        id: "hq",
+        label: "HQ",
+        cellClass: "muted",
+        render: (c) => [c.hqCity, c.hqCountry].filter(Boolean).join(", ") || c.hqLocation || "—",
+      },
+      {
+        id: "types",
+        label: "Types",
+        render: (c) =>
+          c.companyTypes.map((t) => (
+            <span key={t} className="tag">
+              {t}
+            </span>
+          )),
+      },
+      { id: "funding", label: "Funding", cellClass: "muted", render: (c) => c.funding ?? "—" },
+      ...fields.map(
+        (f): Column => ({
+          id: `custom:${f.name}`,
+          label: f.label,
+          cellClass: "muted",
+          render: (c) => (fieldApplies(f, c.kind) ? formatCustom(c.custom?.[f.name]) : "—"),
+        }),
+      ),
+    ],
+    [fields],
+  );
+
+  // Apply the saved order; append any new columns, drop any that no longer exist.
+  const columns: Column[] = useMemo(() => {
+    const byId = new Map(allColumns.map((c) => [c.id, c]));
+    const ordered = order.filter((id) => byId.has(id)).map((id) => byId.get(id)!);
+    const rest = allColumns.filter((c) => !order.includes(c.id));
+    return [...ordered, ...rest];
+  }, [allColumns, order]);
+
+  function saveOrder(ids: string[]) {
+    setOrder(ids);
+    try {
+      localStorage.setItem(ORDER_KEY, JSON.stringify(ids));
+    } catch {
+      /* localStorage unavailable — order just won't persist */
+    }
+  }
+
+  function dropColumn(targetId: string) {
+    if (!dragId || dragId === targetId) return;
+    const ids = columns.map((c) => c.id);
+    ids.splice(ids.indexOf(dragId), 1);
+    ids.splice(ids.indexOf(targetId), 0, dragId);
+    saveOrder(ids);
+    setDragId(null);
+    setDragOverId(null);
+  }
+
   function updateCompanyKind(name: string, newKind: string | null) {
     setCompanies((cs) => cs.map((c) => (c.name === name ? { ...c, kind: newKind } : c)));
     setSelected((s) => (s && s.name === name ? { ...s, kind: newKind } : s));
@@ -104,7 +186,9 @@ export default function App() {
   }
 
   function openCompany(name: string) {
-    fetchCompany(name).then(setSelected).catch((e) => setError(String(e)));
+    fetchCompany(name)
+      .then(setSelected)
+      .catch((e) => setError(String(e)));
   }
 
   return (
@@ -117,6 +201,11 @@ export default function App() {
           <span className="count">
             {loading ? "loading…" : `${rows.length} / ${companies.length} companies`}
           </span>
+          {order.length > 0 && (
+            <button className="chat-toggle" onClick={() => saveOrder([])} title="Reset column order">
+              ↺ Columns
+            </button>
+          )}
           <button className="chat-toggle" onClick={() => setChatOpen((v) => !v)}>
             💬 Assistant
           </button>
@@ -183,55 +272,51 @@ export default function App() {
         <table>
           <thead>
             <tr>
-              {COLUMNS.map((col) => (
+              {columns.map((col) => (
                 <th
-                  key={col.key}
-                  className={col.numeric ? "num" : ""}
-                  onClick={() => toggleSort(col.key)}
+                  key={col.id}
+                  className={[
+                    col.numeric ? "num" : "",
+                    dragId === col.id ? "dragging" : "",
+                    dragOverId === col.id ? "drag-over" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  draggable
+                  onDragStart={() => setDragId(col.id)}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    if (dragId && dragOverId !== col.id) setDragOverId(col.id);
+                  }}
+                  onDragLeave={() => setDragOverId((d) => (d === col.id ? null : d))}
+                  onDrop={() => dropColumn(col.id)}
+                  onDragEnd={() => {
+                    setDragId(null);
+                    setDragOverId(null);
+                  }}
+                  onClick={() => col.sortKey && toggleSort(col.sortKey)}
                 >
                   {col.label}
-                  {sortKey === col.key && <span className="arrow">{sortAsc ? " ▲" : " ▼"}</span>}
+                  {col.sortKey && sortKey === col.sortKey && (
+                    <span className="arrow">{sortAsc ? " ▲" : " ▼"}</span>
+                  )}
                 </th>
-              ))}
-              <th>Kind</th>
-              <th>HQ</th>
-              <th>Types</th>
-              <th>Funding</th>
-              {fields.map((f) => (
-                <th key={f.name}>{f.label}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {rows.map((c) => (
               <tr key={c.name} onClick={() => openCompany(c.name)}>
-                <td className="name">{c.name}</td>
-                <td className="num">{c.headcount ?? "—"}</td>
-                <td className="num">{c.yearFounded ?? "—"}</td>
-                <td className="num">{c.partnerCount || "—"}</td>
-                <td className="num">{c.clientCount || "—"}</td>
-                <td className="muted">{c.kind ? kindLabel(c.kind) : "—"}</td>
-                <td className="muted">
-                  {[c.hqCity, c.hqCountry].filter(Boolean).join(", ") || c.hqLocation || "—"}
-                </td>
-                <td>
-                  {c.companyTypes.map((t) => (
-                    <span key={t} className="tag">
-                      {t}
-                    </span>
-                  ))}
-                </td>
-                <td className="muted">{c.funding ?? "—"}</td>
-                {fields.map((f) => (
-                  <td key={f.name} className="muted">
-                    {fieldApplies(f, c.kind) ? formatCustom(c.custom?.[f.name]) : "—"}
+                {columns.map((col) => (
+                  <td key={col.id} className={col.cellClass ?? ""}>
+                    {col.render(c)}
                   </td>
                 ))}
               </tr>
             ))}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={9 + fields.length} className="empty">
+                <td colSpan={columns.length} className="empty">
                   No companies match these filters.
                 </td>
               </tr>

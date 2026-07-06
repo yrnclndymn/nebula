@@ -138,15 +138,25 @@ thead th {
   color: var(--muted);
   padding: 0.7rem 0.8rem;
   border-bottom: 1px solid var(--border);
-  cursor: pointer;
+  cursor: grab;
   white-space: nowrap;
   user-select: none;
+}
+thead th:active {
+  cursor: grabbing;
 }
 thead th.num {
   text-align: right;
 }
 thead th:hover {
   color: var(--text);
+}
+/* Column drag-and-drop reordering */
+thead th.dragging {
+  opacity: 0.4;
+}
+thead th.drag-over {
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .arrow {
   color: var(--accent);
