@@ -14,6 +14,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+  // A signed-in but non-allow-listed account: let the app show an access screen.
+  if (resp.status === 403) window.dispatchEvent(new CustomEvent("nebula:forbidden"));
   if (!resp.ok) throw new Error(`${path} → ${resp.status}`);
   return resp.json() as Promise<T>;
 }
