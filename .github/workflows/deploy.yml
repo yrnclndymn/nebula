@@ -1,0 +1,88 @@
+name: Deploy
+
+# Runs only after CI succeeds on main — never straight off a push, and never from
+# a PR (a fork PR must not be able to deploy). workflow_dispatch = manual button.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # required to mint the WIF OIDC token
+
+env:
+  PROJECT: emergent-strategies
+  REGION: europe-west2
+
+jobs:
+  backend:
+    name: backend → Cloud Run
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/102436624144/locations/global/workloadIdentityPools/github/providers/github
+          service_account: nebula-deployer@emergent-strategies.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v2
+      # --source rebuilds via Cloud Build and deploys a new revision, inheriting the
+      # existing env vars, secrets, service account, and scaling from the last one.
+      - name: Deploy
+        run: |
+          gcloud run deploy nebula-api \
+            --source backend \
+            --region "$REGION" \
+            --project "$PROJECT" \
+            --quiet
+
+  frontend:
+    name: frontend → Firebase Hosting
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # Firebase web config is public by design (it ships in the client bundle).
+      - name: Build SPA
+        working-directory: frontend
+        env:
+          VITE_AUTH_ENABLED: "true"
+          VITE_API_BASE: /api
+          VITE_FIREBASE_API_KEY: AIzaSyAJbGb11vW9rlf3nXWcdxn75GrUTbtr7BU
+          VITE_FIREBASE_AUTH_DOMAIN: emergent-strategies.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: emergent-strategies
+          VITE_FIREBASE_APP_ID: "1:102436624144:web:26490d4e1e1941840b7795"
+        run: |
+          npm ci
+          npm run build
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/102436624144/locations/global/workloadIdentityPools/github/providers/github
+          service_account: nebula-deployer@emergent-strategies.iam.gserviceaccount.com
+      # firebase-tools reads Application Default Credentials, which the auth step
+      # above exports via GOOGLE_APPLICATION_CREDENTIALS.
+      - name: Deploy
+        run: npx --yes firebase-tools deploy --only hosting:nebula --project "$PROJECT" --non-interactive
