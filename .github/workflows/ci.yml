@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: backend — lint + test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      neo4j:
+        image: neo4j:5
+        env:
+          NEO4J_AUTH: neo4j/nebula-local-dev
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p nebula-local-dev 'RETURN 1'"
+          --health-interval 15s
+          --health-timeout 10s
+          --health-retries 12
+          --health-start-period 40s
+    env:
+      NEO4J_URI: bolt://localhost:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: nebula-local-dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Lint (ruff)
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: Apply graph schema
+        run: uv run python -m app.graph.schema
+      - name: Test (pytest)
+        run: uv run pytest -q
+
+  frontend:
+    name: frontend — lint + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint (oxlint)
+        run: npm run lint
+      - name: Build (tsc + vite)
+        run: npm run build
