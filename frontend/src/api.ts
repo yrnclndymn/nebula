@@ -1,23 +1,25 @@
+import { getIdToken } from "./firebase";
 import type { Backfill, CompanyDetail, CompanyRow, Proposal } from "./types";
 
-// Backend base URL. Override in production via VITE_API_BASE.
+// Backend base URL. Override in production via VITE_API_BASE (e.g. "/api").
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8080";
 
-async function getJson<T>(path: string): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`);
-  if (!resp.ok) throw new Error(`${path} → ${resp.status}`);
-  return resp.json() as Promise<T>;
-}
-
-async function postJson<T>(path: string, body: unknown): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = {};
+  const token = await getIdToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (body !== undefined) headers["Content-Type"] = "application/json";
   const resp = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!resp.ok) throw new Error(`${path} → ${resp.status}`);
   return resp.json() as Promise<T>;
 }
+
+const getJson = <T>(path: string) => request<T>("GET", path);
+const postJson = <T>(path: string, body: unknown) => request<T>("POST", path, body);
 
 export const sendChat = (sessionId: string, message: string) =>
   postJson<{ reply: string; proposals: Proposal[]; backfills: { job_id: string; field: string; total: number }[] }>(
@@ -31,14 +33,11 @@ export const commitBackfill = (jobId: string, companies: string[] | null) =>
   postJson<{ committed?: number; error?: string }>(`/backfill/${jobId}/commit`, { companies });
 
 export const setKind = (name: string, kind: string | null) =>
-  fetch(`${API_BASE}/companies/${encodeURIComponent(name)}/kind`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind }),
-  }).then((r) => {
-    if (!r.ok) throw new Error(`kind → ${r.status}`);
-    return r.json() as Promise<{ name: string; kind: string | null }>;
-  });
+  request<{ name: string; kind: string | null }>(
+    "PATCH",
+    `/companies/${encodeURIComponent(name)}/kind`,
+    { kind },
+  );
 
 export const getProposal = (proposalId: string) =>
   getJson<Proposal>(`/proposals/${encodeURIComponent(proposalId)}`);

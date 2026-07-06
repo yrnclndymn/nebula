@@ -12,6 +12,7 @@ import type { CompanyDetail, CompanyRow, FieldDef } from "./types";
 import { fieldApplies, formatCustom, KINDS, kindLabel } from "./types";
 import { CompanyDrawer } from "./CompanyDrawer";
 import { ChatPanel } from "./ChatPanel";
+import { AUTH_ENABLED, signOutUser } from "./firebase";
 
 type SortKey = "name" | "headcount" | "yearFounded" | "partnerCount" | "clientCount";
 
@@ -119,6 +120,11 @@ export default function App() {
           <button className="chat-toggle" onClick={() => setChatOpen((v) => !v)}>
             💬 Assistant
           </button>
+          {AUTH_ENABLED && (
+            <button className="chat-toggle" onClick={signOutUser}>
+              Sign out
+            </button>
+          )}
         </div>
       </header>
 

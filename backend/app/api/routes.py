@@ -11,16 +11,18 @@ from app.graph import cache, jobs, queries
 from app.graph.driver import check_connectivity, get_driver
 from app.graph.models import APPLIES_TO, KINDS, field_key
 
-router = APIRouter()
+router = APIRouter()  # user-facing routes (Firebase-authed in prod)
+public_router = APIRouter()  # health checks (always open)
+tasks_router = APIRouter()  # Cloud Tasks callbacks (OIDC-authed in prod)
 
 
-@router.get("/health")
+@public_router.get("/health")
 async def health() -> dict[str, str]:
     """Liveness: the API process is up. Does not touch the database."""
     return {"status": "ok"}
 
 
-@router.get("/health/graph")
+@public_router.get("/health/graph")
 async def health_graph() -> JSONResponse:
     """Readiness: can we reach Neo4j? Returns 503 if not."""
     try:
@@ -125,11 +127,10 @@ async def backfill_status(job_id: str) -> dict:
     return job
 
 
-@router.post("/jobs/run/{job_id}")
+@tasks_router.post("/jobs/run/{job_id}")
 async def run_job_endpoint(job_id: str) -> dict:
     """Runner invoked by Cloud Tasks (prod) to execute a job with CPU allocated.
-    Not used in local mode (jobs run inline). TODO (Phase C): verify the Cloud Tasks
-    OIDC token so only the tasks service account can call this."""
+    Not used in local mode (jobs run inline). Guarded by verify_task (OIDC)."""
     await jobs.run_job(job_id)
     return {"ran": job_id}
 

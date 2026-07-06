@@ -149,13 +149,24 @@ NEO4J_USER=NEO4J_USER:latest,NEO4J_PASSWORD=NEO4J_PASSWORD:latest \
   days) later if they pile up.
 
 ### Phase C — auth + Firebase Hosting (nebula subdomain)
-1. Enable **Google** provider in Firebase Auth; set `ALLOWED_EMAILS` env on Cloud Run.
-2. Backend: `firebase-admin` token-verify dependency (+ OIDC branch for `/jobs/*`).
-3. Frontend: Firebase sign-in gate; `API_BASE = "/api"`; attach ID token.
+**Code done** (behind flags; local dev unaffected):
+- Backend `app/auth.py`: `verify_user` (Firebase ID token + `ALLOWED_EMAILS`) on the
+  main router; `verify_task` (Cloud Tasks OIDC from `TASKS_SERVICE_ACCOUNT`) on
+  `/jobs/run`; `/health` open. Both no-op when `REQUIRE_AUTH` is off.
+- Frontend: `AuthGate` (Google sign-in gate) + ID token attached to every `/api`
+  call — active only when `VITE_AUTH_ENABLED=true`.
+
+**Deploy wiring:**
+1. Firebase console: enable the **Google** sign-in provider.
+2. Cloud Run env: `REQUIRE_AUTH=true`, `ALLOWED_EMAILS=yrnclndymn@gmail.com,\
+andy@emergentstrategies.tech`, plus the Phase B job vars. Cloud Run's default SA is
+   the Firebase Admin identity (grant it token-verify via project membership).
+3. Frontend build env: `VITE_AUTH_ENABLED=true`, `VITE_API_BASE=/api`, and the
+   `VITE_FIREBASE_*` values (apiKey/authDomain/projectId/appId) from the console.
 4. `firebase.json`: hosting target `nebula`, rewrites `/api/**` → Cloud Run
-   `nebula-api`, else → `/index.html`. `firebase target:apply hosting nebula
-   nebula-…`; build Vite; `firebase deploy --only hosting:nebula`.
-5. Add `nebula.emergentstrategies.com` as a custom domain in Firebase Hosting; set DNS.
+   `nebula-api`, else → `/index.html`. `firebase target:apply hosting nebula …`;
+   build Vite; `firebase deploy --only hosting:nebula`.
+5. Add `nebula.emergentstrategies.com` as a custom domain in Firebase Hosting; DNS.
 
 ### Phase D — MCP (local)
 - Local `backend/.env` → Aura creds + `GEMINI_API_KEY`. Run `.mcp.json` as today; it

@@ -7,10 +7,11 @@ project grows.
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import router
+from app.api.routes import public_router, router, tasks_router
+from app.auth import verify_task, verify_user
 from app.config import settings
 from app.graph.driver import close_driver, get_driver
 
@@ -32,4 +33,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(router)
+app.include_router(public_router)
+app.include_router(tasks_router, dependencies=[Depends(verify_task)])
+app.include_router(router, dependencies=[Depends(verify_user)])
