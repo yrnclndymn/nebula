@@ -11,8 +11,14 @@ class Settings(BaseSettings):
     neo4j_user: str = "neo4j"
     neo4j_password: str = "nebula-local-dev"
 
-    # CORS origin for the Vite dev server.
+    # CORS origin for the Vite dev server (set to the prod SPA origin in prod).
     frontend_origin: str = "http://localhost:5173"
+
+    # Auth: off locally, on in prod. When on, every route except /health requires a
+    # Firebase ID token whose (verified) email is in allowed_emails; /jobs/run
+    # requires a Cloud Tasks OIDC token from tasks_service_account.
+    require_auth: bool = False
+    allowed_emails: str = ""  # comma-separated
 
     # Gemini (google-genai reads GEMINI_API_KEY / GOOGLE_API_KEY from the env).
     # flash-lite tier: cheap, fast, and less demand-throttled than 2.5-flash.
