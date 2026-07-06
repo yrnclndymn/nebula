@@ -16,33 +16,43 @@ from app.tools.field_extract import extract_field
 turn_backfills: ContextVar[list | None] = ContextVar("nebula_turn_backfills", default=None)
 
 
-async def _applicable_companies(driver, applies_to_kind: str, country: str | None) -> list[dict]:
+async def _applicable_companies(
+    driver, applies_to_kind: str, country: str | None, missing_key: str | None = None
+) -> list[dict]:
     kind_clause = "" if applies_to_kind == "all" else "AND c.kind = $kind"
     country_clause = "AND c.hqCountry = $country" if country else ""
+    # Only companies that don't already have the field set (its property is the key).
+    missing_clause = "AND c[$missingKey] IS NULL" if missing_key else ""
     async with driver.session() as session:
         result = await session.run(
             f"MATCH (c:Company)-[:TAGGED_AS]->(:Topic) "
-            f"WHERE c.website IS NOT NULL {kind_clause} {country_clause} "
+            f"WHERE c.website IS NOT NULL {kind_clause} {country_clause} {missing_clause} "
             f"RETURN DISTINCT c.name AS name, c.website AS website ORDER BY name",
             kind=applies_to_kind,
             country=country,
+            missingKey=missing_key,
         )
         return [dict(record) async for record in result]
 
 
-async def start_backfill(field_name: str, country: str = "") -> dict:
+async def start_backfill(field_name: str, country: str = "", missing_only: bool = False) -> dict:
     """Research a custom field for companies of its kind and prepare a batch for the
     user to review and commit. Returns immediately; runs in the background. Use when
     the user asks to fill in / research an existing field across companies. The
     field_name is the field's key (e.g. 'serviceLines'). Optionally scope to a
-    country (full name, e.g. 'United Kingdom') to only research companies HQ'd there."""
+    country (full name, e.g. 'United Kingdom') to only research companies HQ'd there.
+    Set missing_only=True when the user wants only the companies that DON'T already
+    have a value for this field (e.g. 'fill it in where it's missing')."""
     driver = get_driver()
     field_defs = {f["name"]: f for f in await queries.list_field_defs(driver)}
     field_def = field_defs.get(field_name)
     if field_def is None:
         return {"error": f"no field named {field_name!r}; add it first with add_field"}
 
-    companies = await _applicable_companies(driver, field_def["appliesToKind"], country or None)
+    missing_key = field_name if missing_only else None
+    companies = await _applicable_companies(
+        driver, field_def["appliesToKind"], country or None, missing_key
+    )
     job_id = uuid.uuid4().hex[:8]
     await jobs.create_job(
         job_id,
@@ -53,6 +63,7 @@ async def start_backfill(field_name: str, country: str = "") -> dict:
             "field": {k: field_def[k] for k in ("name", "label", "type")},
             "field_name": field_name,
             "country": country or "",
+            "missing_only": missing_only,
             "total": len(companies),
             "done": 0,
             "rows": [],
@@ -85,8 +96,9 @@ async def run_backfill_job(job_id: str) -> None:
         await jobs.update_job(job_id, {**job, "error": "field was removed"}, status="error")
         return
 
+    missing_key = job["field_name"] if job.get("missing_only") else None
     companies = await _applicable_companies(
-        driver, field_def["appliesToKind"], job.get("country") or None
+        driver, field_def["appliesToKind"], job.get("country") or None, missing_key
     )
     rows: list[dict] = []
     for company in companies:
