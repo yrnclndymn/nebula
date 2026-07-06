@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "emergent-strategies"
-  }
+  },
+  "targets": {
+    "emergent-strategies": {
+      "hosting": {
+        "nebula": [
+          "nebula-emergentstrategies"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }
