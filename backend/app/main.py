@@ -33,6 +33,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(public_router)
-app.include_router(tasks_router, dependencies=[Depends(verify_task)])
-app.include_router(router, dependencies=[Depends(verify_user)])
+app.include_router(public_router)  # /health — open, at root
+app.include_router(tasks_router, dependencies=[Depends(verify_task)])  # /jobs/run — root, OIDC
+app.include_router(
+    router, prefix=settings.api_prefix, dependencies=[Depends(verify_user)]
+)  # user routes — "/api" in prod
