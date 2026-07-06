@@ -1,0 +1,166 @@
+# Deploying Nebula
+
+Target: the existing **emergent-strategies** Firebase/GCP project. Private, near
+$0/month idle, keys never leave the server.
+
+## Decisions (locked)
+
+- **Frontend** → Firebase Hosting at **`nebula.emergentstrategies.com`**.
+- **Backend** → Cloud Run, **scale-to-zero** (`min-instances=0`).
+- **Graph** → **Neo4j Aura Free** (auto-pauses after ~3 days idle; resumes on next
+  connection).
+- **Auth** → Firebase Auth (Google), restricted to an email allowlist; enforced on
+  the SPA *and* every API call.
+- **Long jobs** (propose / back-fill) → **Cloud Tasks**, with job state in the graph
+  (required because scale-to-zero kills in-process background tasks).
+- **Secrets** → Google Secret Manager, injected into Cloud Run at runtime.
+- **MCP** → stays a **local stdio** server pointed at prod Aura.
+
+## Architecture
+
+```
+ Browser ──HTTPS──► Firebase Hosting (nebula.emergentstrategies.com)
+                      │  static SPA (Vite build)
+                      │  rewrite  /api/**  ──► Cloud Run  nebula-api  (scale-to-zero)
+                      │                           │  FastAPI + ADK agents
+ Firebase Auth ◄──────┘ (Google sign-in,          │  verifies Firebase ID token
+   ID token on every /api call)                   │  reads secrets from Secret Manager
+                                                   ├─► Neo4j Aura  (neo4j+s://)
+                                                   ├─► Gemini API  (key from Secret Mgr)
+                                                   └─► Cloud Tasks ─┐ enqueue long jobs
+                                                        │           │
+                                                        ▼ (OIDC)    │
+                                                   Cloud Run /jobs/run/{id}  ◄┘
+                                                        (does research w/ CPU,
+                                                         writes results to graph)
+
+ Your laptop:  MCP stdio server ──► Aura (prod)   [personal, not exposed]
+```
+
+Same-origin (`/api/**` rewrite) means **no CORS** and one domain. Cloud Run is also
+reachable at its `*.run.app` URL, but every route requires a valid token, so that's
+fine.
+
+## Privacy & auth
+
+**Web app (two layers):**
+1. SPA gates on **Firebase Google sign-in** (Firebase JS SDK) and sends the ID token
+   as `Authorization: Bearer <token>` on every `/api` call. Point `API_BASE` at
+   `/api` (same origin).
+2. Backend FastAPI dependency verifies the token with `firebase-admin`
+   (`auth.verify_id_token`) and checks the email against `ALLOWED_EMAILS`. Applies to
+   all routes **except** `/health`. Invalid/absent → 401.
+
+**Cloud Tasks callbacks** (`/jobs/run/*`) are called by Cloud Tasks, not the user, so
+they use a **different** check: Cloud Tasks attaches an **OIDC token** (a dedicated
+service account); the endpoint verifies the token's issuer/audience instead of a
+Firebase token. So the auth dependency branches: `/jobs/*` → OIDC from the tasks SA;
+everything else → Firebase user token.
+
+**MCP:** local stdio process under your account, not network-exposed. "Auth" = it
+runs on your machine with the Aura creds in a local `.env`. (Remote+OAuth is a future
+option, not needed now.)
+
+## Secrets — keys stay server-side
+
+- Store in **Secret Manager**: `GEMINI_API_KEY`, `NEO4J_URI`, `NEO4J_USER`,
+  `NEO4J_PASSWORD` (later `ANTHROPIC_API_KEY`, etc.).
+- Cloud Run reads them via `--set-secrets` → they arrive as env vars; pydantic
+  `Settings` already reads env. Never in the repo, the image, or the frontend.
+- The **SPA only** carries the Firebase *web* config (apiKey etc.), which is **not
+  secret** by design — auth is enforced by the token check. LLM/Neo4j keys never
+  reach the browser.
+- Cloud Run runs as a least-privilege **service account** (Secret Manager accessor +
+  Cloud Tasks enqueuer). `.gitignore` already excludes `.env` and `*.csv`.
+
+## Scale-to-zero + durable jobs (the one real refactor)
+
+Scale-to-zero throttles CPU after the response and kills idle instances, so the
+current "background `asyncio` task + in-memory `PROPOSALS`/`BACKFILLS`" design won't
+survive. Reads / filters / chat / short ops are unaffected. The long jobs change to:
+
+1. **State in the graph:** `(:Proposal {id,status,record,...})` and
+   `(:BackfillJob {id,status,field,...})-[:HAS_ROW]->(:BackfillRow {...})`. Pollable
+   from any instance, survives cold starts. (Replaces the module-level dicts in
+   `proposals.py` / `backfill.py`.)
+2. **Work runs in a Cloud Tasks-triggered request:**
+   - `start` endpoint: create the job node (`pending`) + **enqueue a Cloud Task**
+     targeting `/jobs/run/{id}`; return immediately.
+   - `/jobs/run/{id}`: Cloud Tasks invokes it → CPU is allocated for that request
+     (timeout up to 60 min) → does the research → writes rows/results to the graph.
+   - Client polls `GET /proposals/{id}` / `GET /backfill/{id}` (reads the graph) —
+     **UX unchanged** (spinner + progressive rows). Commit endpoints unchanged.
+3. **Chat sessions** stay in-memory and ephemeral: a cold start resets *short-term*
+   context; **long-term memory (`:Memory`) persists** in the graph. No refactor.
+
+Cloud Tasks is free at this scale and keeps `min-instances=0`.
+
+## Switchable LLM
+
+- **Now:** Gemini model IDs are env vars (`GEMINI_MODEL`, `AGENT_MODEL`) — switch
+  models without redeploying. Provider key in Secret Manager.
+- **Later (Phase E):** provider-switching via **LiteLLM** for the ADK agents
+  (`LiteLlm(model="anthropic/claude-…")`) plus a thin `llm()` wrapper for the direct
+  `google-genai` structured calls (extract / judge / tidy / field_extract / logos).
+  Then `LLM_PROVIDER` + `LLM_MODEL` env switches everything; each provider's key lives
+  in Secret Manager. Not a deploy blocker.
+
+## Phased rollout
+
+### Phase A — backend on Cloud Run + Aura + secrets
+1. **Aura:** create a Free instance; note `neo4j+s://…`, user, password.
+2. **Seed data:** point `NEO4J_URI` at Aura locally, then `make db-init` and re-run
+   the seed (CSV import → tidy HQ → set kinds → any enrichments), or `neo4j-admin
+   database dump/load` from local. One-time.
+3. **Secrets:**
+   `printf '%s' "$KEY" | gcloud secrets create GEMINI_API_KEY --data-file=-` (repeat
+   for NEO4J_URI / NEO4J_USER / NEO4J_PASSWORD).
+4. **Dockerfile** for `backend/` (uv base image → `uvicorn app.main:app`).
+5. **Deploy:**
+   ```
+   gcloud run deploy nebula-api --source backend --region europe-west2 \
+     --min-instances=0 --max-instances=2 \
+     --set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest,NEO4J_URI=NEO4J_URI:latest,\
+NEO4J_USER=NEO4J_USER:latest,NEO4J_PASSWORD=NEO4J_PASSWORD:latest \
+     --set-env-vars=GEMINI_MODEL=gemini-3.1-flash-lite,AGENT_MODEL=gemini-3.1-flash-lite \
+     --service-account=nebula-run@<project>.iam.gserviceaccount.com \
+     --allow-unauthenticated
+   ```
+   Grant the SA `roles/secretmanager.secretAccessor`. Verify `/health`.
+
+### Phase B — durable jobs (Cloud Tasks)
+1. `gcloud tasks queues create nebula-jobs --location=europe-west2`.
+2. Refactor `proposals.py` / `backfill.py`: job state → graph; `start_*` enqueues a
+   task; add `/jobs/run/{id}` runner endpoints (OIDC-verified).
+3. Grant Cloud Run SA `roles/cloudtasks.enqueuer`; create a tasks-invoker SA with
+   `roles/run.invoker` for the OIDC callback.
+4. Verify: start a propose → task runs → graph updates → poll shows ready.
+
+### Phase C — auth + Firebase Hosting (nebula subdomain)
+1. Enable **Google** provider in Firebase Auth; set `ALLOWED_EMAILS` env on Cloud Run.
+2. Backend: `firebase-admin` token-verify dependency (+ OIDC branch for `/jobs/*`).
+3. Frontend: Firebase sign-in gate; `API_BASE = "/api"`; attach ID token.
+4. `firebase.json`: hosting target `nebula`, rewrites `/api/**` → Cloud Run
+   `nebula-api`, else → `/index.html`. `firebase target:apply hosting nebula
+   nebula-…`; build Vite; `firebase deploy --only hosting:nebula`.
+5. Add `nebula.emergentstrategies.com` as a custom domain in Firebase Hosting; set DNS.
+
+### Phase D — MCP (local)
+- Local `backend/.env` → Aura creds + `GEMINI_API_KEY`. Run `.mcp.json` as today; it
+  now reads/writes prod data. Nothing exposed.
+
+### Phase E — switchable LLM provider (later)
+- LiteLLM for ADK agents + `llm()` wrapper for direct calls; `LLM_PROVIDER`/`LLM_MODEL`
+  env; keys in Secret Manager.
+
+## Cost
+
+Scale-to-zero Cloud Run + Aura Free + Firebase Hosting + Cloud Tasks all sit within
+free tiers for personal use → **~$0/month idle**, plus Gemini API usage. (First
+request after Aura auto-pause or a Cloud Run cold start has a few-second delay.)
+
+## Open items
+
+- Confirm GCP region (assumed `europe-west2`) and the emergent-strategies project id.
+- Data seed vs dump/load choice for the Aura migration.
+- Email allowlist values.
