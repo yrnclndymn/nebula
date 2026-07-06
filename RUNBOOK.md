@@ -2,7 +2,7 @@
 
 Ordered commands to deploy Nebula. Architecture/rationale is in `DEPLOYMENT.md`.
 Settled: project `emergent-strategies`, region `europe-west2`, dump/load migration,
-allowlist `yrnclndymn@gmail.com`, `andy@emergentstrategies.tech`.
+allowlist `you@example.com`, `teammate@example.com`.
 
 Placeholders `<LIKE_THIS>` come from a console step; fill them as you go.
 
@@ -59,7 +59,7 @@ gcloud tasks queues create nebula-jobs --location=europe-west2
 gcloud run deploy nebula-api --source backend --region europe-west2 \
   --service-account=$RUN_SA --min-instances=0 --max-instances=2 --allow-unauthenticated \
   --set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest,NEO4J_URI=NEO4J_URI:latest,NEO4J_USER=NEO4J_USER:latest,NEO4J_PASSWORD=NEO4J_PASSWORD:latest \
-  --set-env-vars="^##^REQUIRE_AUTH=true##API_PREFIX=/api##JOB_MODE=cloudtasks##GCP_PROJECT=emergent-strategies##CLOUD_TASKS_LOCATION=europe-west2##TASKS_SERVICE_ACCOUNT=$TASK_SA##GEMINI_MODEL=gemini-3.1-flash-lite##AGENT_MODEL=gemini-3.1-flash-lite##ALLOWED_EMAILS=yrnclndymn@gmail.com,andy@emergentstrategies.tech##FRONTEND_ORIGIN=https://nebula.emergentstrategies.tech"
+  --set-env-vars="^##^REQUIRE_AUTH=true##API_PREFIX=/api##JOB_MODE=cloudtasks##GCP_PROJECT=emergent-strategies##CLOUD_TASKS_LOCATION=europe-west2##TASKS_SERVICE_ACCOUNT=$TASK_SA##GEMINI_MODEL=gemini-3.1-flash-lite##AGENT_MODEL=gemini-3.1-flash-lite##ALLOWED_EMAILS=you@example.com,teammate@example.com##FRONTEND_ORIGIN=https://nebula.emergentstrategies.tech"
 # ^##^ sets '##' as the pair delimiter so the comma in ALLOWED_EMAILS is literal.
 # Note the service URL, then set SERVICE_URL + let the tasks SA invoke it:
 SERVICE_URL=$(gcloud run services describe nebula-api --region europe-west2 --format='value(status.url)')

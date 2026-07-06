@@ -35,10 +35,11 @@ funded that partner with Anthropic and have headcount < 100*).
   a graph-backed cache (`:Page`, `:SiteClients`) with a `cache_ttl_days` TTL, so
   repeat questions about a company don't re-crawl. `POST /cache/refresh {domain}`
   clears it. In the graph (not SQLite) for Cloud-Run/Aura fit + dev/prod parity.
-- **Auth — Firebase Auth (Google provider)**, restricted to the owner. SPA gates
-  on sign-in; the backend verifies the Firebase ID token. *(Not yet built.)*
-- Deploys into the **same Firebase/GCP project as `emergent-strategies`** (the
-  user's personal site), as a separate hosting target or subdomain.
+- **Auth — Firebase Auth (Google provider)**, restricted to an email allowlist.
+  SPA gates on sign-in; the backend verifies the Firebase ID token on every route
+  (Cloud Tasks callbacks use OIDC instead). See `app/auth.py`.
+- Deployed into the **same Firebase/GCP project as `emergent-strategies`** (the
+  owner's personal site), as a separate hosting target + the `nebula` subdomain.
 
 ## Commands
 
@@ -99,7 +100,11 @@ Health wiring: `GET /health` (process up, no DB) and `GET /health/graph`
    (`frontend/src/`): `App.tsx` filterable+sortable table, `CompanyDrawer.tsx`
    detail panel, `api.ts`/`types.ts`. Fetches all rows once, filters client-side
    (dataset is small). Run both: `make dev` + `make frontend-dev`.
-5. **Auth + deploy** — Firebase Auth gate; Cloud Run (API) + Firebase Hosting (SPA).
+5. ~~**Auth + deploy**~~ — done. Firebase Auth gate + server-side token
+   verification (`app/auth.py`); durable jobs via Cloud Tasks (`app/graph/jobs.py`);
+   Cloud Run (API, scale-to-zero) + Firebase Hosting (SPA) at
+   `nebula.emergentstrategies.tech`. Steps in `RUNBOOK.md`, rationale in
+   `DEPLOYMENT.md`.
 
 **Model note:** the LLM extractor now uses **Gemini** (`gemini-3.1-flash-lite`),
 but the provider is a live decision (see the `model-picker` skill / the "never
