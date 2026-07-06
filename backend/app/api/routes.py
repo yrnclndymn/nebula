@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from app.agents.assistant.backfill import commit_backfill, get_backfill
 from app.agents.assistant.proposals import commit_proposal, get_proposal
 from app.agents.assistant.service import respond
-from app.graph import cache, queries
+from app.graph import cache, jobs, queries
 from app.graph.driver import check_connectivity, get_driver
 from app.graph.models import APPLIES_TO, KINDS, field_key
 
@@ -96,7 +96,7 @@ async def chat(req: ChatRequest) -> dict:
 @router.get("/proposals/{proposal_id}")
 async def proposal_status(proposal_id: str) -> dict:
     """Poll a background enrichment proposal until status is 'ready' (or 'error')."""
-    proposal = get_proposal(proposal_id)
+    proposal = await get_proposal(proposal_id)
     if proposal is None:
         raise HTTPException(status_code=404, detail="unknown proposal")
     return proposal
@@ -119,10 +119,19 @@ async def commit(req: CommitRequest) -> dict:
 @router.get("/backfill/{job_id}")
 async def backfill_status(job_id: str) -> dict:
     """Poll a back-fill job; rows fill in as companies are researched."""
-    job = get_backfill(job_id)
+    job = await get_backfill(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="unknown back-fill job")
     return job
+
+
+@router.post("/jobs/run/{job_id}")
+async def run_job_endpoint(job_id: str) -> dict:
+    """Runner invoked by Cloud Tasks (prod) to execute a job with CPU allocated.
+    Not used in local mode (jobs run inline). TODO (Phase C): verify the Cloud Tasks
+    OIDC token so only the tasks service account can call this."""
+    await jobs.run_job(job_id)
+    return {"ran": job_id}
 
 
 class BackfillCommitRequest(BaseModel):
