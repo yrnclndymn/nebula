@@ -49,9 +49,11 @@ frontend-dev:     ## Run the Vite dev server on :5173 (PORT= to override for a p
 worktree:         ## Isolated worktree + branch for a parallel session. NAME=<slug> [BASE=main]
 	@test -n "$(NAME)" || { echo 'usage: make worktree NAME=<slug> [BASE=main]'; exit 1; }
 	@set -e; dir="../nebula-$(NAME)"; base="$(if $(BASE),$(BASE),main)"; \
+	test ! -e "$$dir" || { echo "error: $$dir already exists — remove it (git worktree remove $$dir) or pick another NAME"; exit 1; }; \
+	if git show-ref --quiet "refs/heads/$(NAME)"; then echo "error: branch '$(NAME)' already exists — 'git branch -D $(NAME)' or pick another NAME"; exit 1; fi; \
 	git fetch --quiet origin || true; \
-	git branch --no-track "$(NAME)" "origin/$$base"; \
-	git worktree add "$$dir" "$(NAME)"; \
+	git -c branch.autoSetupMerge=false worktree add -b "$(NAME)" "$$dir" "origin/$$base" \
+		|| { git branch -D "$(NAME)" 2>/dev/null || true; exit 1; }; \
 	[ -f .claude/settings.local.json ] && mkdir -p "$$dir/.claude" \
 		&& cp .claude/settings.local.json "$$dir/.claude/" || true; \
 	[ -f backend/.env ] && cp backend/.env "$$dir/backend/.env" || true; \
