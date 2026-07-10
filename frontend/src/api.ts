@@ -44,9 +44,10 @@ export const setKind = (name: string, kind: string | null) =>
 export const getProposal = (proposalId: string) =>
   getJson<Proposal>(`/proposals/${encodeURIComponent(proposalId)}`);
 
-export const commitProposal = (proposalId: string) =>
-  postJson<{ committed?: string; error?: string }>("/proposals/commit", {
+export const commitProposal = (proposalId: string, scope: "focus" | "all" = "all") =>
+  postJson<{ committed?: string; scope?: string; error?: string }>("/proposals/commit", {
     proposal_id: proposalId,
+    scope,
   });
 
 export const fetchCompanies = () => getJson<CompanyRow[]>("/companies");
