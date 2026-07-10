@@ -1,6 +1,7 @@
 """Social/profile-URL field extraction (deterministic footer-link scan)."""
 
-from app.tools.field_extract import _pick_social_href, _social_domains_for
+from app.tools.social import pick_social_href as _pick_social_href
+from app.tools.social import social_domains_for as _social_domains_for
 
 
 def test_label_maps_to_social_domains():

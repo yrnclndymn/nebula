@@ -6,7 +6,7 @@ Aura it needs no extra infra (SQLite doesn't survive a serverless, scale-to-zero
 filesystem), it's shared across instances, and it matches local dev (same Neo4j).
 A page cache is exact-key lookup — Neo4j's strength — not full-text search.
 
-Model: (:Page {url, text, linksJson, imagesJson, fetchedAt}),
+Model: (:Page {url, text, linksJson, imagesJson, socialJson, fetchedAt}),
        (:SiteClients {domain, clients, fetchedAt}).
 """
 
@@ -32,7 +32,8 @@ async def get_cached_page(
         result = await session.run(
             "MATCH (p:Page {url: $url}) "
             "WHERE p.fetchedAt >= datetime() - duration({days: $ttl}) "
-            "RETURN p.text AS text, p.linksJson AS links, p.imagesJson AS images",
+            "RETURN p.text AS text, p.linksJson AS links, p.imagesJson AS images, "
+            "       p.socialJson AS social",
             url=url,
             ttl=ttl,
         )
@@ -44,6 +45,7 @@ async def get_cached_page(
         "text": record["text"] or "",
         "links": json.loads(record["links"] or "[]"),
         "images": json.loads(record["images"] or "[]"),
+        "social": json.loads(record["social"] or "{}"),  # {} for pages cached pre-social
     }
 
 
@@ -52,11 +54,12 @@ async def store_page(driver: AsyncDriver, page: dict) -> None:
         await session.run(
             "MERGE (p:Page {url: $url}) "
             "SET p.text = $text, p.linksJson = $links, p.imagesJson = $images, "
-            "    p.fetchedAt = datetime()",
+            "    p.socialJson = $social, p.fetchedAt = datetime()",
             url=page["url"],
             text=page.get("text", ""),
             links=json.dumps(page.get("links", [])),
             images=json.dumps(page.get("images", [])),
+            social=json.dumps(page.get("social", {})),
         )
 
 

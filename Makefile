@@ -17,6 +17,9 @@ db-init:          ## Create Neo4j constraints + indexes (idempotent)
 import:           ## Import a sheet CSV. Usage: make import CSV=data/x.csv TOPIC="SAP ecosystem"
 	cd backend && uv run python -m app.importer.csv_import $(CSV) $(if $(TOPIC),--topic "$(TOPIC)",)
 
+normalize-linkedin: ## Canonicalise stored LinkedIn URLs (uk.->www., trailing slash). ARGS=--dry-run
+	cd backend && uv run python scripts/normalize_linkedin.py $(ARGS)
+
 enrich:           ## Research one company via the ADK agent. NAME= WEBSITE= [TOPIC=]
 	cd backend && uv run python -m app.agents.enrichment.enrich "$(NAME)" "$(WEBSITE)" $(if $(TOPIC),"$(TOPIC)",)
 

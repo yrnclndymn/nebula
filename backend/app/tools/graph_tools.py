@@ -13,6 +13,7 @@ from app.graph.driver import get_driver
 from app.graph.models import Citation, CompanyRecord, Leader
 from app.graph.repository import upsert_company
 from app.importer.extract import canonical_company_types
+from app.tools.social import normalize_linkedin
 
 # When set to a list (by the propose flow), save_company appends the record it
 # WOULD write and does not touch the graph — enabling propose→review→commit.
@@ -116,7 +117,7 @@ async def save_company(
         name=name,
         about=about or None,
         website=website or None,
-        linkedin=linkedin or None,
+        linkedin=normalize_linkedin(linkedin) if linkedin else None,
         hq_location=hq_location or None,
         headcount=guarded["headcount"],
         estimated_revenue=guarded["estimated_revenue"],

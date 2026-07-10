@@ -7,7 +7,6 @@ the pages are cached after the first research.
 """
 
 import asyncio
-import re
 
 import requests
 from google import genai
@@ -16,6 +15,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.genai_retry import generate_with_retry
+from app.tools.social import normalize_linkedin, pick_social_href, social_domains_for
 from app.tools.web import _HEADERS, fetch_page
 
 _PAGE_KEYWORDS = (
@@ -36,57 +36,15 @@ class _FieldExtract(BaseModel):
     source_url: str
 
 
-# Some fields are really a social/profile URL. The value is an external <a href> in
-# the site footer (often just an icon, no visible text) — but fetch_page strips
-# external links and the text has no URL, so the LLM never sees it. Grab it
-# deterministically instead. Domains are ordered most-specific first.
-_SOCIAL_DOMAINS: dict[str, tuple[str, ...]] = {
-    "linkedin": ("linkedin.com/company", "linkedin.com/school", "linkedin.com/in", "linkedin.com"),
-    "twitter": ("x.com", "twitter.com"),
-    "x": ("x.com", "twitter.com"),
-    "github": ("github.com",),
-    "facebook": ("facebook.com",),
-    "instagram": ("instagram.com",),
-    "youtube": ("youtube.com", "youtu.be"),
-    "crunchbase": ("crunchbase.com",),
-}
-_SHARE_MARKERS = ("/share", "sharer", "/intent", "sharearticle", "/sharing", "/shareon")
-
-
-def _social_domains_for(label: str) -> tuple[str, ...]:
-    """The social domains a field label maps to (e.g. 'LinkedIn' → linkedin.com), or
-    () if it isn't a known social/profile field."""
-    low = label.lower()
-    for key, domains in _SOCIAL_DOMAINS.items():
-        if re.search(rf"\b{re.escape(key)}\b", low):
-            return domains
-    return ()
-
-
-def _pick_social_href(html: str, domains: tuple[str, ...]) -> str | None:
-    """Pick the best matching profile URL from a page's hrefs (skips share links)."""
-    hrefs = re.findall(r'href=["\']([^"\'#\s]+)["\']', html, re.I)
-    hits = [
-        h
-        for h in hrefs
-        if any(d in h.lower() for d in domains) and not any(m in h.lower() for m in _SHARE_MARKERS)
-    ]
-    if not hits:
-        return None
-    for pref in domains:  # prefer a company/profile path over a bare domain
-        for h in hits:
-            if pref in h.lower():
-                return h.split("?")[0]
-    return hits[0].split("?")[0]
-
-
 def _find_social_url(start: str, domains: tuple[str, ...]) -> str | None:
+    """Fetch a page and pick the best profile URL from its hrefs (LinkedIn canonicalised)."""
     try:
         resp = requests.get(start, timeout=12, headers=_HEADERS)
         resp.raise_for_status()
     except Exception:  # noqa: BLE001
         return None
-    return _pick_social_href(resp.text, domains)
+    href = pick_social_href(resp.text, domains)
+    return normalize_linkedin(href) if href else None
 
 
 async def extract_field(website: str, label: str, description: str, field_type: str) -> dict:
@@ -96,7 +54,7 @@ async def extract_field(website: str, label: str, description: str, field_type: 
 
     # Social/profile URL fields: grab the footer link directly (the LLM path can't
     # see it), skipping the page crawl + LLM call entirely.
-    domains = _social_domains_for(label)
+    domains = social_domains_for(label)
     if domains:
         url = await asyncio.to_thread(_find_social_url, start, domains)
         if url:

@@ -21,6 +21,7 @@ from app.config import settings
 from app.genai_retry import generate_with_retry
 from app.graph import cache
 from app.graph.driver import get_driver
+from app.tools.social import find_social_links
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; NebulaResearchBot/0.1)"}
 _MAX_LINKS = 60
@@ -76,21 +77,26 @@ def _fetch_page_live(url: str) -> dict:
             if len(images) >= _MAX_IMAGES:
                 break
 
+    # The company's own social/profile links (LinkedIn etc.) — found from the raw
+    # HTML because the same-domain filter above drops these external hrefs.
+    social = find_social_links(resp.text)
+
     for tag in soup(["script", "style", "noscript", "svg"]):
         tag.decompose()
     text = " ".join(soup.get_text(" ").split())
-    return {"url": url, "text": text[:5000], "links": links, "images": images}
+    return {"url": url, "text": text[:5000], "links": links, "images": images, "social": social}
 
 
 async def fetch_page(url: str) -> dict:
-    """Fetch a web page and return its readable text plus its internal links and
-    images (src + alt). Use `links` to find relevant sub-pages and `images` when a
-    page shows information as logos. To gather a company's client list, prefer the
-    find_clients tool over crawling by hand. Results are cached, so re-reading a
-    page is cheap.
+    """Fetch a web page and return its readable text plus its internal links, images
+    (src + alt), and the company's social/profile URLs. Use `links` to find relevant
+    sub-pages, `images` when a page shows information as logos, and `social` for the
+    company's own LinkedIn/Twitter/etc. (prefer social.linkedin over a web_search
+    result). To gather a company's client list, prefer the find_clients tool over
+    crawling by hand. Results are cached, so re-reading a page is cheap.
 
-    Returns {url, text (~5000 chars), links:[{url,text}], images:[{src,alt}]} on
-    success, or {url, error} on failure.
+    Returns {url, text (~5000 chars), links:[{url,text}], images:[{src,alt}],
+    social:{platform:url}} on success, or {url, error} on failure.
     """
     driver = get_driver()
     cached = await cache.get_cached_page(driver, url)

@@ -19,11 +19,16 @@ information about the company and save it to the graph.
 
 Process:
 1. First call fetch_page on the company's website for the basics (what they do,
-   HQ, leadership, founding, and their LinkedIn URL if linked from the website).
+   HQ, leadership, founding). Its `social` field holds the company's own profile
+   URLs — use social.linkedin as the LinkedIn value whenever it's present: it's the
+   canonical link the company publishes. Only fall back to web_search for LinkedIn
+   if the site exposes none.
 2. Use web_search for anything still missing: HQ location, headcount, year
    founded, funding/investors, notable partnerships, leadership (names + titles),
-   company LinkedIn profile URL, and whether it is a B-Corp / ESOP / employee-owned /
-   co-operative / non-profit. fetch_page on the most promising results to confirm.
+   and whether it is a B-Corp / ESOP / employee-owned / co-operative / non-profit.
+   fetch_page on the most promising results to confirm. Prefer the site's
+   social.linkedin over a LinkedIn URL from search (search often returns a
+   country-subdomain variant like uk.linkedin.com).
 
 2b. To find CLIENTS / customers, call find_clients(website) ONCE. It crawls the
    company's client / "who we've helped" / case-study pages and their sub-pages and
