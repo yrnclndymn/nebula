@@ -49,3 +49,45 @@ def test_missing_only_skips_already_filled():
     assert {"__bf_has__", "__bf_nof__"} <= everyone  # both applicable without the filter
     assert "__bf_nof__" in missing  # the unfilled one is kept
     assert "__bf_has__" not in missing  # the already-filled one is skipped
+
+
+def test_company_scope_selects_one():
+    async def scenario():
+        try:
+            await check_connectivity()
+        except Exception:
+            return "skip"
+        d = get_driver()
+        async with d.session() as s:
+            await s.run(
+                "MERGE (t:Topic {name:$t}) "
+                "MERGE (a:Company {name:$a}) "
+                "  SET a.website='https://a.example', a.kind='service_provider' "
+                "MERGE (b:Company {name:$b}) "
+                "  SET b.website='https://b.example', b.kind='service_provider' "
+                "MERGE (a)-[:TAGGED_AS]->(t) MERGE (b)-[:TAGGED_AS]->(t)",
+                t="__bfcotest__",
+                a="__bf_one__",
+                b="__bf_two__",
+            )
+        scoped = {
+            c["name"]
+            for c in await _applicable_companies(d, "service_provider", None, None, "__bf_one__")
+        }
+        no_match = await _applicable_companies(d, "service_provider", None, None, "__bf_absent__")
+        async with d.session() as s:
+            await s.run(
+                "MATCH (c:Company) WHERE c.name IN [$a, $b] DETACH DELETE c",
+                a="__bf_one__",
+                b="__bf_two__",
+            )
+            await s.run("MATCH (t:Topic {name:$t}) DELETE t", t="__bfcotest__")
+        await close_driver()
+        return scoped, no_match
+
+    out = asyncio.run(scenario())
+    if out == "skip":
+        pytest.skip("Neo4j not reachable — run `make db-up`")
+    scoped, no_match = out
+    assert scoped == {"__bf_one__"}  # only the named company, not its sibling
+    assert no_match == []  # a name that matches nothing selects nothing
