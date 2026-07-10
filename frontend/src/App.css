@@ -364,6 +364,13 @@ td.muted {
   .app.chat-open {
     margin-right: 400px;
   }
+  /* When the chat is open too, slot the detail card to the LEFT of the chat
+     (offset by its width) so the two sit side by side instead of the chat
+     covering the card. With only one open, neither rule fires and it stays in
+     the right-hand slot. */
+  .app.chat-open .drawer {
+    margin-right: 400px;
+  }
 }
 .chat {
   position: fixed;
