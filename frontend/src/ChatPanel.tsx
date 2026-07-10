@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { commitProposal, getProposal, sendChat } from "./api";
-import type { Backfill, Proposal } from "./types";
+import type { Backfill, Proposal, ScalarDiff } from "./types";
 import { BackfillCard, BackfillModal } from "./BackfillReview";
 
 interface JobRef {
@@ -24,9 +24,43 @@ const SUGGESTIONS = [
 
 type CommitStatus = "idle" | "committing" | "committed" | "discarded";
 
+function fmt(v: unknown): string {
+  if (v === null || v === undefined || v === "") return "—";
+  return String(v);
+}
+
+function ScalarValue({ s }: { s: ScalarDiff }) {
+  if (s.status === "changed" && s.old !== null && s.old !== undefined && s.old !== "") {
+    return (
+      <span>
+        <span className="diff-old">{fmt(s.old)}</span>
+        <span className="diff-arrow"> → </span>
+        <span className="diff-new">{fmt(s.new)}</span>
+      </span>
+    );
+  }
+  return <span className="diff-new">{fmt(s.new)}</span>;
+}
+
+function ChipGroup({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="diff-group">
+      <div className="diff-group-h">{title}</div>
+      <div className="name-chips">
+        {items.map((name) => (
+          <span key={name} className="chip">
+            {name}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ProposalCard({ p: initial }: { p: Proposal }) {
   const [prop, setProp] = useState<Proposal>(initial);
-  const [commitState, setCommitState] = useState<CommitStatus>("idle");
+  const [primary, setPrimary] = useState<CommitStatus>("idle");
+  const [others, setOthers] = useState<CommitStatus>("idle");
   const [error, setError] = useState<string | null>(null);
 
   // Poll while the background research is still running.
@@ -43,16 +77,16 @@ function ProposalCard({ p: initial }: { p: Proposal }) {
     return () => clearInterval(iv);
   }, [prop.status, prop.proposal_id]);
 
-  async function commit() {
-    setCommitState("committing");
+  async function commit(scope: "focus" | "all", setState: (s: CommitStatus) => void) {
+    setState("committing");
     setError(null);
     try {
-      const res = await commitProposal(prop.proposal_id);
+      const res = await commitProposal(prop.proposal_id, scope);
       if (res.error) throw new Error(res.error);
-      setCommitState("committed");
+      setState("committed");
     } catch (e) {
       setError(String(e));
-      setCommitState("idle");
+      setState("idle");
     }
   }
 
@@ -64,7 +98,7 @@ function ProposalCard({ p: initial }: { p: Proposal }) {
       </div>
     );
   }
-  if (prop.status === "error" || !prop.record) {
+  if (prop.status === "error" || !prop.record || !prop.diff) {
     return (
       <div className="proposal">
         ⚠ couldn't research <strong>{prop.name}</strong>
@@ -74,54 +108,153 @@ function ProposalCard({ p: initial }: { p: Proposal }) {
   }
 
   const r = prop.record;
-  const facts: [string, unknown][] = [
-    ["HQ", r.hq_location],
-    ["Founded", r.year_founded],
-    ["Headcount", r.headcount],
-    ["Funding", r.funding],
-    ["Revenue", r.estimated_revenue],
-    ["Types", r.company_types.join(", ") || null],
-  ];
-  const leaders = r.leadership.map((l) => (l.title ? `${l.name} — ${l.title}` : l.name));
-  const lists: [string, string[]][] = [
-    ["Clients", r.clients],
-    ["Partners", r.partnerships],
-    ["Leadership", leaders],
-  ];
+  const diff = prop.diff;
+  const focusKey = prop.focus_key ?? null;
+  const focusLabel = prop.focus_label || "";
+  const focusMode = !!focusKey;
+
+  const focusScalar = focusKey ? diff.scalars.find((s) => s.key === focusKey) : undefined;
+  const rest = diff.scalars.filter((s) => s !== focusScalar);
+  const changed = rest.filter((s) => s.status === "changed");
+  const created = rest.filter((s) => s.status === "new");
+  const unchanged = rest.filter((s) => s.status === "same");
+  const lead = diff.leadership;
+
+  // Committable "other" work beyond the focus field (variants are flagged, not written).
+  const otherUpdates =
+    changed.length +
+    created.length +
+    diff.clients.added.length +
+    diff.partners.added.length +
+    lead.added.length +
+    lead.merged.length;
+
+  const focusSrc = focusKey
+    ? r.citations.find(
+        (c) => c.field.toLowerCase().replace(/[ _-]/g, "") === focusKey.replace(/[ _-]/g, ""),
+      )
+    : undefined;
+
+  // The changed/new/relationship groups — shown inline for a general update, or
+  // tucked into a collapsible for a focused one.
+  const groups = (
+    <>
+      {changed.length > 0 && (
+        <div className="diff-group">
+          <div className="diff-group-h">Updated values</div>
+          {changed.map((s) => (
+            <div key={s.key} className="diff-row">
+              <span className="diff-k">{s.label}</span> <ScalarValue s={s} />
+            </div>
+          ))}
+        </div>
+      )}
+      {created.length > 0 && (
+        <div className="diff-group">
+          <div className="diff-group-h">Newly sourced</div>
+          {created.map((s) => (
+            <div key={s.key} className="diff-row">
+              <span className="diff-k">{s.label}</span> <ScalarValue s={s} />
+            </div>
+          ))}
+        </div>
+      )}
+      {diff.clients.added.length > 0 && (
+        <ChipGroup title={`Clients (+${diff.clients.added.length})`} items={diff.clients.added} />
+      )}
+      {diff.partners.added.length > 0 && (
+        <ChipGroup title={`Partners (+${diff.partners.added.length})`} items={diff.partners.added} />
+      )}
+      {lead.added.length > 0 && (
+        <ChipGroup
+          title={`Leadership (+${lead.added.length})`}
+          items={lead.added.map((l) => (l.title ? `${l.name} — ${l.title}` : l.name))}
+        />
+      )}
+      {lead.merged.length > 0 && (
+        <div className="diff-group">
+          <div className="diff-group-h">Merged duplicates</div>
+          {lead.merged.map((m, i) => (
+            <div key={i} className="diff-merge">
+              <span className="diff-old">{m.proposed}</span>
+              <span className="diff-arrow"> → </span>
+              {m.canonical}
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
 
   return (
-    <div className={`proposal ${commitState}`}>
+    <div className={`proposal ${primary}`}>
       <div className="proposal-head">
         <strong>{prop.name}</strong>
         <span className={`origin ${prop.exists ? "" : "origin-agent"}`}>
-          {prop.exists ? "updates existing" : "new"}
+          {prop.exists ? "updates existing" : "new company"}
         </span>
       </div>
-      <div className="proposal-facts">
-        {facts
-          .filter(([, v]) => v !== null && v !== undefined && v !== "")
-          .map(([k, v]) => (
-            <div key={k}>
-              <span className="pf-k">{k}</span> {String(v)}
+
+      {focusMode ? (
+        focusScalar ? (
+          <div className="diff-focus">
+            <div className="diff-focus-label">{focusScalar.label}</div>
+            <div className="diff-focus-val">
+              <ScalarValue s={focusScalar} />
+              {focusSrc && (
+                <a href={focusSrc.source} target="_blank" rel="noreferrer" className="diff-src">
+                  ↗
+                </a>
+              )}
+            </div>
+            {focusScalar.status === "same" && (
+              <div className="muted small">matches the value already on record</div>
+            )}
+          </div>
+        ) : (
+          <div className="diff-focus empty">No {focusLabel || "value"} found in the sources.</div>
+        )
+      ) : (
+        groups
+      )}
+
+      {/* Uncertain name variants always surface — they are NOT written automatically. */}
+      {lead.variants.length > 0 && (
+        <div className="diff-variants">
+          <div className="diff-group-h warn">⚠ Possible duplicate people — review</div>
+          {lead.variants.map((v, i) => (
+            <div key={i} className="diff-variant">
+              <strong>{v.name}</strong>
+              {v.title ? ` — ${v.title}` : ""} · possibly the same as{" "}
+              <strong>{v.possibly}</strong>
             </div>
           ))}
-      </div>
-      {lists
-        .filter(([, items]) => items.length > 0)
-        .map(([label, items]) => (
-          <details key={label} className="proposal-sources" open={label === "Clients"}>
-            <summary>
-              {items.length} {label.toLowerCase()}
-            </summary>
-            <div className="name-chips">
-              {items.map((name) => (
-                <span key={name} className="chip">
-                  {name}
-                </span>
-              ))}
-            </div>
-          </details>
-        ))}
+          <div className="muted small">
+            Not written automatically. Add manually if they're different people.
+          </div>
+        </div>
+      )}
+
+      {focusMode && otherUpdates > 0 && (
+        <details className="proposal-sources">
+          <summary>{otherUpdates} other change{otherUpdates > 1 ? "s" : ""} found</summary>
+          <div className="diff-other">{groups}</div>
+        </details>
+      )}
+
+      {unchanged.length > 0 && (
+        <details className="proposal-sources">
+          <summary>{unchanged.length} unchanged</summary>
+          <ul>
+            {unchanged.map((s) => (
+              <li key={s.key}>
+                {s.label}: {fmt(s.new)}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
       {r.citations.length > 0 && (
         <details className="proposal-sources">
           <summary>{r.citations.length} sources</summary>
@@ -137,19 +270,54 @@ function ProposalCard({ p: initial }: { p: Proposal }) {
           </ul>
         </details>
       )}
+
       {error && <div className="proposal-err">{error}</div>}
-      {commitState === "committed" ? (
-        <div className="proposal-done">✓ committed to the graph</div>
-      ) : commitState === "discarded" ? (
+
+      {primary === "discarded" ? (
         <div className="proposal-done muted">discarded</div>
       ) : (
-        <div className="proposal-actions">
-          <button className="commit" onClick={commit} disabled={commitState === "committing"}>
-            {commitState === "committing" ? "committing…" : "Commit"}
-          </button>
-          <button className="discard" onClick={() => setCommitState("discarded")}>
-            Discard
-          </button>
+        <div className="proposal-foot">
+          <div className="proposal-actions">
+            {primary === "committed" ? (
+              <span className="proposal-done">
+                ✓ {focusMode ? `${focusLabel} committed` : "changes committed"}
+              </span>
+            ) : (
+              <>
+                <button
+                  className="commit"
+                  disabled={primary === "committing" || (focusMode && !focusScalar)}
+                  onClick={() => commit(focusMode ? "focus" : "all", setPrimary)}
+                >
+                  {primary === "committing"
+                    ? "committing…"
+                    : focusMode
+                      ? `Commit ${focusLabel}`
+                      : "Commit all changes"}
+                </button>
+                <button className="discard" onClick={() => setPrimary("discarded")}>
+                  Discard
+                </button>
+              </>
+            )}
+          </div>
+          {focusMode &&
+            otherUpdates > 0 &&
+            (others === "committed" ? (
+              <div className="proposal-done small">
+                ✓ {otherUpdates} other update{otherUpdates > 1 ? "s" : ""} applied
+              </div>
+            ) : (
+              <button
+                className="apply-others"
+                disabled={others === "committing"}
+                onClick={() => commit("all", setOthers)}
+              >
+                {others === "committing"
+                  ? "applying…"
+                  : `＋ apply ${otherUpdates} other update${otherUpdates > 1 ? "s" : ""}`}
+              </button>
+            ))}
         </div>
       )}
     </div>

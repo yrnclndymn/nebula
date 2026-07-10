@@ -571,6 +571,104 @@ td.muted {
   margin-top: 0.4rem;
   font-size: 12px;
 }
+
+/* Diff-aware proposal card */
+.diff-focus {
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--bg);
+  padding: 0.5rem 0.7rem;
+  margin-bottom: 0.5rem;
+}
+.diff-focus.empty {
+  color: var(--muted);
+  font-style: italic;
+}
+.diff-focus-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.diff-focus-val {
+  font-size: 15px;
+  font-weight: 600;
+  margin-top: 0.1rem;
+}
+.diff-group {
+  margin: 0.4rem 0;
+}
+.diff-group-h {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 0.2rem;
+}
+.diff-group-h.warn {
+  color: #b45309;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+.diff-row,
+.diff-merge {
+  font-size: 13px;
+  line-height: 1.5;
+}
+.diff-k {
+  color: var(--muted);
+  margin-right: 0.3rem;
+}
+.diff-old {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.diff-arrow {
+  color: var(--muted);
+}
+.diff-new {
+  font-weight: 600;
+}
+.diff-src {
+  color: var(--accent);
+  text-decoration: none;
+  margin-left: 0.35rem;
+}
+.diff-variants {
+  border: 1px solid #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
+  border-radius: 10px;
+  padding: 0.45rem 0.6rem;
+  margin: 0.5rem 0;
+}
+.diff-variant {
+  font-size: 13px;
+  line-height: 1.5;
+}
+.diff-other {
+  margin-top: 0.3rem;
+}
+.small {
+  font-size: 11px;
+}
+.proposal-foot {
+  margin-top: 0.6rem;
+}
+.apply-others {
+  margin-top: 0.4rem;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  font-size: 12px;
+}
+.apply-others:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
 .name-chips {
   display: flex;
   flex-wrap: wrap;

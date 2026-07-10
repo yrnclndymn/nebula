@@ -106,13 +106,14 @@ async def proposal_status(proposal_id: str) -> dict:
 
 class CommitRequest(BaseModel):
     proposal_id: str
+    scope: str = "all"  # "focus" = just the asked-about field; "all" = full record
 
 
 @router.post("/proposals/commit")
 async def commit(req: CommitRequest) -> dict:
     """Write a reviewed proposal to the graph (the user's approval of an
     agent-prepared enrichment)."""
-    result = await commit_proposal(req.proposal_id)
+    result = await commit_proposal(req.proposal_id, req.scope)
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
     return result

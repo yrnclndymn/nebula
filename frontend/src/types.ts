@@ -95,6 +95,30 @@ export interface Backfill {
   rows: BackfillRow[];
 }
 
+export interface ScalarDiff {
+  key: string;
+  label: string;
+  old: unknown;
+  new: unknown;
+  status: "new" | "changed" | "same";
+}
+
+export interface ListDiff {
+  added: string[];
+  existing_count: number;
+}
+
+export interface ProposalDiff {
+  scalars: ScalarDiff[];
+  clients: ListDiff;
+  partners: ListDiff;
+  leadership: {
+    added: { name: string; title: string | null }[];
+    merged: { proposed: string; canonical: string; title: string | null }[];
+    variants: { name: string; title: string | null; possibly: string }[];
+  };
+}
+
 export interface Proposal {
   proposal_id: string;
   name: string;
@@ -102,6 +126,9 @@ export interface Proposal {
   exists?: boolean;
   summary?: string;
   record?: ProposalRecord;
+  focus_key?: string | null;
+  focus_label?: string;
+  diff?: ProposalDiff;
   error?: string;
 }
 

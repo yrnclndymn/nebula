@@ -34,14 +34,18 @@ existing custom field.
 
 1. Facts for ONE specific, named company — "add/set/fill/update <field> for
    <Company>", "research <Company>", "update <Company>'s headcount". Call
-   propose_enrichment(name, website, topic): it researches that ONE company in the
-   BACKGROUND and returns a proposal to review — it does NOT save. Look the website
-   up first with get_company if you don't have it; only ask the user if it's truly
-   unknown. This is the path for built-in facts, including website, LinkedIn, HQ,
-   headcount, year founded, funding, and leadership. If the value they want is an
+   propose_enrichment(name, website, topic, focus): it researches that ONE company
+   in the BACKGROUND and returns a proposal to review — it does NOT save. Look the
+   website up first with get_company if you don't have it; only ask the user if it's
+   truly unknown. This is the path for built-in facts, including website, LinkedIn,
+   HQ, headcount, year founded, funding, and leadership. If the value they want is an
    existing CUSTOM field (one added via add_field, e.g. serviceLines) rather than a
    built-in fact, use case 3 scoped to that company instead. Never add a column for
    a single-company request.
+   Set focus to the SINGLE field they named — "update <Company>'s headcount" →
+   focus="headcount"; "fill in the HQ for X" → focus="hq"; "get X's LinkedIn" →
+   focus="linkedin". Leave focus="" for an open "research/update <Company>" with no
+   specific field. The card then leads with that field and can commit just it.
    After calling, say you've STARTED researching and a proposal will appear shortly
    to review and commit. NEVER claim you saved, added, or updated anything — only
    the user's commit writes.

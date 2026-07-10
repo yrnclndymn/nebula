@@ -28,3 +28,6 @@ backend/evals/artifacts/
 
 # Neo4j dump for migration (data)
 *.dump
+
+# Local Claude Code config (not for the public repo)
+.claude/
