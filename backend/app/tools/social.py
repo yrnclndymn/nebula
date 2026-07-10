@@ -45,19 +45,35 @@ def social_domains_for(label: str) -> tuple[str, ...]:
     return ()
 
 
+def _href_matches(href: str, fragment: str) -> bool:
+    """Does an href match a "host[/path]" domain fragment on HOST BOUNDARIES?
+
+    The host must equal the fragment's host or be a real subdomain of it (so
+    `business-linkedin.com` does NOT match `linkedin.com`), and any path part of the
+    fragment must prefix the href's path (so `/company` is preferred over a bare host).
+    """
+    host_frag, _, path_frag = fragment.partition("/")
+    parsed = urlparse(href if "://" in href else "https://" + href)
+    host = parsed.netloc.lower()
+    if host != host_frag and not host.endswith("." + host_frag):
+        return False
+    return not path_frag or parsed.path.lower().lstrip("/").startswith(path_frag.lower())
+
+
 def pick_social_href(html: str, domains: tuple[str, ...]) -> str | None:
     """Pick the best matching profile URL from a page's hrefs (skips share links)."""
     hrefs = re.findall(r'href=["\']([^"\'#\s]+)["\']', html, re.I)
     hits = [
         h
         for h in hrefs
-        if any(d in h.lower() for d in domains) and not any(m in h.lower() for m in SHARE_MARKERS)
+        if any(_href_matches(h, d) for d in domains)
+        and not any(m in h.lower() for m in SHARE_MARKERS)
     ]
     if not hits:
         return None
     for pref in domains:  # prefer a company/profile path over a bare domain
         for h in hits:
-            if pref in h.lower():
+            if _href_matches(h, pref):
                 return h.split("?")[0]
     return hits[0].split("?")[0]
 

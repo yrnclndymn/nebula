@@ -1,6 +1,11 @@
 """LinkedIn canonicalisation + surfacing a page's social links."""
 
-from app.tools.social import find_social_links, normalize_linkedin
+from app.tools.social import (
+    find_social_links,
+    normalize_linkedin,
+    pick_social_href,
+    social_domains_for,
+)
 
 
 def test_normalize_drops_country_subdomain():
@@ -63,3 +68,17 @@ def test_find_social_links_surfaces_canonical_linkedin():
 
 def test_find_social_links_empty_when_none_present():
     assert find_social_links("<p>no socials here</p>") == {}
+
+
+def test_pick_rejects_lookalike_host():
+    # A look-alike host must NOT be matched as LinkedIn at the pick layer either, so
+    # the two layers agree and nothing gets surfaced as the company's LinkedIn.
+    lookalike = '<a href="https://business-linkedin.com/company/acme">x</a>'
+    assert pick_social_href(lookalike, social_domains_for("LinkedIn")) is None
+    assert find_social_links(lookalike) == {}
+    # A real subdomain still matches.
+    real = '<a href="https://uk.linkedin.com/company/acme">x</a>'
+    assert (
+        pick_social_href(real, social_domains_for("LinkedIn"))
+        == "https://uk.linkedin.com/company/acme"
+    )
