@@ -76,6 +76,7 @@ async def save_company(
     topic: str,
     about: str,
     website: str,
+    linkedin: str,
     hq_location: str,
     headcount: int,
     estimated_revenue: str,
@@ -97,7 +98,7 @@ async def save_company(
 
     citations: provenance for the facts you save — one entry per checkable fact,
     formatted "field | value | source_url | source_date". `field` matches a saved
-    field (e.g. funding, headcount, year_founded, hq_location); `source_url` is the
+    field (e.g. funding, headcount, year_founded, hq_location, linkedin); `source_url` is the
     page you got it from; `source_date` is when the info is from (e.g. "2025-09" or
     "as of 2024"). REQUIRED for every financial figure and headcount you save.
     """
@@ -115,6 +116,7 @@ async def save_company(
         name=name,
         about=about or None,
         website=website or None,
+        linkedin=linkedin or None,
         hq_location=hq_location or None,
         headcount=guarded["headcount"],
         estimated_revenue=guarded["estimated_revenue"],
