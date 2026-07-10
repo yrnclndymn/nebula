@@ -26,8 +26,8 @@ eval:             ## Evaluate the enrichment agent (LLM-as-Judge). ARGS=--grade-
 chat:             ## Chat with the research assistant. ARGS="a question" for one-shot
 	cd backend && uv run python -m app.agents.assistant.chat $(ARGS)
 
-dev:              ## Run the API with reload on :8080
-	cd backend && uv run uvicorn app.main:app --reload --port 8080
+dev:              ## Run the API with reload on :8080 (PORT= to override for a parallel worktree)
+	cd backend && uv run uvicorn app.main:app --reload --port $(if $(PORT),$(PORT),8080)
 
 test:             ## Run backend tests
 	cd backend && uv run pytest
@@ -39,7 +39,27 @@ lint:             ## Lint + format-check the backend
 frontend-install: ## Install frontend dependencies
 	cd frontend && npm install
 
-frontend-dev:     ## Run the Vite dev server on :5173
-	cd frontend && npm run dev
+frontend-dev:     ## Run the Vite dev server on :5173 (PORT= to override for a parallel worktree)
+	cd frontend && npm run dev -- --port $(if $(PORT),$(PORT),5173)
 
-.PHONY: db-up db-down install db-init import enrich eval chat dev test lint frontend-install frontend-dev
+# --- Parallel sessions --------------------------------------------------------
+# Each Claude session should run in its OWN git worktree: a separate working
+# directory sharing this repo's history, so concurrent sessions don't clobber
+# each other's files or move each other's branch/HEAD. This target creates one.
+worktree:         ## Isolated worktree + branch for a parallel session. NAME=<slug> [BASE=main]
+	@test -n "$(NAME)" || { echo 'usage: make worktree NAME=<slug> [BASE=main]'; exit 1; }
+	@dir="../nebula-$(NAME)"; base="$(if $(BASE),$(BASE),main)"; \
+	git fetch --quiet origin || true; \
+	git branch --no-track "$(NAME)" "origin/$$base"; \
+	git worktree add "$$dir" "$(NAME)"; \
+	[ -f .claude/settings.local.json ] && mkdir -p "$$dir/.claude" \
+		&& cp .claude/settings.local.json "$$dir/.claude/" || true; \
+	echo "→ installing backend deps (uv sync)…"; (cd "$$dir/backend" && uv sync); \
+	echo "→ installing frontend deps (npm install)…"; (cd "$$dir/frontend" && npm install); \
+	echo ""; \
+	echo "✓ worktree ready: $$dir  (branch '$(NAME)' off origin/$$base)"; \
+	echo "  start a parallel session:  cd $$dir && claude"; \
+	echo "  non-clashing dev ports:    make dev PORT=8081  |  make frontend-dev PORT=5174"; \
+	echo "  remove when merged:        git worktree remove $$dir && git branch -d $(NAME)"
+
+.PHONY: db-up db-down install db-init import enrich eval chat dev test lint frontend-install frontend-dev worktree
