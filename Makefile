@@ -48,12 +48,13 @@ frontend-dev:     ## Run the Vite dev server on :5173 (PORT= to override for a p
 # each other's files or move each other's branch/HEAD. This target creates one.
 worktree:         ## Isolated worktree + branch for a parallel session. NAME=<slug> [BASE=main]
 	@test -n "$(NAME)" || { echo 'usage: make worktree NAME=<slug> [BASE=main]'; exit 1; }
-	@dir="../nebula-$(NAME)"; base="$(if $(BASE),$(BASE),main)"; \
+	@set -e; dir="../nebula-$(NAME)"; base="$(if $(BASE),$(BASE),main)"; \
 	git fetch --quiet origin || true; \
 	git branch --no-track "$(NAME)" "origin/$$base"; \
 	git worktree add "$$dir" "$(NAME)"; \
 	[ -f .claude/settings.local.json ] && mkdir -p "$$dir/.claude" \
 		&& cp .claude/settings.local.json "$$dir/.claude/" || true; \
+	[ -f backend/.env ] && cp backend/.env "$$dir/backend/.env" || true; \
 	echo "→ installing backend deps (uv sync)…"; (cd "$$dir/backend" && uv sync); \
 	echo "→ installing frontend deps (npm install)…"; (cd "$$dir/frontend" && npm install); \
 	echo ""; \
