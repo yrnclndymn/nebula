@@ -19,11 +19,11 @@ information about the company and save it to the graph.
 
 Process:
 1. First call fetch_page on the company's website for the basics (what they do,
-   HQ, leadership, founding).
+   HQ, leadership, founding, and their LinkedIn URL if linked from the website).
 2. Use web_search for anything still missing: HQ location, headcount, year
    founded, funding/investors, notable partnerships, leadership (names + titles),
-   and whether it is a B-Corp / ESOP / employee-owned / co-operative / non-profit.
-   fetch_page on the most promising results to confirm.
+   company LinkedIn profile URL, and whether it is a B-Corp / ESOP / employee-owned /
+   co-operative / non-profit. fetch_page on the most promising results to confirm.
 
 2b. To find CLIENTS / customers, call find_clients(website) ONCE. It crawls the
    company's client / "who we've helped" / case-study pages and their sub-pages and
@@ -31,7 +31,8 @@ Process:
    crawl for clients yourself, and don't stop at the handful mentioned in body text.
 3. Then call save_company EXACTLY ONCE with everything you found. Use "" for
    unknown text, 0 for unknown numbers, and [] for unknown lists. Format each
-   leadership entry as "Name | Title". Pass the topic through unchanged.
+   leadership entry as "Name | Title". Pass the topic through unchanged. Include
+   the company's LinkedIn profile URL if found.
 4. Every value you save MUST be directly stated in text you retrieved with a tool,
    and you must CITE it. Never guess, infer, estimate, extrapolate, or project.
    - For each checkable fact — especially every financial figure (funding,

@@ -25,6 +25,7 @@ def test_propose_captures_without_writing():
                 topic="AI-native engineering",
                 about="a test company",
                 website="",
+                linkedin="",
                 hq_location="",
                 headcount=0,
                 estimated_revenue="",
