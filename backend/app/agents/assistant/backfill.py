@@ -64,6 +64,12 @@ async def start_backfill(
     companies = await _applicable_companies(
         driver, field_def["appliesToKind"], country or None, missing_key, company or None
     )
+    # Scoping to one named company makes a zero match common (typo, wrong kind, no
+    # website/topic). Surface that instead of enqueuing an empty job the user is
+    # told to wait on.
+    if not companies:
+        scope = f" matching {company!r}" if company else ""
+        return {"companies": 0, "note": f"no applicable company{scope}"}
     job_id = uuid.uuid4().hex[:8]
     await jobs.create_job(
         job_id,

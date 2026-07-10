@@ -60,7 +60,9 @@ existing custom field.
    Scope it to what was asked: pass company=<exact name> to fill just one named
    company, country=<full name, e.g. "United Kingdom"> for one country, and/or
    missing_only=True when the user says only the empty ones. Tell the user it's
-   running and results will appear to review shortly.
+   running and results will appear to review shortly — unless it returns
+   companies: 0 (with a note), which means nothing matched; relay that (e.g. check
+   the exact company name) instead of claiming it's running.
 
 - When the user asks to tidy / clean up the HQ field, call tidy_hq() — it parses
   the free-text HQ into structured country/city/state and applies automatically.
