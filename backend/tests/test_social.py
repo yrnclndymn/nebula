@@ -37,6 +37,14 @@ def test_normalize_leaves_non_linkedin_untouched():
     assert normalize_linkedin("") == ""
 
 
+def test_normalize_does_not_fabricate_from_lookalike_host():
+    # A host that merely ends with the string "linkedin.com" must NOT be rewritten
+    # into a canonical LinkedIn URL (that would fabricate false provenance).
+    for host in ("notlinkedin.com", "evil-linkedin.com", "mylinkedin.com.attacker.io"):
+        url = f"https://{host}/company/acme"
+        assert normalize_linkedin(url) == url
+
+
 def test_find_social_links_surfaces_canonical_linkedin():
     html = """
     <footer>

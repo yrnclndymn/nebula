@@ -70,7 +70,10 @@ def normalize_linkedin(url: str) -> str:
         return url
     raw = url.strip()
     parsed = urlparse(raw if "://" in raw else "https://" + raw)
-    if not parsed.netloc.lower().endswith("linkedin.com"):
+    host = parsed.netloc.lower()
+    # Exact host or a real subdomain only — NOT a substring, so we never rewrite
+    # e.g. notlinkedin.com into a fabricated www.linkedin.com URL.
+    if host != "linkedin.com" and not host.endswith(".linkedin.com"):
         return url
     return "https://www.linkedin.com" + parsed.path.rstrip("/")
 
