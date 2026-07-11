@@ -495,8 +495,10 @@ async def similar_companies(
              COUNT { (x)-[:HAS_CLIENT]->(c:Company) WHERE (y)-[:HAS_CLIENT]->(c) } AS shared_clients,
              COUNT { (x)-[:PARTNERS_WITH]-(p:Company) WHERE (y)-[:PARTNERS_WITH]-(p) } AS shared_partners,
              COUNT { (x)-[:TAGGED_AS]->(t:Topic) WHERE (y)-[:TAGGED_AS]->(t) } AS shared_topics,
-             (x.kind IS NOT NULL AND x.kind = y.kind) AS same_kind,
-             (x.hqCountry IS NOT NULL AND x.hqCountry = y.hqCountry) AS same_country
+             (x.kind IS NOT NULL AND y.kind IS NOT NULL
+                 AND x.kind = y.kind) AS same_kind,
+             (x.hqCountry IS NOT NULL AND y.hqCountry IS NOT NULL
+                 AND x.hqCountry = y.hqCountry) AS same_country
         WITH y.name AS name, shared_clients, shared_partners, shared_topics,
              same_kind, same_country,
              $wClient * shared_clients + $wPartner * shared_partners
