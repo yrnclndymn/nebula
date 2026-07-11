@@ -154,6 +154,20 @@ async def company_graph(name: str) -> dict:
     return result
 
 
+@router.get("/companies/{name}/similar")
+async def company_similar(
+    name: str,
+    limit: int = Query(default=queries.SIMILAR_DEFAULT, ge=1, le=queries.SIMILAR_MAX),
+) -> list[dict]:
+    """Most similar OTHER researched companies, with an explainable weighted-overlap
+    score (shared clients/partners/topics, same kind, same country — each component
+    returned). Excludes junk and end-customer (kind='client') stubs. 404 if unknown."""
+    result = await queries.similar_companies(get_driver(), name, limit=limit)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"No company named {name!r}")
+    return result
+
+
 class ChatRequest(BaseModel):
     session_id: str
     message: str

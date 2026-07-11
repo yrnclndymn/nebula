@@ -7,8 +7,9 @@ deterministic.
 """
 
 import re
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # What kind of business a company is (distinct from ownership CompanyType).
 # The first three are *ecosystem* players — companies worth researching. "client"
@@ -111,3 +112,91 @@ class CompanyRecord(BaseModel):
             "kind": self.kind,
         }
         return {k: v for k, v in props.items() if v is not None}
+
+
+# --- Signals (news / blog / event per company) -----------------------------
+# Foundation for the Signals epic: the graph shape every capture agent writes and
+# every read serves. Kind is a validated string *property* (not a node label) so
+# the vocabulary can grow without new labels.
+SIGNAL_KINDS = ("news", "blog", "event")
+
+# Query keys that carry no identity — only click/campaign tracking. Stripped when
+# canonicalising so the same story shared with different tracking tags dedupes to
+# one Signal. `utm_*` is matched by prefix; the rest are exact (case-insensitive).
+_TRACKING_PARAMS = frozenset(
+    {
+        "fbclid",
+        "gclid",
+        "gbraid",
+        "wbraid",
+        "dclid",
+        "msclkid",
+        "yclid",
+        "mc_cid",
+        "mc_eid",
+        "igshid",
+    }
+)
+
+
+def _is_tracking_param(key: str) -> bool:
+    k = key.lower()
+    return k.startswith("utm_") or k in _TRACKING_PARAMS
+
+
+def canonicalise_url(url: str) -> str:
+    """Reduce a URL to a stable identity so the same story dedupes to one Signal.
+
+    Pure function. Rules (see acceptance for #33):
+      - force the scheme to ``https`` (and default a scheme-less URL to https);
+      - lowercase the host (hostnames are case-insensitive; the path is left as-is
+        because paths can be case-sensitive);
+      - drop tracking query params (``utm_*``, ``fbclid``, ``gclid``, …) while
+        keeping the rest in their original order;
+      - drop the fragment;
+      - strip a trailing slash from the path (so ``/x`` and ``/x/`` are one URL).
+
+    Empty/whitespace input returns ``""``.
+    """
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    if "://" not in raw:
+        raw = "https://" + raw
+    parts = urlparse(raw)
+    netloc = parts.netloc.lower()
+    path = parts.path.rstrip("/")
+    kept = [
+        (k, v)
+        for k, v in parse_qsl(parts.query, keep_blank_values=True)
+        if not _is_tracking_param(k)
+    ]
+    query = urlencode(kept)
+    return urlunparse(("https", netloc, path, parts.params, query, ""))
+
+
+class SignalRecord(BaseModel):
+    """A single news/blog/event item about one or more companies.
+
+    Content is kept deliberately thin — ``title`` + ``summary`` only, never full
+    article text (retention story #37 caps graph growth). ``url`` is stored in its
+    canonical form (see :func:`canonicalise_url`); ``canonical_url`` is what the
+    write path keys on.
+    """
+
+    url: str
+    title: str
+    published_at: str | None = None  # raw string as found; parsed to a date on write
+    kind: str = "news"  # ∈ SIGNAL_KINDS
+    summary: str | None = None
+    source: str | None = None  # provenance: URL of the Source that yielded this
+
+    @field_validator("kind")
+    @classmethod
+    def _validate_kind(cls, v: str) -> str:
+        if v not in SIGNAL_KINDS:
+            raise ValueError(f"kind must be one of {SIGNAL_KINDS}, got {v!r}")
+        return v
+
+    def canonical_url(self) -> str:
+        return canonicalise_url(self.url)
