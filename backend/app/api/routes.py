@@ -81,6 +81,17 @@ async def company_detail(name: str) -> dict:
     return company
 
 
+@router.get("/companies/{name}/graph")
+async def company_graph(name: str) -> dict:
+    """A company node + its 1-hop typed edges (partners, clients, leaders, topics,
+    types) for the interactive graph view. Fetched lazily per node so the client
+    never renders the whole ~700-node graph at once."""
+    result = await queries.company_neighbourhood(get_driver(), name)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"No company named {name!r}")
+    return result
+
+
 class ChatRequest(BaseModel):
     session_id: str
     message: str
