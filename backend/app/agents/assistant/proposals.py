@@ -21,6 +21,7 @@ from app.agents.assistant.proposal_diff import (
 )
 from app.agents.assistant.reconcile import reconcile_people
 from app.agents.enrichment.enrich import enrich
+from app.genai_retry import QuotaExhausted, run_with_quota_retry
 from app.graph import jobs, queries
 from app.graph.driver import get_driver
 from app.graph.models import Citation, CompanyRecord
@@ -33,7 +34,11 @@ turn_proposals: ContextVar[list | None] = ContextVar("nebula_turn_proposals", de
 
 
 async def propose_enrichment(
-    name: str, website: str, topic: str = "AI-native engineering", focus: str = ""
+    name: str,
+    website: str,
+    topic: str = "AI-native engineering",
+    focus: str = "",
+    enqueue_delay: float = 0.0,
 ) -> dict:
     """Start researching a company in the BACKGROUND to prepare a proposed graph
     update for the user to review. Returns immediately and does NOT save anything.
@@ -45,7 +50,11 @@ async def propose_enrichment(
     focus: the SINGLE field the user asked about, if they named one — e.g.
     "headcount", "hq", "funding", "linkedin", "year founded", "revenue", "about".
     Leave it "" for a general "research/update <Company>" with no specific field.
-    A focused proposal leads the review card with that field and commits just it."""
+    A focused proposal leads the review card with that field and commits just it.
+
+    enqueue_delay: seconds to defer the job start (issue #65) so a batch of
+    proposals staggers instead of firing all at once and exhausting Gemini quota.
+    Chat proposals leave it 0 (start now)."""
     proposal_id = uuid.uuid4().hex[:8]
     await jobs.create_job(
         proposal_id,
@@ -59,7 +68,7 @@ async def propose_enrichment(
             "focus": focus,
         },
     )
-    await jobs.enqueue(proposal_id)
+    await jobs.enqueue(proposal_id, delay=enqueue_delay)
 
     collected = turn_proposals.get()
     if collected is not None:
@@ -159,7 +168,14 @@ async def run_proposal_job(proposal_id: str) -> None:
                 return
             job = {**job, "website": discovered, "discovered_website": discovered}
             await jobs.update_job(proposal_id, job)  # persist before the slow research
-        result = await enrich(job["name"], job["website"], job["topic"], verbose=False)
+        # A 429 RESOURCE_EXHAUSTED must not kill the job: re-run the whole enrich
+        # on quota errors, honouring the server's RetryInfo delay, bounded. The
+        # ADK Runner hides the per-request call, so retry is at run granularity —
+        # the page cache makes the re-crawl cheap. After the bound it raises
+        # QuotaExhausted, surfaced below as a friendly one-liner.
+        result = await run_with_quota_retry(
+            lambda: enrich(job["name"], job["website"], job["topic"], verbose=False)
+        )
         if not sink:
             await jobs.update_job(
                 proposal_id, {**job, "error": "no record produced"}, status="error"
@@ -189,6 +205,14 @@ async def run_proposal_job(proposal_id: str) -> None:
                 "diff": diff,
             },
             status="ready",
+        )
+    except QuotaExhausted as exc:
+        # Human-readable one-liner on the Job (not a raw 429 JSON dump); the raw
+        # error is kept under a separate key for debugging.
+        await jobs.update_job(
+            proposal_id,
+            {**job, "error": exc.message, "error_detail": exc.detail},
+            status="error",
         )
     except Exception as exc:  # noqa: BLE001 — surface research failures to the client
         await jobs.update_job(proposal_id, {**job, "error": str(exc)}, status="error")

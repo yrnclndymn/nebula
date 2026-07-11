@@ -17,6 +17,7 @@ from app.agents.assistant.resolution import (
     start_resolution,
 )
 from app.agents.assistant.service import respond
+from app.config import settings
 from app.graph import cache, jobs, queries, schedules
 from app.graph.driver import check_connectivity, get_driver
 from app.graph.models import APPLIES_TO, KINDS, field_key
@@ -112,9 +113,13 @@ async def backlog_research(req: BacklogResearchRequest) -> dict:
             status_code=422,
             detail=f"at most {MAX_BACKLOG_RESEARCH} companies per request (got {len(names)})",
         )
+    # Stagger the batch so the jobs don't all fire at once and exhaust the
+    # free-tier Gemini quota (issue #65): the i-th proposal starts i*gap later.
     proposals = []
-    for name in names:
-        started = await propose_enrichment(name, website="")
+    for i, name in enumerate(names):
+        started = await propose_enrichment(
+            name, website="", enqueue_delay=i * settings.research_stagger_seconds
+        )
         proposals.append({"name": name, "proposal_id": started["proposal_id"]})
     return {"proposals": proposals, "cap": MAX_BACKLOG_RESEARCH}
 

@@ -39,7 +39,9 @@ def test_backlog_research_dedupes_before_cap(monkeypatch):
 
     started: list[str] = []
 
-    async def fake_propose(name: str, website: str, topic: str = "", focus: str = "") -> dict:
+    async def fake_propose(
+        name: str, website: str, topic: str = "", focus: str = "", enqueue_delay: float = 0.0
+    ) -> dict:
         started.append(name)
         return {"proposal_id": f"p{len(started)}", "name": name, "status": "pending"}
 
@@ -50,6 +52,28 @@ def test_backlog_research_dedupes_before_cap(monkeypatch):
     assert resp.status_code == 200
     assert len(started) == 10  # the 11th (case-variant duplicate) was deduped
     assert len(resp.json()["proposals"]) == 10
+
+
+def test_backlog_research_staggers_enqueue_delays(monkeypatch):
+    # The batch must not fire simultaneously: each proposal gets an enqueue_delay
+    # of i * research_stagger_seconds, so the i-th starts progressively later.
+    from app.api import routes
+
+    delays: list[float] = []
+
+    async def fake_propose(
+        name: str, website: str, topic: str = "", focus: str = "", enqueue_delay: float = 0.0
+    ) -> dict:
+        delays.append(enqueue_delay)
+        return {"proposal_id": f"p{len(delays)}", "name": name, "status": "pending"}
+
+    monkeypatch.setattr(routes, "propose_enrichment", fake_propose)
+    monkeypatch.setattr(settings, "research_stagger_seconds", 5.0)
+    names = [f"Co {i} __pytest__" for i in range(4)]
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post("/backlog/research", json={"names": names})
+    assert resp.status_code == 200
+    assert delays == [0.0, 5.0, 10.0, 15.0]  # staggered, first starts immediately
 
 
 def test_backlog_research_requires_auth():
