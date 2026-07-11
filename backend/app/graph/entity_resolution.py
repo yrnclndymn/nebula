@@ -363,7 +363,13 @@ async def add_aliases(driver: AsyncDriver, canonical: str, aliases: list[str]) -
 # can point either way (a stub may be someone's client and have clients of its
 # own); CITES/LEADS attach in one direction. Kept explicit rather than via APOC
 # so it runs on a stock Neo4j (local Docker and Aura alike).
-async def merge_companies(driver: AsyncDriver, canonical: str, variants: list[str]) -> dict:
+async def merge_companies(
+    driver: AsyncDriver,
+    canonical: str,
+    variants: list[str],
+    *,
+    allow_researched: bool = False,
+) -> dict:
     """Merge variant company nodes into `canonical`. IRREVERSIBLE — commit only.
 
     For each variant: re-point its HAS_CLIENT / PARTNERS_WITH / CITES / LEADS
@@ -375,6 +381,15 @@ async def merge_companies(driver: AsyncDriver, canonical: str, variants: list[st
     Idempotent-safe and defensive: a variant equal to the canonical, a
     self-merge, an already-merged (missing) variant, or an unknown canonical are
     all skipped rather than erroring. Returns a summary of what happened.
+
+    `allow_researched` relaxes the promoted-variant TOCTOU guard (see `_merge_tx`).
+    It stays False for the scan flow — there a "stub" that gained a website/topic
+    while review sat open was never meant to be merged, so deleting it would be an
+    accident. It is set True ONLY for an explicit, user-named merge (the scoped
+    chat flow), where the user asserted these are the same organisation and a
+    researched variant is intended, not accidental. The union is still
+    non-destructive to the survivor (edges/provenance re-pointed, props fill gaps
+    only), so the researched canonical keeps its data.
     """
     if not canonical:
         return {
@@ -385,10 +400,15 @@ async def merge_companies(driver: AsyncDriver, canonical: str, variants: list[st
         }
     targets = [v for v in dict.fromkeys(variants) if v and v != canonical]
     async with driver.session() as session:
-        return await session.execute_write(_merge_tx, canonical, targets)
+        return await session.execute_write(_merge_tx, canonical, targets, allow_researched)
 
 
-async def _merge_tx(tx: AsyncManagedTransaction, canonical: str, variants: list[str]) -> dict:
+async def _merge_tx(
+    tx: AsyncManagedTransaction,
+    canonical: str,
+    variants: list[str],
+    allow_researched: bool = False,
+) -> dict:
     # Bail cleanly if the survivor doesn't exist — don't create it implicitly.
     exists = await tx.run("MATCH (c:Company {name: $name}) RETURN c.name", name=canonical)
     if await exists.single() is None:
@@ -418,11 +438,13 @@ async def _merge_tx(tx: AsyncManagedTransaction, canonical: str, variants: list[
         if row is None or row["vp"] is None:
             skipped.append(variant)  # already merged / never existed — no-op
             continue
-        if row["promoted"]:
+        if row["promoted"] and not allow_researched:
             # TOCTOU guard: review can sit open, and an enrichment in the meantime
             # may have promoted this "stub" to a researched company (topic tag or
             # website). Deleting it now would destroy researched data — skip it;
-            # a fresh scan can re-propose against current state.
+            # a fresh scan can re-propose against current state. Relaxed only for
+            # an explicit, user-named merge (allow_researched), where a researched
+            # variant is intended and the union still preserves the survivor.
             skipped.append(variant)
             promoted.append(variant)
             continue

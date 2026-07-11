@@ -184,7 +184,26 @@ async def chat(req: ChatRequest) -> dict:
     session_id per client to keep multi-turn context. May return `proposals` —
     enrichment the assistant prepared for the user to review and commit."""
     turn = await respond(req.session_id, req.message)
-    return {"reply": turn.reply, "proposals": turn.proposals, "backfills": turn.backfills}
+    return {
+        "reply": turn.reply,
+        "proposals": turn.proposals,
+        "backfills": turn.backfills,
+        "merges": turn.merges,
+    }
+
+
+@router.get("/jobs")
+async def list_jobs(
+    type: str | None = None,
+    status: str | None = None,
+    limit: int = Query(default=50, ge=1, le=500),
+) -> list[dict]:
+    """Recent durable jobs (newest first), with optional type/status filters.
+    Returns id/type/status/createdAt + a compact type-aware summary (for proposals:
+    name, discovered_website, error) — the full dataJson stays on the per-id detail
+    endpoints. Rehydrates in-progress research after a refresh (#66) and backs the
+    agent-activity page (#48)."""
+    return await jobs.list_jobs(get_driver(), type=type, status=status, limit=limit)
 
 
 @router.get("/proposals/{proposal_id}")

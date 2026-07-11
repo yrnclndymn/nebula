@@ -145,6 +145,23 @@ export interface BacklogRow {
   rank_score: number;
 }
 
+// --- Durable job listing (issue #66) -----------------------------------------
+// Compact, newest-first view of :Job nodes for rehydrating research activity
+// after a refresh; reused by the agent-activity page (#48). The full dataJson
+// stays on the per-id detail endpoints — this carries only a small summary.
+export interface JobSummary {
+  id: string;
+  type: string;
+  status: string;
+  createdAt: string;
+  summary: {
+    name?: string;
+    discovered_website?: string;
+    error?: string;
+    committed?: boolean; // proposal already committed — not awaiting review
+  };
+}
+
 // --- Entity resolution (stub dedup / alias / junk) ---------------------------
 
 export interface ResolutionMember {
@@ -171,6 +188,24 @@ export type ResolutionDecision =
   | { action: "merge"; canonical: string; variants: string[] }
   | { action: "alias"; canonical: string; aliases: string[] }
   | { action: "junk"; names: string[] };
+
+// --- Chat-proposed merge (issue #64) -----------------------------------------
+// A user-named merge the assistant prepared: the named companies, which one
+// survives, and (if the tool swapped the survivor to protect researched data) why.
+// Committed via the existing resolution commit endpoint — the assistant never merges.
+
+export interface MergeMember {
+  name: string;
+  edges: number;
+  researched: boolean;
+}
+
+export interface MergeProposal {
+  job_id: string;
+  canonical: string;
+  members: MergeMember[];
+  canonical_reason?: string;
+}
 
 // --- Client-kind classification (bulk-label end-customer stubs) ---------------
 

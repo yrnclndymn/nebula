@@ -16,6 +16,8 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
+from neo4j import AsyncDriver
+
 from app.config import settings
 from app.graph.driver import get_driver
 
@@ -58,6 +60,74 @@ async def update_job(job_id: str, data: dict, status: str | None = None) -> None
             data=json.dumps(data),
             status=status,
         )
+
+
+def _job_summary(
+    job_id: str, job_type: str, status: str, created_at, data_json: str | None
+) -> dict:
+    """A compact, type-aware view of a job for the listing endpoint — enough to
+    render an activity row without shipping the (potentially large) full dataJson.
+    The per-id detail endpoints (`/proposals/{id}`, `/backfill/{id}`, …) still
+    return the whole payload. dataJson is parsed server-side so the client never
+    sees raw job internals; null fields are dropped to keep the summary small."""
+    data = json.loads(data_json) if data_json else {}
+    if job_type == "proposal":
+        fields = {
+            "name": data.get("name"),
+            "discovered_website": data.get("discovered_website"),
+            "error": data.get("error"),
+            # Committed proposals keep node status "ready" ON PURPOSE — the
+            # two-step focus/all commit re-commits the same job — so the list
+            # must carry the committed flag for the UI to tell them apart.
+            "committed": data.get("committed"),
+        }
+    else:
+        # Generic fallback for other job types (backfill/resolution/…): surface a
+        # human label + any error so the shared activity page (#48) can list them.
+        fields = {"name": data.get("name"), "error": data.get("error")}
+    summary = {k: v for k, v in fields.items() if v is not None}
+    return {
+        "id": job_id,
+        "type": job_type,
+        "status": status,
+        "createdAt": created_at,
+        "summary": summary,
+    }
+
+
+async def list_jobs(
+    driver: AsyncDriver,
+    *,
+    type: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    """Recent Job nodes, newest first, with optional type/status filters and a
+    limit. Returns the compact per-job summary (see `_job_summary`) — NOT the full
+    dataJson, which can be large. Designed for reuse by the agent-activity page
+    (#48) and the backlog page's research-activity rehydration (#66)."""
+    conditions: list[str] = []
+    params: dict = {"limit": limit}
+    if type:
+        conditions.append("j.type = $type")
+        params["type"] = type
+    if status:
+        conditions.append("j.status = $status")
+        params["status"] = status
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    query = (
+        f"MATCH (j:Job) {where} "
+        "RETURN j.id AS id, j.type AS type, j.status AS status, "
+        "j.dataJson AS data, toString(j.createdAt) AS createdAt "
+        "ORDER BY j.createdAt DESC LIMIT $limit"
+    )
+    async with driver.session() as session:
+        result = await session.run(query, **params)
+        records = [rec async for rec in result]
+    return [
+        _job_summary(rec["id"], rec["type"], rec["status"], rec["createdAt"], rec["data"])
+        for rec in records
+    ]
 
 
 async def run_job(job_id: str) -> None:

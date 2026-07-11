@@ -5,6 +5,8 @@ import type {
   Classification,
   CompanyDetail,
   CompanyRow,
+  JobSummary,
+  MergeProposal,
   Proposal,
   Resolution,
   ResolutionDecision,
@@ -33,10 +35,12 @@ const getJson = <T>(path: string) => request<T>("GET", path);
 const postJson = <T>(path: string, body: unknown) => request<T>("POST", path, body);
 
 export const sendChat = (sessionId: string, message: string) =>
-  postJson<{ reply: string; proposals: Proposal[]; backfills: { job_id: string; field: string; total: number }[] }>(
-    "/chat",
-    { session_id: sessionId, message },
-  );
+  postJson<{
+    reply: string;
+    proposals: Proposal[];
+    backfills: { job_id: string; field: string; total: number }[];
+    merges: MergeProposal[];
+  }>("/chat", { session_id: sessionId, message });
 
 export const getBackfill = (jobId: string) => getJson<Backfill>(`/backfill/${jobId}`);
 
@@ -80,6 +84,17 @@ export const commitClassification = (jobId: string, names: string[]) =>
   postJson<{ classified?: number; error?: string }>(`/classification/${jobId}/commit`, { names });
 
 export const fetchBacklog = (limit = 200) => getJson<BacklogRow[]>(`/backlog?limit=${limit}`);
+
+// Recent durable jobs, newest first (issue #66) — rehydrates in-progress
+// research after a refresh. Full dataJson stays on the per-id detail endpoints.
+export const listJobs = (params: { type?: string; status?: string; limit?: number } = {}) => {
+  const qs = new URLSearchParams();
+  if (params.type) qs.set("type", params.type);
+  if (params.status) qs.set("status", params.status);
+  if (params.limit) qs.set("limit", String(params.limit));
+  const q = qs.toString();
+  return getJson<JobSummary[]>(`/jobs${q ? `?${q}` : ""}`);
+};
 
 export const researchBacklog = (names: string[]) =>
   postJson<{ proposals: { name: string; proposal_id: string }[]; cap: number }>(
