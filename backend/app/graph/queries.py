@@ -265,6 +265,96 @@ async def graph_overview(driver: AsyncDriver) -> dict:
     return {"nodes": nodes, "edges": edges}
 
 
+# Edge types surfaced in the interactive graph view (issue #50). Matched
+# undirected so a node's whole 1-hop neighbourhood comes back regardless of the
+# stored direction; the direction is preserved per edge in the response.
+_GRAPH_EDGE_TYPES = ["PARTNERS_WITH", "HAS_CLIENT", "TAGGED_AS", "CLASSIFIED_AS", "LEADS"]
+
+
+def _node_kind(labels: list[str]) -> str:
+    """Pick the styling label for a node (Company / Person / Topic / CompanyType)."""
+    for label in ("Company", "Person", "Topic", "CompanyType"):
+        if label in labels:
+            return label
+    return labels[0] if labels else "Unknown"
+
+
+async def company_neighbourhood(driver: AsyncDriver, name: str) -> dict | None:
+    """A company node plus its 1-hop typed edges, for the interactive graph view.
+
+    Lazy expansion: the SPA fetches one node's neighbourhood at a time rather than
+    rendering the whole ~700-node graph. Returns ``{center, nodes, edges}`` with
+    stable ids (``"<Label>:<name>"``) so the client can dedupe/merge across
+    expansions, and preserves each edge's direction (source→target). Returns None
+    if the company is absent.
+    """
+    cypher = """
+        MATCH (c:Company {name: $name})
+        OPTIONAL MATCH (c)-[r]-(m)
+        WHERE type(r) IN $edgeTypes
+        WITH c, r, m, startNode(r) = c AS outgoing
+        RETURN labels(c) AS centerLabels,
+               c.name AS centerName,
+               c.kind AS centerKind,
+               c.website AS centerWebsite,
+               EXISTS { (c)-[:TAGGED_AS]->(:Topic) } AS centerResearched,
+               collect(
+                 CASE WHEN r IS NULL THEN NULL ELSE {
+                   type: type(r),
+                   outgoing: outgoing,
+                   name: m.name,
+                   labels: labels(m),
+                   kind: m.kind,
+                   website: m.website,
+                   researched: EXISTS { (m)-[:TAGGED_AS]->(:Topic) }
+                 } END
+               ) AS rels
+    """
+    async with driver.session() as session:
+        result = await session.run(cypher, name=name, edgeTypes=_GRAPH_EDGE_TYPES)
+        record = await result.single()
+    if record is None or record["centerName"] is None:
+        return None
+    data = record.data()
+
+    center_kind = _node_kind(data["centerLabels"])
+    center_id = f"{center_kind}:{data['centerName']}"
+    nodes: dict[str, dict] = {
+        center_id: {
+            "id": center_id,
+            "kind": center_kind,
+            "name": data["centerName"],
+            "companyKind": data["centerKind"],
+            "website": data["centerWebsite"],
+            "researched": data["centerResearched"],
+        }
+    }
+    edges: list[dict] = []
+    seen: set[tuple] = set()
+    for rel in data["rels"]:
+        if rel is None or rel.get("name") is None:
+            continue
+        m_kind = _node_kind(rel["labels"])
+        m_id = f"{m_kind}:{rel['name']}"
+        if m_id not in nodes:
+            nodes[m_id] = {
+                "id": m_id,
+                "kind": m_kind,
+                "name": rel["name"],
+                "companyKind": rel.get("kind"),
+                "website": rel.get("website"),
+                "researched": bool(rel.get("researched")),
+            }
+        source, target = (center_id, m_id) if rel["outgoing"] else (m_id, center_id)
+        key = (source, target, rel["type"])
+        if key in seen:
+            continue
+        seen.add(key)
+        edges.append({"source": source, "target": target, "type": rel["type"]})
+
+    return {"center": center_id, "nodes": list(nodes.values()), "edges": edges}
+
+
 # Reject anything that could mutate the graph; run_read_cypher is read-only.
 _WRITE_KEYWORDS = re.compile(
     r"\b(CREATE|MERGE|DELETE|SET|REMOVE|DROP|FOREACH|LOAD\s+CSV|CALL\s*\{)\b",
