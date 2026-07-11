@@ -16,7 +16,8 @@ class Settings(BaseSettings):
 
     # Prefix for user routes. Empty locally; "/api" in prod so the same-origin
     # Firebase Hosting rewrite (/api/** → Cloud Run, path passed through) matches.
-    # /health and /jobs/run stay at the root (Cloud Run + Cloud Tasks hit them direct).
+    # /health, /jobs/run, and /jobs/schedule-tick stay at the root (Cloud Run,
+    # Cloud Tasks, and Cloud Scheduler hit them direct).
     api_prefix: str = ""
 
     # Auth: off locally, on in prod. When on, every route except /health requires a
