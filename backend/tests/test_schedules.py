@@ -142,3 +142,72 @@ def test_tick_skips_when_no_due_work(monkeypatch):
 
 async def _record(bucket: list[str], job_id: str) -> None:
     bucket.append(job_id)
+
+
+def test_errored_job_does_not_block_cadence(monkeypatch):
+    """A failed run must not lock out retries for the whole cadence window: an
+    errored job is excluded from the cadence guard, so the next tick re-enqueues."""
+
+    async def scenario():
+        try:
+            await check_connectivity()
+        except Exception:
+            return "skip"
+
+        enqueued: list[str] = []
+        monkeypatch.setattr(jobs, "enqueue", lambda job_id: _record(enqueued, job_id))
+
+        driver = get_driver()
+        async with driver.session() as session:
+            await session.run("MATCH (j:Job {type:'cache_prune'}) DETACH DELETE j")
+            await session.run(
+                "MATCH (n) WHERE n.url IN [$s,$f] DETACH DELETE n", s=STALE_URL, f=FRESH_URL
+            )
+            await session.run(
+                "CREATE (:Page {url:$s, fetchedAt: datetime() - duration({days:$old})})",
+                s=STALE_URL,
+                old=schedules._PRUNE_AGE_DAYS + 5,
+            )
+
+        first = await schedules.run_tick()
+        job_id = first["enqueued"][0]
+
+        # Simulate the runner failing: run_scheduled marks the job errored.
+        async def boom(_job_id: str) -> None:
+            raise RuntimeError("simulated runner failure")
+
+        failing = schedules.Schedule(job_type="cache_prune", cadence_days=7, run=boom)
+        monkeypatch.setattr(schedules, "SCHEDULES", [failing])
+        await schedules.run_scheduled(job_id, "cache_prune")
+        errored = await jobs.get_job(job_id)
+
+        # The errored job must not satisfy the cadence guard: a re-tick re-enqueues.
+        monkeypatch.setattr(
+            schedules,
+            "SCHEDULES",
+            [
+                schedules.Schedule(
+                    job_type="cache_prune",
+                    cadence_days=7,
+                    run=schedules.run_cache_prune,
+                    is_due=schedules._stale_cache_exists,
+                )
+            ],
+        )
+        second = await schedules.run_tick()
+
+        async with driver.session() as session:
+            await session.run("MATCH (j:Job {type:'cache_prune'}) DETACH DELETE j")
+            await session.run(
+                "MATCH (n) WHERE n.url IN [$s,$f] DETACH DELETE n", s=STALE_URL, f=FRESH_URL
+            )
+        await close_driver()
+        return errored, second
+
+    out = asyncio.run(scenario())
+    if out == "skip":
+        pytest.skip("Neo4j not reachable — run `make db-up`")
+    errored, second = out
+    assert errored["status"] == "error"
+    assert "simulated runner failure" in errored["error"]
+    assert len(second["enqueued"]) == 1  # retry allowed despite recent errored job

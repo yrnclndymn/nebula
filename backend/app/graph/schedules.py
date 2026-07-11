@@ -59,11 +59,14 @@ async def _always_due() -> bool:
 
 async def _cadence_elapsed(driver: AsyncDriver, job_type: str, cadence_days: float) -> bool:
     """False if a job of this type was created within the cadence window. This is
-    the idempotence guard: a just-enqueued job blocks a re-tick's duplicate."""
+    the idempotence guard: a just-enqueued job blocks a re-tick's duplicate.
+    Errored jobs don't count — a failed run shouldn't block its retry for the
+    whole cadence window; the next tick re-enqueues it."""
     async with driver.session() as session:
         result = await session.run(
             "MATCH (j:Job {type: $type}) "
-            "WHERE j.createdAt >= datetime() - duration({seconds: $secs}) "
+            "WHERE j.status <> 'error' "
+            "AND j.createdAt >= datetime() - duration({seconds: $secs}) "
             "RETURN count(j) AS n",
             type=job_type,
             secs=cadence_days * 86400,
@@ -98,10 +101,17 @@ async def run_tick() -> dict:
 
 async def run_scheduled(job_id: str, job_type: str) -> None:
     """Dispatch a scheduled job to its registered runner (called by jobs.run_job
-    for any type this registry owns)."""
+    for any type this registry owns). A runner that raises marks its job errored
+    (instead of leaving it pending forever); with errored jobs excluded from the
+    cadence guard, the next tick retries it."""
     for sched in SCHEDULES:
         if sched.job_type == job_type:
-            await sched.run(job_id)
+            try:
+                await sched.run(job_id)
+            except Exception as exc:  # noqa: BLE001 — surface the failure on the job
+                logger.exception("scheduled job %s (%s) failed", job_id, job_type)
+                job = await jobs.get_job(job_id)
+                await jobs.update_job(job_id, {**(job or {}), "error": str(exc)}, status="error")
             return
 
 
