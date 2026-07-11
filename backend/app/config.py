@@ -48,6 +48,21 @@ class Settings(BaseSettings):
     service_url: str = ""  # this Cloud Run service's base URL (for the task target)
     tasks_service_account: str = ""  # SA whose OIDC token authorizes /jobs/run
 
+    # Per-run budget caps, keyed by job type (see app/budget.py). Cost guardrails
+    # for scheduled/ambient jobs, enforced in the tool layer — NOT by prompting.
+    # Each dimension is a hard ceiling per run; a null (None) means uncapped. A
+    # job type absent here runs unlimited; a job's payload can override its caps
+    # (a "budget" dict merged on top). Override the whole map via the
+    # JOB_BUDGETS env var as JSON.
+    job_budgets: dict[str, dict[str, int | None]] = {
+        "backfill": {
+            "max_pages": 60,
+            "max_searches": 0,
+            "max_llm_calls": 40,
+            "max_companies": 25,
+        },
+    }
+
 
 settings = Settings()
 
