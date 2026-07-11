@@ -118,25 +118,41 @@ def test_client_heuristic_proposes_only_inbound_client_stubs():
 
 
 def test_classify_as_client_sets_kind_and_skips_promoted():
+    """Commit re-runs the FULL scan predicate: a node promoted since the scan
+    (website gained) or that gained a non-client edge (inbound partnership) is
+    skipped — only a still-pure client stub is classified."""
+
     async def scenario():
         try:
             await check_connectivity()
         except Exception:
             return "skip"
         d = get_driver()
+        mentioner = "Initech __clcommit__"
         stub = "Acme __clcommit__"
         promoted = "Globex __clcommit__"  # promoted (has website) since the scan
-        names = [stub, promoted]
+        partnered = "Umbrella __clcommit__"  # gained an inbound partnership since the scan
+        names = [mentioner, stub, promoted, partnered]
         async with d.session() as s:
             await s.run("MATCH (c:Company) WHERE c.name IN $n DETACH DELETE c", n=names)
             await s.run(
+                "MERGE (m:Company {name:$m}) "
                 "MERGE (a:Company {name:$a}) "
-                "MERGE (b:Company {name:$b}) SET b.website='https://b.example'",
+                "MERGE (b:Company {name:$b}) SET b.website='https://b.example' "
+                "MERGE (p:Company {name:$p}) "
+                "MERGE (m)-[:HAS_CLIENT]->(a) "
+                "MERGE (m)-[:HAS_CLIENT]->(b) "
+                "MERGE (m)-[:HAS_CLIENT]->(p) "
+                "MERGE (m)-[:PARTNERS_WITH]->(p)",
+                m=mentioner,
                 a=stub,
                 b=promoted,
+                p=partnered,
             )
-        # Approve both, but the promoted one must be skipped (still gets no kind).
-        classified = await er.classify_as_client(d, [stub, promoted, "No Such Co __clcommit__"])
+        # Approve all three, but only the pure client stub may be classified.
+        classified = await er.classify_as_client(
+            d, [stub, promoted, partnered, "No Such Co __clcommit__"]
+        )
         async with d.session() as s:
             r = await s.run(
                 "MATCH (c:Company) WHERE c.name IN $n RETURN c.name AS name, c.kind AS kind",
@@ -151,6 +167,7 @@ def test_classify_as_client_sets_kind_and_skips_promoted():
     if out == "skip":
         pytest.skip("Neo4j not reachable — run `make db-up`")
     classified, kinds = out
-    assert classified == 1  # only the true stub; promoted + unknown skipped
+    assert classified == 1  # only the true stub; promoted + partnered + unknown skipped
     assert kinds["Acme __clcommit__"] == "client"
     assert kinds["Globex __clcommit__"] is None  # promoted node was not mislabelled
+    assert kinds["Umbrella __clcommit__"] is None  # partnership gained since scan — skipped

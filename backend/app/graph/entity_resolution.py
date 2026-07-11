@@ -279,11 +279,15 @@ async def list_client_stub_candidates(driver: AsyncDriver) -> list[dict]:
 async def classify_as_client(driver: AsyncDriver, names: list[str]) -> int:
     """Set kind='client' on the named companies. IDEMPOTENT.
 
-    Defensive re-check at commit time (like the merge TOCTOU guard): only nodes
-    that are *still* an unclassified stub are updated. If review sat open while an
-    enrichment promoted a "client" stub (gave it a website, a topic tag, or a
-    kind), it is skipped rather than mislabelled — a fresh scan re-proposes against
-    current state. Returns the count actually classified; unknown names are ignored.
+    Defensive re-check at commit time (like the merge TOCTOU guard): re-runs the
+    FULL scan predicate from `list_client_stub_candidates` — not just the cheap
+    field checks — so a node that gained any other signal while review sat open
+    (an outbound edge from an enrichment or a merge, an inbound partnership or
+    LEADS, a junk flag, a website/topic/kind) is skipped rather than mislabelled.
+    A false positive here would silently drop a real ecosystem company from the
+    research backlog, so the guard must match the definition exactly. A fresh scan
+    re-proposes against current state. Returns the count actually classified;
+    unknown names are ignored.
     """
     if not names:
         return 0
@@ -293,7 +297,15 @@ async def classify_as_client(driver: AsyncDriver, names: list[str]) -> int:
             MATCH (c:Company) WHERE c.name IN $names
               AND c.kind IS NULL
               AND c.website IS NULL
+              AND NOT coalesce(c.junk, false)
               AND NOT (c)-[:TAGGED_AS]->(:Topic)
+              AND EXISTS { (:Company)-[:HAS_CLIENT]->(c) }
+            OPTIONAL MATCH (c)-[out]->()
+            WITH c, count(out) AS outDeg
+            OPTIONAL MATCH (c)<-[inc]-()
+            WITH c, outDeg,
+                 sum(CASE WHEN type(inc) = 'HAS_CLIENT' THEN 0 ELSE 1 END) AS inOther
+            WHERE outDeg = 0 AND inOther = 0
             SET c.kind = 'client', c.updatedAt = datetime()
             RETURN count(c) AS classified
             """,
