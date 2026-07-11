@@ -130,7 +130,19 @@ export interface Proposal {
   focus_key?: string | null;
   focus_label?: string;
   diff?: ProposalDiff;
+  discovered_website?: string; // set when a backlog stub's official site was found
   error?: string;
+}
+
+// --- Research backlog (ranked un-researched stubs, issue #30/#31) -------------
+
+export interface BacklogRow {
+  name: string;
+  mention_count: number;
+  client_mentions: number;
+  partner_mentions: number;
+  cloud_isv_partner_mentions: number;
+  rank_score: number;
 }
 
 // --- Entity resolution (stub dedup / alias / junk) ---------------------------

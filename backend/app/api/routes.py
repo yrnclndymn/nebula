@@ -10,7 +10,7 @@ from app.agents.assistant.classification import (
     get_classification,
     start_classification,
 )
-from app.agents.assistant.proposals import commit_proposal, get_proposal
+from app.agents.assistant.proposals import commit_proposal, get_proposal, propose_enrichment
 from app.agents.assistant.resolution import (
     commit_resolution,
     get_resolution,
@@ -78,6 +78,45 @@ async def backlog(
     boost for cloud_provider/isv partnerships. Excludes junk and end-customer
     (kind='client') stubs. Paginated via limit/offset."""
     return await queries.research_backlog(get_driver(), limit=limit, offset=offset)
+
+
+# Sanity cap on one "research selected" request. Proposal jobs are unbudgeted LLM
+# work (the per-run budget guards scheduled fan-out, not interactive proposals),
+# so the guard against a costly mis-click is a hard cap on how many a single
+# request may enqueue.
+MAX_BACKLOG_RESEARCH = 10
+
+
+class BacklogResearchRequest(BaseModel):
+    names: list[str]
+
+
+@router.post("/backlog/research")
+async def backlog_research(req: BacklogResearchRequest) -> dict:
+    """Enqueue enrichment research for selected backlog stubs (issue #31).
+
+    Each stub has no website, so its proposal job discovers the official site first
+    and then runs the normal enrichment. Returns one proposal id per name for the
+    client to poll and review — nothing is written until the user commits each
+    proposal (HITL). Capped at MAX_BACKLOG_RESEARCH companies per request."""
+    names, seen = [], set()
+    for raw in req.names:
+        name = raw.strip()
+        if name and name.lower() not in seen:
+            seen.add(name.lower())
+            names.append(name)
+    if not names:
+        raise HTTPException(status_code=422, detail="no company names given")
+    if len(names) > MAX_BACKLOG_RESEARCH:
+        raise HTTPException(
+            status_code=422,
+            detail=f"at most {MAX_BACKLOG_RESEARCH} companies per request (got {len(names)})",
+        )
+    proposals = []
+    for name in names:
+        started = await propose_enrichment(name, website="")
+        proposals.append({"name": name, "proposal_id": started["proposal_id"]})
+    return {"proposals": proposals, "cap": MAX_BACKLOG_RESEARCH}
 
 
 class KindRequest(BaseModel):

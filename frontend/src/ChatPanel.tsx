@@ -57,7 +57,7 @@ function ChipGroup({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function ProposalCard({ p: initial }: { p: Proposal }) {
+export function ProposalCard({ p: initial }: { p: Proposal }) {
   const [prop, setProp] = useState<Proposal>(initial);
   const [primary, setPrimary] = useState<CommitStatus>("idle");
   const [others, setOthers] = useState<CommitStatus>("idle");
@@ -194,6 +194,16 @@ function ProposalCard({ p: initial }: { p: Proposal }) {
           {prop.exists ? "updates existing" : "new company"}
         </span>
       </div>
+
+      {/* Backlog stubs have no website: the job discovered one to research from. */}
+      {prop.discovered_website && (
+        <div className="muted small">
+          🌐 discovered site:{" "}
+          <a href={`https://${prop.discovered_website}`} target="_blank" rel="noreferrer">
+            {prop.discovered_website}
+          </a>
+        </div>
+      )}
 
       {focusMode ? (
         focusScalar ? (
