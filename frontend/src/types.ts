@@ -188,6 +188,24 @@ export type ResolutionDecision =
   | { action: "alias"; canonical: string; aliases: string[] }
   | { action: "junk"; names: string[] };
 
+// --- Chat-proposed merge (issue #64) -----------------------------------------
+// A user-named merge the assistant prepared: the named companies, which one
+// survives, and (if the tool swapped the survivor to protect researched data) why.
+// Committed via the existing resolution commit endpoint — the assistant never merges.
+
+export interface MergeMember {
+  name: string;
+  edges: number;
+  researched: boolean;
+}
+
+export interface MergeProposal {
+  job_id: string;
+  canonical: string;
+  members: MergeMember[];
+  canonical_reason?: string;
+}
+
 // --- Client-kind classification (bulk-label end-customer stubs) ---------------
 
 export interface ClientCandidate {

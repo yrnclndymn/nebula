@@ -6,6 +6,7 @@ import type {
   CompanyDetail,
   CompanyRow,
   JobSummary,
+  MergeProposal,
   Proposal,
   Resolution,
   ResolutionDecision,
@@ -34,10 +35,12 @@ const getJson = <T>(path: string) => request<T>("GET", path);
 const postJson = <T>(path: string, body: unknown) => request<T>("POST", path, body);
 
 export const sendChat = (sessionId: string, message: string) =>
-  postJson<{ reply: string; proposals: Proposal[]; backfills: { job_id: string; field: string; total: number }[] }>(
-    "/chat",
-    { session_id: sessionId, message },
-  );
+  postJson<{
+    reply: string;
+    proposals: Proposal[];
+    backfills: { job_id: string; field: string; total: number }[];
+    merges: MergeProposal[];
+  }>("/chat", { session_id: sessionId, message });
 
 export const getBackfill = (jobId: string) => getJson<Backfill>(`/backfill/${jobId}`);
 
