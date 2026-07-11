@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchBacklog, getProposal, researchBacklog } from "./api";
-import type { BacklogRow, Proposal } from "./types";
+import { fetchBacklog, getProposal, listJobs, researchBacklog } from "./api";
+import type { BacklogRow, JobSummary, Proposal } from "./types";
 import { ProposalCard } from "./ChatPanel";
 
 // Server-side sanity cap: at most this many companies per "Research selected"
@@ -8,12 +8,20 @@ import { ProposalCard } from "./ChatPanel";
 // ceiling so the user can't build a selection the server will reject.
 const MAX_SELECT = 10;
 
+// How many recent proposal jobs to rehydrate into the activity section on open.
+const ACTIVITY_LIMIT = 25;
+
 type Emphasis = "score" | "client" | "partner";
 
 // Research backlog page (issue #31): the ranked list of un-researched stubs with
 // their score components, simple filters, multi-select, and a "Research selected"
 // trigger that runs each stub through the durable propose→review→commit flow.
 // Nothing is written to the graph until the user commits each proposal here (HITL).
+//
+// Research activity (issue #66) rehydrates from the graph on open — recent
+// proposal jobs (pending / ready / error), NOT client-session state — so jobs
+// triggered before a refresh (and any completed-but-un-reviewed proposals) survive
+// navigation instead of being stranded.
 export function BacklogModal({ onClose }: { onClose: () => void }) {
   const [rows, setRows] = useState<BacklogRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,10 +31,15 @@ export function BacklogModal({ onClose }: { onClose: () => void }) {
   const [emphasis, setEmphasis] = useState<Emphasis>("score");
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  // Proposals keyed by the backlog name they were triggered for.
-  const [triggered, setTriggered] = useState<Record<string, Proposal>>({});
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // Research activity, newest-first: rehydrated from the graph on open, then
+  // grown in-session as the user triggers/retries. The single source of truth for
+  // both the review cards below and the per-row status badge — nothing durable
+  // relies on client-session state.
+  const [activity, setActivity] = useState<Proposal[]>([]);
+  const [activityLoading, setActivityLoading] = useState(true);
 
   useEffect(() => {
     let stop = false;
@@ -39,19 +52,45 @@ export function BacklogModal({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
-  // Poll the triggered proposals until each resolves (ready/error). ProposalCard
-  // does its own polling, but we poll here too so the table row's status badge
-  // stays live; the card is only rendered once a proposal is no longer pending, so
-  // there is no duplicate polling of the same proposal.
+  // Rehydrate recent proposal jobs from the graph on open. The listing endpoint
+  // returns a compact summary; for ready proposals we fetch the full detail so the
+  // ProposalCard can render the diff (and un-strand a completed proposal for
+  // review/commit). Pending/error rows render from the summary alone.
   useEffect(() => {
-    const pending = Object.values(triggered).filter((p) => p.status === "pending");
+    let stop = false;
+    async function load() {
+      try {
+        const jobs = await listJobs({ type: "proposal", limit: ACTIVITY_LIMIT });
+        const hydrated = await Promise.all(jobs.map(hydrate));
+        if (!stop) setActivity(hydrated);
+      } catch {
+        /* activity is best-effort; the backlog table still works without it */
+      } finally {
+        if (!stop) setActivityLoading(false);
+      }
+    }
+    load();
+    return () => {
+      stop = true;
+    };
+  }, []);
+
+  // Light polling while any proposal is still researching: refresh just the
+  // pending ones until each resolves (ready/error). ProposalCard is only rendered
+  // once a proposal is no longer pending, so there's no duplicate polling.
+  useEffect(() => {
+    const pending = activity.filter((p) => p.status === "pending");
     if (pending.length === 0) return;
     const iv = setInterval(() => {
       pending.forEach(async (p) => {
         try {
           const updated = await getProposal(p.proposal_id);
           if (updated.status !== "pending") {
-            setTriggered((t) => ({ ...t, [p.name]: { ...updated, name: p.name } }));
+            setActivity((a) =>
+              a.map((x) =>
+                x.proposal_id === p.proposal_id ? { ...updated, name: updated.name || p.name } : x,
+              ),
+            );
           }
         } catch {
           /* transient — keep polling */
@@ -59,7 +98,15 @@ export function BacklogModal({ onClose }: { onClose: () => void }) {
       });
     }, 2500);
     return () => clearInterval(iv);
-  }, [triggered]);
+  }, [activity]);
+
+  // Latest proposal status per company name (activity is newest-first, so the
+  // first match wins) — drives the table's Status column.
+  const statusByName = useMemo(() => {
+    const m = new Map<string, Proposal["status"]>();
+    for (const p of activity) if (!m.has(p.name)) m.set(p.name, p.status);
+    return m;
+  }, [activity]);
 
   const view = useMemo(() => {
     const filtered = rows.filter((r) => r.mention_count >= minMentions);
@@ -90,19 +137,21 @@ export function BacklogModal({ onClose }: { onClose: () => void }) {
     });
   }
 
+  // Prepend freshly-triggered proposals so they show (and get polled) immediately.
+  function addPending(fresh: { name: string; proposal_id: string }[]) {
+    setActivity((a) => [
+      ...fresh.map((p) => ({ proposal_id: p.proposal_id, name: p.name, status: "pending" as const })),
+      ...a,
+    ]);
+  }
+
   async function research() {
     if (!selected.size || busy) return;
     setBusy(true);
     setNotice(null);
     try {
       const res = await researchBacklog([...selected]);
-      setTriggered((t) => {
-        const next = { ...t };
-        for (const { name, proposal_id } of res.proposals) {
-          next[name] = { proposal_id, name, status: "pending" };
-        }
-        return next;
-      });
+      addPending(res.proposals);
       setSelected(new Set());
     } catch (e) {
       setNotice(String(e));
@@ -111,9 +160,21 @@ export function BacklogModal({ onClose }: { onClose: () => void }) {
     }
   }
 
-  const reviewList = Object.values(triggered).filter(
-    (p) => p.status === "ready" || p.status === "error",
-  );
+  // Re-trigger an errored proposal: re-uses the same endpoint, creating a FRESH
+  // proposal for that name (issue #66).
+  async function retry(name: string) {
+    if (busy) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const res = await researchBacklog([name]);
+      addPending(res.proposals);
+    } catch (e) {
+      setNotice(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="backfill-overlay" onClick={onClose}>
@@ -184,11 +245,11 @@ export function BacklogModal({ onClose }: { onClose: () => void }) {
               </thead>
               <tbody>
                 {view.map((r) => {
-                  const p = triggered[r.name];
+                  const st = statusByName.get(r.name);
                   return (
                     <tr key={r.name}>
                       <td>
-                        {!p && (
+                        {!st && (
                           <input
                             type="checkbox"
                             checked={selected.has(r.name)}
@@ -205,7 +266,7 @@ export function BacklogModal({ onClose }: { onClose: () => void }) {
                       <td className="num">{r.client_mentions}</td>
                       <td className="num">{r.partner_mentions}</td>
                       <td className="num">{r.cloud_isv_partner_mentions || "—"}</td>
-                      <td>{p ? <StatusBadge status={p.status} /> : <span className="muted">—</span>}</td>
+                      <td>{st ? <StatusBadge status={st} /> : <span className="muted">—</span>}</td>
                     </tr>
                   );
                 })}
@@ -213,12 +274,37 @@ export function BacklogModal({ onClose }: { onClose: () => void }) {
             </table>
           )}
 
-          {reviewList.length > 0 && (
+          {(activity.length > 0 || (!activityLoading && !loading)) && (
             <div className="backlog-review">
-              <div className="diff-group-h">Proposals to review</div>
-              {reviewList.map((p) => (
-                <ProposalCard key={p.proposal_id} p={p} />
-              ))}
+              <div className="diff-group-h">Research activity</div>
+              {activityLoading ? (
+                <div className="muted small">loading recent research…</div>
+              ) : activity.length === 0 ? (
+                <div className="muted small">No recent research jobs.</div>
+              ) : (
+                activity.map((p) =>
+                  p.status === "pending" ? (
+                    <div key={p.proposal_id} className="proposal pending">
+                      🔎 researching <strong>{p.name}</strong>…{" "}
+                      <span className="muted">this can take a minute</span>
+                    </div>
+                  ) : p.status === "error" ? (
+                    <div key={p.proposal_id} className="proposal">
+                      <div>
+                        ⚠ couldn't research <strong>{p.name}</strong>
+                        {p.error ? `: ${p.error}` : ""}
+                      </div>
+                      <div className="proposal-foot">
+                        <button className="commit" disabled={busy} onClick={() => retry(p.name)}>
+                          Retry
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <ProposalCard key={p.proposal_id} p={p} />
+                  ),
+                )
+              )}
             </div>
           )}
         </div>
@@ -236,6 +322,27 @@ export function BacklogModal({ onClose }: { onClose: () => void }) {
       </div>
     </div>
   );
+}
+
+// Hydrate a compact job summary into a Proposal. Ready proposals need the full
+// record/diff (fetched per-id) so the review card can render; pending/error rows
+// render from the summary alone.
+async function hydrate(job: JobSummary): Promise<Proposal> {
+  const base: Proposal = {
+    proposal_id: job.id,
+    name: job.summary.name || job.id,
+    status: job.status as Proposal["status"],
+    discovered_website: job.summary.discovered_website,
+    error: job.summary.error,
+  };
+  if (job.status === "ready") {
+    try {
+      return await getProposal(job.id);
+    } catch {
+      return base;
+    }
+  }
+  return base;
 }
 
 function StatusBadge({ status }: { status: Proposal["status"] }) {
