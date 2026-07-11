@@ -70,6 +70,18 @@ function endId(v: string | number | NodeObject<GNode> | undefined): string {
   return String(v);
 }
 
+// The hover tooltip (float-tooltip inside force-graph) inserts nodeLabel as raw
+// HTML. Node names come from crawled/enriched data — untrusted input — so they
+// MUST be escaped or a crafted company name becomes stored XSS in the SPA.
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export function GraphView({
   seed,
   onClose,
@@ -90,6 +102,9 @@ export function GraphView({
   );
   const expanded = useRef<Set<string>>(new Set());
   const fitted = useRef(false);
+  // Bumped on every re-seed; in-flight expand fetches from a previous seed check
+  // it before merging, so a slow response can't leak into the new graph.
+  const generation = useRef(0);
 
   // Merge a fetched neighbourhood, reusing existing node objects so the running
   // simulation keeps their positions instead of resetting.
@@ -97,7 +112,15 @@ export function GraphView({
     setData((prev) => {
       const nodes = new Map(prev.nodes.map((n) => [n.id, n]));
       for (const n of g.nodes) {
-        if (!nodes.has(n.id)) nodes.set(n.id, { ...n });
+        const existing = nodes.get(n.id);
+        if (existing) {
+          // Refresh fields on refetch — a node first seen as a stub in someone
+          // else's neighbourhood gains researched/website when fetched as its
+          // own centre. Keep the object identity (sim position) + expanded flag.
+          Object.assign(existing, n, { expanded: existing.expanded });
+        } else {
+          nodes.set(n.id, { ...n });
+        }
       }
       if (expandedId) {
         const ex = nodes.get(expandedId);
@@ -116,6 +139,7 @@ export function GraphView({
   useEffect(() => {
     if (!seed) return;
     let cancelled = false;
+    generation.current += 1;
     expanded.current = new Set();
     fitted.current = false;
     setData({ nodes: [], links: [] });
@@ -152,8 +176,12 @@ export function GraphView({
       onOpenCompany(n.name); // acceptance: clicking a company node opens its drawer
       if (expanded.current.has(n.id)) return; // already expanded — no refetch
       expanded.current.add(n.id);
+      const gen = generation.current;
       fetchCompanyGraph(n.name)
-        .then((g) => merge(g, n.id))
+        .then((g) => {
+          if (gen !== generation.current) return; // graph was re-seeded meanwhile
+          merge(g, n.id);
+        })
         .catch(() => {
           /* a stub with no researched record — nothing more to expand */
         });
@@ -254,7 +282,7 @@ export function GraphView({
             height={size.h}
             nodeId="id"
             nodeRelSize={4}
-            nodeLabel={(n) => `${(n as GNode).name} · ${(n as GNode).kind}`}
+            nodeLabel={(n) => escapeHtml(`${(n as GNode).name} · ${(n as GNode).kind}`)}
             nodeCanvasObject={drawNode}
             nodePointerAreaPaint={drawNodeHit}
             linkColor={linkColor}
