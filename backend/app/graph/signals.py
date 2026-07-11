@@ -163,11 +163,10 @@ async def signals_for_company(driver: AsyncDriver, name: str, limit: int = 20) -
         MATCH (:Company {{name: $name}})-[:MENTIONED_IN]->(s:Signal)
         OPTIONAL MATCH (c:Company)-[:MENTIONED_IN]->(s)
         OPTIONAL MATCH (s)-[:FROM_SOURCE]->(src:Source)
-        RETURN {_SIGNAL_PROPS} AS signal,
-               collect(DISTINCT c.name) AS companies,
-               collect(DISTINCT src.url) AS sources
+        WITH s, collect(DISTINCT c.name) AS companies, collect(DISTINCT src.url) AS sources
         ORDER BY coalesce(s.publishedAt, s.capturedAt) DESC
         LIMIT $limit
+        RETURN {_SIGNAL_PROPS} AS signal, companies, sources
     """
     async with driver.session() as session:
         result = await session.run(cypher, name=name, limit=limit)
@@ -185,11 +184,10 @@ async def recent_signals(
         {where}
         OPTIONAL MATCH (c:Company)-[:MENTIONED_IN]->(s)
         OPTIONAL MATCH (s)-[:FROM_SOURCE]->(src:Source)
-        RETURN {_SIGNAL_PROPS} AS signal,
-               collect(DISTINCT c.name) AS companies,
-               collect(DISTINCT src.url) AS sources
+        WITH s, collect(DISTINCT c.name) AS companies, collect(DISTINCT src.url) AS sources
         ORDER BY coalesce(s.publishedAt, s.capturedAt) DESC
         LIMIT $limit
+        RETURN {_SIGNAL_PROPS} AS signal, companies, sources
     """
     params: dict = {"limit": limit}
     if kind:
