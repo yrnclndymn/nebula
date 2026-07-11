@@ -229,6 +229,92 @@ async def list_stub_companies(driver: AsyncDriver) -> list[dict]:
         return [dict(record) async for record in result]
 
 
+async def list_client_stub_candidates(driver: AsyncDriver) -> list[dict]:
+    """Stubs whose ONLY graph signal is being someone's client → propose kind='client'.
+
+    An end-customer organisation (a bank/retailer/public body dragged in via
+    HAS_CLIENT) typically enters the graph as a bare stub that is *only* ever the
+    object of a HAS_CLIENT edge: nobody's partner, no clients of its own, no
+    leadership, no topic tag, no company-type tag, no website. That exact shape is
+    what this heuristic isolates.
+
+    The query is deliberately strict — it proposes only, and only for stubs with
+    no other signal:
+      - `c.kind IS NULL` — a company already carrying an ecosystem kind (e.g. a
+        cloud provider that also happens to be someone's client) is never touched;
+        genuine dual-role companies keep their ecosystem kind.
+      - `website IS NULL` and no `TAGGED_AS` topic — an already-researched company
+        is out of scope.
+      - **no outgoing edges at all** (`outDeg = 0`): no clients of its own, no
+        outbound partnership, no topic/company-type tag, no CITES provenance.
+      - **the only incoming edges are HAS_CLIENT** (`inOther = 0`): rules out an
+        inbound partnership and any LEADS from a person.
+      - at least one inbound HAS_CLIENT (`EXISTS`), so it really is someone's client.
+
+    Purely additive to the graph read layer; like the rest of it, it skips in CI
+    when Neo4j is absent. Nothing is written — the caller reviews and commits.
+    """
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (c:Company)
+            WHERE c.kind IS NULL
+              AND c.website IS NULL
+              AND NOT coalesce(c.junk, false)
+              AND NOT (c)-[:TAGGED_AS]->(:Topic)
+              AND EXISTS { (:Company)-[:HAS_CLIENT]->(c) }
+            OPTIONAL MATCH (c)-[out]->()
+            WITH c, count(out) AS outDeg
+            OPTIONAL MATCH (c)<-[inc]-()
+            WITH c, outDeg, sum(CASE WHEN type(inc) = 'HAS_CLIENT' THEN 0 ELSE 1 END) AS inOther,
+                 sum(CASE WHEN type(inc) = 'HAS_CLIENT' THEN 1 ELSE 0 END) AS inbound
+            WHERE outDeg = 0 AND inOther = 0
+            RETURN c.name AS name, inbound
+            ORDER BY inbound DESC, name
+            """
+        )
+        return [dict(record) async for record in result]
+
+
+async def classify_as_client(driver: AsyncDriver, names: list[str]) -> int:
+    """Set kind='client' on the named companies. IDEMPOTENT.
+
+    Defensive re-check at commit time (like the merge TOCTOU guard): re-runs the
+    FULL scan predicate from `list_client_stub_candidates` — not just the cheap
+    field checks — so a node that gained any other signal while review sat open
+    (an outbound edge from an enrichment or a merge, an inbound partnership or
+    LEADS, a junk flag, a website/topic/kind) is skipped rather than mislabelled.
+    A false positive here would silently drop a real ecosystem company from the
+    research backlog, so the guard must match the definition exactly. A fresh scan
+    re-proposes against current state. Returns the count actually classified;
+    unknown names are ignored.
+    """
+    if not names:
+        return 0
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (c:Company) WHERE c.name IN $names
+              AND c.kind IS NULL
+              AND c.website IS NULL
+              AND NOT coalesce(c.junk, false)
+              AND NOT (c)-[:TAGGED_AS]->(:Topic)
+              AND EXISTS { (:Company)-[:HAS_CLIENT]->(c) }
+            OPTIONAL MATCH (c)-[out]->()
+            WITH c, count(out) AS outDeg
+            OPTIONAL MATCH (c)<-[inc]-()
+            WITH c, outDeg,
+                 sum(CASE WHEN type(inc) = 'HAS_CLIENT' THEN 0 ELSE 1 END) AS inOther
+            WHERE outDeg = 0 AND inOther = 0
+            SET c.kind = 'client', c.updatedAt = datetime()
+            RETURN count(c) AS classified
+            """,
+            names=names,
+        )
+        record = await result.single()
+    return record["classified"] if record else 0
+
+
 async def flag_junk(driver: AsyncDriver, names: list[str]) -> int:
     """Mark companies as junk so they drop out of the company/backlog lists.
 

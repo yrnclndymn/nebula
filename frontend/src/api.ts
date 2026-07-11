@@ -1,6 +1,7 @@
 import { getIdToken } from "./firebase";
 import type {
   Backfill,
+  Classification,
   CompanyDetail,
   CompanyRow,
   Proposal,
@@ -67,6 +68,15 @@ export const commitResolution = (jobId: string, decisions: ResolutionDecision[])
     `/resolution/${jobId}/commit`,
     { decisions },
   );
+
+export const scanClassification = () =>
+  postJson<{ job_id: string; status: string }>("/classification/scan", {});
+
+export const getClassification = (jobId: string) =>
+  getJson<Classification>(`/classification/${jobId}`);
+
+export const commitClassification = (jobId: string, names: string[]) =>
+  postJson<{ classified?: number; error?: string }>(`/classification/${jobId}/commit`, { names });
 
 export const fetchCompanies = () => getJson<CompanyRow[]>("/companies");
 export const fetchCompany = (name: string) =>

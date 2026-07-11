@@ -15,6 +15,7 @@ import { CompanyDrawer } from "./CompanyDrawer";
 import { GraphView } from "./GraphView";
 import { ChatPanel } from "./ChatPanel";
 import { EntityResolutionModal } from "./EntityResolution";
+import { ClientClassificationModal } from "./ClientClassification";
 import { AUTH_ENABLED, signOutUser } from "./firebase";
 
 type SortKey = "name" | "headcount" | "yearFounded" | "partnerCount" | "clientCount";
@@ -73,6 +74,7 @@ export default function App() {
   const [selected, setSelected] = useState<CompanyDetail | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [resolveOpen, setResolveOpen] = useState(false);
+  const [classifyOpen, setClassifyOpen] = useState(false);
   const [graphSeed, setGraphSeed] = useState<string | null>(null);
   const [graphOpen, setGraphOpen] = useState(false);
 
@@ -218,6 +220,9 @@ export default function App() {
           )}
           <button className="chat-toggle" onClick={() => setResolveOpen(true)} title="Dedup stub companies">
             🧩 Resolve stubs
+          </button>
+          <button className="chat-toggle" onClick={() => setClassifyOpen(true)} title="Bulk-label end-customer stubs as clients">
+            🏷 Classify clients
           </button>
           <button
             className="chat-toggle"
@@ -366,6 +371,7 @@ export default function App() {
       )}
       {chatOpen && <ChatPanel onClose={() => setChatOpen(false)} />}
       {resolveOpen && <EntityResolutionModal onClose={() => setResolveOpen(false)} />}
+      {classifyOpen && <ClientClassificationModal onClose={() => setClassifyOpen(false)} />}
     </div>
   );
 }

@@ -11,9 +11,19 @@ import re
 from pydantic import BaseModel, Field
 
 # What kind of business a company is (distinct from ownership CompanyType).
-KINDS = ("service_provider", "isv", "cloud_provider")
-# A custom field applies to one kind, or to every company.
-APPLIES_TO = KINDS + ("all",)
+# The first three are *ecosystem* players — companies worth researching. "client"
+# marks an end-customer organisation (a bank/retailer/public-sector body pulled in
+# via HAS_CLIENT) that is not an ecosystem player and is not a research target.
+ECOSYSTEM_KINDS = ("service_provider", "isv", "cloud_provider")
+KINDS = ECOSYSTEM_KINDS + ("client",)
+# A custom field applies to one kind, or to every company. DELIBERATE DECISION:
+# custom research fields are ecosystem-only — a field can target an ecosystem kind
+# (or "all") but NOT "client". Custom fields capture things we research about
+# ecosystem players (service lines, product tiers, …); end-customer orgs are not
+# researched, so letting a field target "client" would only invite dead columns.
+# ("all"-scoped fields still nominally cover clients, but clients carry no
+# researched data to fill them, so they render as blanks — see fieldApplies.)
+APPLIES_TO = ECOSYSTEM_KINDS + ("all",)
 
 
 def field_key(label: str) -> str:
@@ -67,7 +77,7 @@ class CompanyRecord(BaseModel):
     funding: str | None = None  # raw text for now; structured into :INVESTED_IN later
     notes: str | None = None
     origin: str | None = None  # who produced this record: "agent" | "sheet" | "manual"
-    kind: str | None = None  # service_provider | isv | cloud_provider
+    kind: str | None = None  # service_provider | isv | cloud_provider | client
 
     # Tags (→ nodes MERGE'd by name)
     topics: list[str] = Field(default_factory=list)  # research domains
