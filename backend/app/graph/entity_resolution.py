@@ -313,6 +313,7 @@ async def _merge_tx(tx: AsyncManagedTransaction, canonical: str, variants: list[
 
     merged: list[str] = []
     skipped: list[str] = []
+    promoted: list[str] = []  # variants no longer stubs at commit time (TOCTOU guard)
     for variant in variants:
         # Read both property maps up front. Computing the property union in
         # Python (rather than a dynamic-key `SET canon[k] = v[k]`, which needs a
@@ -320,13 +321,22 @@ async def _merge_tx(tx: AsyncManagedTransaction, canonical: str, variants: list[
         props = await tx.run(
             "MATCH (v:Company {name: $variant}) "
             "OPTIONAL MATCH (canon:Company {name: $canonical}) "
-            "RETURN properties(v) AS vp, properties(canon) AS cp",
+            "RETURN properties(v) AS vp, properties(canon) AS cp, "
+            "       (EXISTS { (v)-[:TAGGED_AS]->(:Topic) } OR v.website IS NOT NULL) AS promoted",
             canonical=canonical,
             variant=variant,
         )
         row = await props.single()
         if row is None or row["vp"] is None:
             skipped.append(variant)  # already merged / never existed — no-op
+            continue
+        if row["promoted"]:
+            # TOCTOU guard: review can sit open, and an enrichment in the meantime
+            # may have promoted this "stub" to a researched company (topic tag or
+            # website). Deleting it now would destroy researched data — skip it;
+            # a fresh scan can re-propose against current state.
+            skipped.append(variant)
+            promoted.append(variant)
             continue
         variant_props, canon_props = row["vp"], row["cp"]
 
@@ -410,4 +420,4 @@ async def _merge_tx(tx: AsyncManagedTransaction, canonical: str, variants: list[
         await tx.run("MATCH (v:Company {name: $name}) DETACH DELETE v", name=variant)
         merged.append(variant)
 
-    return {"canonical": canonical, "merged": merged, "skipped": skipped}
+    return {"canonical": canonical, "merged": merged, "skipped": skipped, "promoted": promoted}

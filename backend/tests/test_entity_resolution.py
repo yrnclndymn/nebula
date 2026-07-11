@@ -200,3 +200,106 @@ def test_merge_unknown_canonical_is_safe():
         pytest.skip("Neo4j not reachable — run `make db-up`")
     assert out["merged"] == []
     assert "error" in out
+
+
+def test_merge_skips_variant_promoted_since_scan():
+    """TOCTOU guard: a variant that gained a topic tag or website between scan
+    and commit is no longer a stub — merging would delete researched data, so it
+    must be skipped (reported under both skipped and promoted)."""
+    canon = "Umbrella __ertest__"
+    promoted_v = "Umbrella Inc __ertest__"
+
+    async def scenario():
+        try:
+            await check_connectivity()
+        except Exception:
+            return "skip"
+        d = get_driver()
+        async with d.session() as s:
+            await s.run("MATCH (n) WHERE n.name IN [$a,$b] DETACH DELETE n", a=canon, b=promoted_v)
+            await s.run(
+                """
+                MERGE (canon:Company {name:$canon})
+                MERGE (v:Company {name:$v}) SET v.website = 'https://example.invalid'
+                """,
+                canon=canon,
+                v=promoted_v,
+            )
+        result = await er.merge_companies(d, canon, [promoted_v])
+        async with d.session() as s:
+            r = await s.run("MATCH (v:Company {name:$v}) RETURN count(v) AS n", v=promoted_v)
+            survives = (await r.single())["n"]
+            await s.run("MATCH (n) WHERE n.name IN [$a,$b] DETACH DELETE n", a=canon, b=promoted_v)
+        await close_driver()
+        return result, survives
+
+    out = asyncio.run(scenario())
+    if out == "skip":
+        pytest.skip("Neo4j not reachable — run `make db-up`")
+    result, survives = out
+    assert result["merged"] == []
+    assert result["promoted"] == [promoted_v]
+    assert promoted_v in result["skipped"]
+    assert survives == 1  # the promoted node was NOT deleted
+
+
+def test_flag_junk_marks_and_excludes():
+    """flag_junk sets the junk flag (idempotently) and unknown names are ignored."""
+
+    async def scenario():
+        try:
+            await check_connectivity()
+        except Exception:
+            return "skip"
+        d = get_driver()
+        name = "Read More __ertest__"
+        async with d.session() as s:
+            await s.run("MATCH (c:Company {name:$n}) DETACH DELETE c", n=name)
+            await s.run("CREATE (:Company {name:$n})", n=name)
+        first = await er.flag_junk(d, [name, "No Such Co __ertest__"])
+        second = await er.flag_junk(d, [name])  # idempotent re-flag
+        async with d.session() as s:
+            r = await s.run("MATCH (c:Company {name:$n}) RETURN c.junk AS junk", n=name)
+            junk = (await r.single())["junk"]
+            await s.run("MATCH (c:Company {name:$n}) DETACH DELETE c", n=name)
+        await close_driver()
+        return first, second, junk
+
+    out = asyncio.run(scenario())
+    if out == "skip":
+        pytest.skip("Neo4j not reachable — run `make db-up`")
+    first, second, junk = out
+    assert first == 1  # only the existing node counted; unknown name ignored
+    assert second == 1
+    assert junk is True
+
+
+def test_add_aliases_appends_without_duplicates():
+    """add_aliases records new spellings, never duplicates, never the canonical
+    itself, and returns [] for an unknown canonical."""
+
+    async def scenario():
+        try:
+            await check_connectivity()
+        except Exception:
+            return "skip"
+        d = get_driver()
+        canon = "Hooli __ertest__"
+        async with d.session() as s:
+            await s.run("MATCH (c:Company {name:$n}) DETACH DELETE c", n=canon)
+            await s.run("CREATE (:Company {name:$n})", n=canon)
+        first = await er.add_aliases(d, canon, ["Hooli Inc __ertest__", canon, "  "])
+        second = await er.add_aliases(d, canon, ["Hooli Inc __ertest__", "Hooli LLC __ertest__"])
+        unknown = await er.add_aliases(d, "No Such Co __ertest__", ["X"])
+        async with d.session() as s:
+            await s.run("MATCH (c:Company {name:$n}) DETACH DELETE c", n=canon)
+        await close_driver()
+        return first, second, unknown
+
+    out = asyncio.run(scenario())
+    if out == "skip":
+        pytest.skip("Neo4j not reachable — run `make db-up`")
+    first, second, unknown = out
+    assert first == ["Hooli Inc __ertest__"]  # canonical + blank filtered out
+    assert sorted(second) == ["Hooli Inc __ertest__", "Hooli LLC __ertest__"]  # no dupes
+    assert unknown == []
