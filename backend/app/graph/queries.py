@@ -439,6 +439,93 @@ async def research_backlog(
         return [record.data() async for record in result]
 
 
+# Weights for the explainable similarity score (issue #32). Shared *relationships*
+# (clients, partners) are the strongest signal — two companies serving the same
+# customer or allied to the same partner are genuinely close — so they weigh 3.
+# Shared research topics weigh 2 (same space, weaker than a shared edge). Same kind
+# and same country each add 1: cheap categorical hints that break ties without
+# drowning out real overlap.
+_SIM_W_CLIENT = 3
+_SIM_W_PARTNER = 3
+_SIM_W_TOPIC = 2
+_SIM_W_KIND = 1
+_SIM_W_COUNTRY = 1
+
+# Default / maximum number of similar companies returned.
+SIMILAR_DEFAULT = 5
+SIMILAR_MAX = 20
+
+
+async def similar_companies(
+    driver: AsyncDriver, name: str, *, limit: int = SIMILAR_DEFAULT
+) -> list[dict] | None:
+    """Researched companies most similar to `name`, with an explainable score (issue #32).
+
+    Similarity is a weighted overlap between two *researched* companies (both
+    TAGGED_AS some topic); junk-flagged stubs and end-customer stubs (kind='client')
+    are excluded on both sides, as is `name` itself. Each component is returned so
+    the score is fully explainable in the UI:
+
+        shared_clients   distinct companies both parties HAS_CLIENT (directed)
+        shared_partners  distinct companies both parties PARTNERS_WITH (undirected,
+                         matching how partnerships are traversed elsewhere)
+        shared_topics    distinct topics both are TAGGED_AS
+        same_kind        both have the same non-null kind
+        same_country     both have the same non-null hqCountry
+
+        score = 3*shared_clients + 3*shared_partners + 2*shared_topics
+                + same_kind + same_country
+
+    Only candidates with score > 0 surface. Ordering is deterministic (score desc,
+    then name asc) and capped at `limit`. Returns None if `name` is not a company at
+    all (so the route can 404); an empty list means the company exists but is either
+    un-researched or has no scoring overlap with any other researched company.
+    """
+    cypher = """
+        MATCH (x:Company {name: $name})
+        WHERE EXISTS { (x)-[:TAGGED_AS]->(:Topic) }
+          AND NOT coalesce(x.junk, false)
+          AND coalesce(x.kind, '') <> 'client'
+        MATCH (y:Company)
+        WHERE y <> x
+          AND EXISTS { (y)-[:TAGGED_AS]->(:Topic) }
+          AND NOT coalesce(y.junk, false)
+          AND coalesce(y.kind, '') <> 'client'
+        WITH x, y,
+             COUNT { (x)-[:HAS_CLIENT]->(c:Company) WHERE (y)-[:HAS_CLIENT]->(c) } AS shared_clients,
+             COUNT { (x)-[:PARTNERS_WITH]-(p:Company) WHERE (y)-[:PARTNERS_WITH]-(p) } AS shared_partners,
+             COUNT { (x)-[:TAGGED_AS]->(t:Topic) WHERE (y)-[:TAGGED_AS]->(t) } AS shared_topics,
+             (x.kind IS NOT NULL AND x.kind = y.kind) AS same_kind,
+             (x.hqCountry IS NOT NULL AND x.hqCountry = y.hqCountry) AS same_country
+        WITH y.name AS name, shared_clients, shared_partners, shared_topics,
+             same_kind, same_country,
+             $wClient * shared_clients + $wPartner * shared_partners
+                 + $wTopic * shared_topics
+                 + $wKind * (CASE WHEN same_kind THEN 1 ELSE 0 END)
+                 + $wCountry * (CASE WHEN same_country THEN 1 ELSE 0 END) AS score
+        WHERE score > 0
+        RETURN name, score, shared_clients, shared_partners, shared_topics,
+               same_kind, same_country
+        ORDER BY score DESC, name ASC
+        LIMIT $limit
+    """
+    async with driver.session() as session:
+        exists = await session.run("MATCH (c:Company {name: $name}) RETURN c.name AS n", name=name)
+        if await exists.single() is None:
+            return None
+        result = await session.run(
+            cypher,
+            name=name,
+            wClient=_SIM_W_CLIENT,
+            wPartner=_SIM_W_PARTNER,
+            wTopic=_SIM_W_TOPIC,
+            wKind=_SIM_W_KIND,
+            wCountry=_SIM_W_COUNTRY,
+            limit=limit,
+        )
+        return [record.data() async for record in result]
+
+
 # Reject anything that could mutate the graph; run_read_cypher is read-only.
 _WRITE_KEYWORDS = re.compile(
     r"\b(CREATE|MERGE|DELETE|SET|REMOVE|DROP|FOREACH|LOAD\s+CSV|CALL\s*\{)\b",
