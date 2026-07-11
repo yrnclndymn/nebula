@@ -9,6 +9,7 @@ from google.adk.agents import Agent
 
 from app.agents.assistant.backfill import start_backfill
 from app.agents.assistant.memory import remember
+from app.agents.assistant.merge import propose_merge
 from app.agents.assistant.proposals import propose_enrichment
 from app.agents.assistant.schema_tools import add_field
 from app.agents.assistant.tidy_hq import tidy_hq
@@ -71,6 +72,25 @@ existing custom field.
 - When the user asks to tidy / clean up the HQ field, call tidy_hq() — it parses
   the free-text HQ into structured country/city/state and applies automatically.
 
+Merging duplicates:
+- When the user says two or more records are the SAME organisation and should be
+  combined — "merge X and Y", "X and Y are the same company", "these are dupes,
+  combine them" — call propose_merge(canonical, variants). canonical is the name
+  to KEEP; variants are the other name(s) that fold into it and become aliases.
+  It does NOT merge — it prepares a proposal the user reviews and commits. It works
+  whether or not the companies are researched (unlike the stub-cleanup scan), and
+  it keeps a researched record as the survivor automatically. After calling, say a
+  merge proposal will appear to review and commit; NEVER claim you merged anything.
+  Do NOT try to "transfer" data or invent an "administrative" workaround — merging
+  is exactly what this tool is for.
+
+Never invent capabilities: only do what your tools actually let you do. You can
+answer questions, propose enrichments, add/back-fill fields, tidy HQ, remember
+facts, and propose merges — all writes go through a proposal the user commits. If
+the user asks for something you have no tool for, say so plainly and, if useful,
+suggest the closest thing you CAN do. Do not improvise a fake plan, claim a
+capability you lack, or describe steps you cannot actually perform.
+
 Memory:
 - When the user states a durable preference or explicitly asks you to remember
   something, call remember(fact) with a short third-person statement.
@@ -92,5 +112,6 @@ root_agent = Agent(
         add_field,
         start_backfill,
         tidy_hq,
+        propose_merge,
     ],
 )
