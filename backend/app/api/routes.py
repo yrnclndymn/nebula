@@ -6,6 +6,11 @@ from pydantic import BaseModel
 
 from app.agents.assistant.backfill import commit_backfill, get_backfill
 from app.agents.assistant.proposals import commit_proposal, get_proposal
+from app.agents.assistant.resolution import (
+    commit_resolution,
+    get_resolution,
+    start_resolution,
+)
 from app.agents.assistant.service import respond
 from app.graph import cache, jobs, queries
 from app.graph.driver import check_connectivity, get_driver
@@ -144,6 +149,37 @@ class BackfillCommitRequest(BaseModel):
 async def backfill_commit(job_id: str, req: BackfillCommitRequest) -> dict:
     """Write selected back-fill rows (companies=null commits all) with provenance."""
     result = await commit_backfill(job_id, req.companies)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.post("/resolution/scan")
+async def resolution_scan() -> dict:
+    """Start a background scan for duplicate/junk company stubs. Returns a job id
+    to poll; nothing is merged until the user commits reviewed decisions."""
+    return await start_resolution()
+
+
+@router.get("/resolution/{job_id}")
+async def resolution_status(job_id: str) -> dict:
+    """Poll an entity-resolution scan; proposed clusters + junk fill in when ready."""
+    job = await get_resolution(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="unknown resolution job")
+    return job
+
+
+class ResolutionCommitRequest(BaseModel):
+    # Each decision: {"action": "merge"|"alias"|"junk", ...}. Merges are
+    # irreversible — this endpoint is the human-in-the-loop commit step.
+    decisions: list[dict]
+
+
+@router.post("/resolution/{job_id}/commit")
+async def resolution_commit(job_id: str, req: ResolutionCommitRequest) -> dict:
+    """Apply reviewed entity-resolution decisions (merge / alias / junk)."""
+    result = await commit_resolution(job_id, req.decisions)
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
     return result

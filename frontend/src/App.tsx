@@ -13,6 +13,7 @@ import type { CompanyDetail, CompanyRow, FieldDef } from "./types";
 import { fieldApplies, formatCustom, KINDS, kindLabel } from "./types";
 import { CompanyDrawer } from "./CompanyDrawer";
 import { ChatPanel } from "./ChatPanel";
+import { EntityResolutionModal } from "./EntityResolution";
 import { AUTH_ENABLED, signOutUser } from "./firebase";
 
 type SortKey = "name" | "headcount" | "yearFounded" | "partnerCount" | "clientCount";
@@ -70,6 +71,7 @@ export default function App() {
 
   const [selected, setSelected] = useState<CompanyDetail | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  const [resolveOpen, setResolveOpen] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -206,6 +208,9 @@ export default function App() {
               ↺ Columns
             </button>
           )}
+          <button className="chat-toggle" onClick={() => setResolveOpen(true)} title="Dedup stub companies">
+            🧩 Resolve stubs
+          </button>
           <button className="chat-toggle" onClick={() => setChatOpen((v) => !v)}>
             💬 Assistant
           </button>
@@ -334,6 +339,7 @@ export default function App() {
         />
       )}
       {chatOpen && <ChatPanel onClose={() => setChatOpen(false)} />}
+      {resolveOpen && <EntityResolutionModal onClose={() => setResolveOpen(false)} />}
     </div>
   );
 }

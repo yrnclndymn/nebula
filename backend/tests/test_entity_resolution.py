@@ -1,0 +1,202 @@
+"""Entity resolution: detection heuristics (pure, no DB) + merge graph surgery
+(skips without Neo4j, like the rest of the graph layer). Fictional names only.
+"""
+
+import asyncio
+
+import pytest
+
+from app.graph import entity_resolution as er
+from app.graph.driver import check_connectivity, close_driver, get_driver
+from app.graph.schema import apply_schema
+
+# --- Normalisation / legal-suffix stripping (pure) ---------------------------
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("Acme, LLC", "acme"),
+        ("Acme Inc", "acme"),
+        ("Acme Ltd.", "acme"),
+        ("The Globex Company", "globex"),
+        ("Globex GmbH", "globex"),
+        ("Acme & Sons", "acme sons"),
+        ("Initech Corporation", "initech"),
+        ("  Umbrella   Corp  ", "umbrella"),
+    ],
+)
+def test_normalize_strips_suffixes_and_noise(name, expected):
+    assert er.normalize_name(name) == expected
+
+
+def test_normalize_keeps_descriptive_words():
+    # "Bank" / "Labs" are descriptive, not legal forms — they must survive.
+    assert er.normalize_name("Acme Bank Inc") == "acme bank"
+    assert er.normalize_name("Globex Labs LLC") == "globex labs"
+
+
+def test_normalize_all_legal_tokens_does_not_vanish():
+    # A name made only of legal/stop tokens keeps something rather than "".
+    assert er.normalize_name("The Company") != ""
+
+
+# --- Variant cluster detection (pure) ----------------------------------------
+
+
+def test_detects_legal_suffix_variants():
+    clusters = er.detect_variant_clusters(["Acme", "Acme Inc", "Acme, LLC", "Globex"])
+    assert len(clusters) == 1
+    cluster = clusters[0]
+    assert cluster["reason"] == "normalized"
+    assert cluster["members"] == ["Acme", "Acme Inc", "Acme, LLC"]
+    assert cluster["canonical"] in cluster["members"]
+
+
+def test_detects_containment_variant():
+    clusters = er.detect_variant_clusters(["Initech", "Initech Digital"])
+    assert len(clusters) == 1
+    assert clusters[0]["reason"] == "containment"
+    assert set(clusters[0]["members"]) == {"Initech", "Initech Digital"}
+
+
+def test_short_token_does_not_chain_unrelated_names():
+    # "AB" is < 4 chars normalised, so it must NOT glue "AB Systems" to "AB Foods".
+    clusters = er.detect_variant_clusters(["AB", "AB Systems", "AB Foods"])
+    joined = {frozenset(c["members"]) for c in clusters}
+    assert frozenset({"AB Systems", "AB Foods"}) not in joined
+
+
+def test_distinct_companies_are_not_clustered():
+    assert er.detect_variant_clusters(["Acme", "Globex", "Initech", "Umbrella"]) == []
+
+
+def test_canonical_prefers_most_descriptive():
+    clusters = er.detect_variant_clusters(["Acme", "Acme Digital Partners"])
+    # Most normalised tokens wins as the default survivor.
+    assert clusters[0]["canonical"] == "Acme Digital Partners"
+
+
+def test_singletons_are_dropped():
+    assert er.detect_variant_clusters(["Acme"]) == []
+
+
+# --- Junk heuristic (pure) ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["Read more", "Our Clients", "click here", "© 2026", "   ", "12345", "Privacy Policy"],
+)
+def test_junk_flags_noise(name):
+    assert er.looks_like_junk(name) is True
+
+
+@pytest.mark.parametrize("name", ["Acme", "Globex Labs", "Initech", "Hooli"])
+def test_junk_keeps_real_names(name):
+    assert er.looks_like_junk(name) is False
+
+
+# --- Merge graph surgery (needs Neo4j) ---------------------------------------
+
+CANON = "Acme __ertest__"
+VARIANT = "Acme Inc __ertest__"
+CLIENT_OF = "Globex __ertest__"
+PARTNER = "Initech __ertest__"
+SOURCE_URL = "https://example.invalid/ertest"
+
+
+def test_merge_repoints_edges_unions_props_and_aliases():
+    async def scenario():
+        try:
+            await check_connectivity()
+        except Exception:
+            return "skip"
+        d = get_driver()
+        await apply_schema(d)
+        async with d.session() as s:
+            # Canonical is a bare stub; the variant carries the edges + a prop.
+            # A partner points AT the variant (incoming edge) to exercise both
+            # directions and the self-loop guard.
+            await s.run(
+                """
+                MERGE (canon:Company {name:$canon})
+                MERGE (v:Company {name:$variant}) SET v.headcount = 7
+                MERGE (client:Company {name:$client})
+                MERGE (partner:Company {name:$partner})
+                MERGE (src:Source {url:$src})
+                MERGE (v)-[:HAS_CLIENT]->(client)
+                MERGE (partner)-[:PARTNERS_WITH]->(v)
+                MERGE (canon)-[:PARTNERS_WITH]->(v)
+                MERGE (v)-[r:CITES {field:'headcount'}]->(src)
+                  SET r.value = '7'
+                """,
+                canon=CANON,
+                variant=VARIANT,
+                client=CLIENT_OF,
+                partner=PARTNER,
+                src=SOURCE_URL,
+            )
+
+        result = await er.merge_companies(d, CANON, [VARIANT, CANON, "Nope __ertest__"])
+
+        async with d.session() as s:
+            row = await (
+                await s.run(
+                    """
+                    MATCH (canon:Company {name:$canon})
+                    RETURN canon.headcount AS headcount,
+                           canon.aliases AS aliases,
+                           EXISTS { (canon)-[:HAS_CLIENT]->(:Company {name:$client}) } AS hasClient,
+                           EXISTS { (:Company {name:$partner})-[:PARTNERS_WITH]->(canon) } AS hasPartner,
+                           EXISTS { (canon)-[:CITES]->(:Source {url:$src}) } AS hasCite,
+                           EXISTS { (canon)-[:PARTNERS_WITH]->(canon) } AS selfLoop,
+                           EXISTS { (:Company {name:$variant}) } AS variantLives
+                    """,
+                    canon=CANON,
+                    variant=VARIANT,
+                    client=CLIENT_OF,
+                    partner=PARTNER,
+                    src=SOURCE_URL,
+                )
+            ).single()
+        async with d.session() as s:
+            await s.run(
+                "MATCH (c:Company) WHERE c.name IN $names DETACH DELETE c",
+                names=[CANON, VARIANT, CLIENT_OF, PARTNER],
+            )
+            await s.run("MATCH (src:Source {url:$src}) DETACH DELETE src", src=SOURCE_URL)
+        await close_driver()
+        return result, row
+
+    out = asyncio.run(scenario())
+    if out == "skip":
+        pytest.skip("Neo4j not reachable — run `make db-up`")
+    result, row = out
+    assert result["merged"] == [VARIANT]  # canonical + unknown skipped, not errored
+    assert VARIANT in result["skipped"] or "Nope __ertest__" in result["skipped"]
+    assert row["variantLives"] is False  # variant node deleted
+    assert row["headcount"] == 7  # scalar unioned into the canonical's gap
+    assert VARIANT in row["aliases"]  # variant name recorded as an alias
+    assert row["hasClient"] is True  # outgoing edge re-pointed
+    assert row["hasPartner"] is True  # incoming edge re-pointed
+    assert row["hasCite"] is True  # provenance re-pointed
+    assert row["selfLoop"] is False  # variant↔canonical edge dropped, not looped
+
+
+def test_merge_unknown_canonical_is_safe():
+    async def scenario():
+        try:
+            await check_connectivity()
+        except Exception:
+            return "skip"
+        d = get_driver()
+        result = await er.merge_companies(d, "Ghost __ertest__", ["Whatever __ertest__"])
+        await close_driver()
+        return result
+
+    out = asyncio.run(scenario())
+    if out == "skip":
+        pytest.skip("Neo4j not reachable — run `make db-up`")
+    assert out["merged"] == []
+    assert "error" in out
