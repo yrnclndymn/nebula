@@ -91,12 +91,31 @@ async def commit_resolution(job_id: str, decisions: list[dict]) -> dict:
     # stays False), so a stale scan can never delete a node that became researched.
     allow_researched = bool(job.get("scoped_merge"))
 
+    # Decisions must be drawn from what THIS job proposed. Without this check any
+    # authenticated caller could mint a scoped_merge job and then commit arbitrary
+    # canonical/variants under the relaxed guard — the relaxation would bind to the
+    # job while the names came from the request. A decision naming anything outside
+    # the job's clusters (or junk list) is rejected, not applied.
+    cluster_sets = [
+        {m.get("name") for m in c.get("members", [])} | {c.get("canonical")}
+        for c in job.get("clusters", [])
+    ]
+    proposed_junk = {m.get("name") for m in job.get("junk", [])}
+
+    def _within_one_cluster(names: set) -> bool:
+        return any(names <= cluster for cluster in cluster_sets)
+
     merged = 0
     aliased = 0
     flagged = 0
+    rejected = 0
     for decision in decisions:
         action = decision.get("action")
         if action == "merge":
+            names = {decision.get("canonical", "")} | set(decision.get("variants", []))
+            if not _within_one_cluster(names):
+                rejected += 1
+                continue
             result = await er.merge_companies(
                 driver,
                 decision.get("canonical", ""),
@@ -105,14 +124,24 @@ async def commit_resolution(job_id: str, decisions: list[dict]) -> dict:
             )
             merged += len(result.get("merged", []))
         elif action == "alias":
+            names = {decision.get("canonical", "")} | set(decision.get("aliases", []))
+            if not _within_one_cluster(names):
+                rejected += 1
+                continue
             aliases = await er.add_aliases(
                 driver, decision.get("canonical", ""), decision.get("aliases", [])
             )
             aliased += len(aliases)
         elif action == "junk":
-            flagged += await er.flag_junk(driver, decision.get("names", []))
+            names = set(decision.get("names", []))
+            all_proposed = proposed_junk.union(*cluster_sets) if cluster_sets else proposed_junk
+            allowed = names & all_proposed
+            if names - allowed:
+                rejected += 1
+            if allowed:
+                flagged += await er.flag_junk(driver, sorted(allowed))
 
     # Flip status so a stale double-POST is rejected by the ready-guard above
     # (the ops are idempotent-safe, but there is no reason to redo them).
     await jobs.update_job(job_id, {**job, "committed": True}, status="committed")
-    return {"merged": merged, "aliased": aliased, "flagged": flagged}
+    return {"merged": merged, "aliased": aliased, "flagged": flagged, "rejected": rejected}

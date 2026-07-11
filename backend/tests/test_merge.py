@@ -199,3 +199,89 @@ def test_scoped_commit_merges_researched_variant():
     assert row["headcount"] == 9  # variant's unique prop filled the gap
     assert variant in row["aliases"]  # variant name recorded as an alias
     assert row["hasClient"] is True  # variant's edge re-pointed onto the survivor
+
+
+def test_commit_rejects_decisions_outside_the_job_proposal(monkeypatch):
+    """The relaxed guard binds to the JOB — a commit naming companies the job never
+    proposed must be rejected, not applied (review finding: otherwise any authed
+    caller could mint a scoped job and merge arbitrary names under the relaxation)."""
+    from app.agents.assistant import resolution as res
+
+    job = {
+        "status": "ready",
+        "scoped_merge": True,
+        "clusters": [
+            {
+                "canonical": "Acme __mergetest__",
+                "members": [
+                    {"name": "Acme __mergetest__", "edges": 3},
+                    {"name": "Acme Inc __mergetest__", "edges": 1},
+                ],
+                "reason": "scoped",
+            }
+        ],
+        "junk": [],
+    }
+    calls: list = []
+
+    async def fake_get_job(_id):
+        return dict(job)
+
+    async def fake_update_job(*a, **k):
+        return None
+
+    async def fake_merge(_driver, canonical, variants, *, allow_researched=False):
+        calls.append((canonical, tuple(variants), allow_researched))
+        return {"merged": list(variants), "skipped": [], "promoted": []}
+
+    monkeypatch.setattr(res.jobs, "get_job", fake_get_job)
+    monkeypatch.setattr(res.jobs, "update_job", fake_update_job)
+    monkeypatch.setattr(res.er, "merge_companies", fake_merge)
+    monkeypatch.setattr(res, "get_driver", lambda: None)
+
+    out = asyncio.run(
+        res.commit_resolution(
+            "j1",
+            [
+                # in-proposal: applied
+                {
+                    "action": "merge",
+                    "canonical": "Acme __mergetest__",
+                    "variants": ["Acme Inc __mergetest__"],
+                },
+                # NOT proposed by this job: rejected, never reaches merge_companies
+                {
+                    "action": "merge",
+                    "canonical": "Globex __mergetest__",
+                    "variants": ["Initech __mergetest__"],
+                },
+            ],
+        )
+    )
+    assert out["merged"] == 1
+    assert out["rejected"] == 1
+    assert len(calls) == 1 and calls[0][0] == "Acme __mergetest__"
+
+
+def test_start_merge_surfaces_unknown_canonical(monkeypatch):
+    """A typo'd canonical must be surfaced, not silently replaced by another
+    company the user never named (review finding)."""
+    from app.agents.assistant import merge as mg
+
+    async def fake_lookup(_driver, names):
+        # canonical "Acme Typo" not found; two variants exist
+        return [
+            {"name": "Globex __mergetest__", "researched": False, "edges": 1},
+            {"name": "Globex Ltd __mergetest__", "researched": False, "edges": 1},
+        ]
+
+    monkeypatch.setattr(mg, "_lookup_members", fake_lookup)
+    monkeypatch.setattr(mg, "get_driver", lambda: None)
+    out = asyncio.run(
+        mg.start_merge(
+            "Acme Typo __mergetest__", ["Globex __mergetest__", "Globex Ltd __mergetest__"]
+        )
+    )
+    assert out["merged"] == 0
+    assert "couldn't find" in out["note"]
+    assert "Acme Typo __mergetest__" in out["note"]

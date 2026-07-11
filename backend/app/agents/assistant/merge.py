@@ -76,7 +76,17 @@ async def start_merge(canonical: str, variants: list[str]) -> dict:
         return {"merged": 0, "note": f"need two known companies to merge; found {found}"}
 
     by_name = {m["name"]: m for m in members}
-    chosen = canonical if canonical in by_name else members[0]["name"]
+    if canonical not in by_name:
+        # The named survivor doesn't exist — surface it rather than silently
+        # substituting another company the user never named (review finding).
+        return {
+            "merged": 0,
+            "note": (
+                f"couldn't find a company named {canonical!r} to keep as the survivor — "
+                "no merge proposed; check the exact name"
+            ),
+        }
+    chosen = canonical
     canonical_reason = ""
     # Protect researched data: the survivor must be a researched node when one is
     # present. If the user's canonical is a bare stub but a variant is researched,
