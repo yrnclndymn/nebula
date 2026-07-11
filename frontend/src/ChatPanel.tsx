@@ -58,7 +58,16 @@ function ChipGroup({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-export function ProposalCard({ p: initial }: { p: Proposal }) {
+// onDiscard: optional override for the Discard button. In chat, discard is a
+// local hide (the card just collapses); host pages that persist activity (the
+// backlog) pass a handler that actually dismisses the underlying job (#73).
+export function ProposalCard({
+  p: initial,
+  onDiscard,
+}: {
+  p: Proposal;
+  onDiscard?: () => void;
+}) {
   const [prop, setProp] = useState<Proposal>(initial);
   const [primary, setPrimary] = useState<CommitStatus>("idle");
   const [others, setOthers] = useState<CommitStatus>("idle");
@@ -306,7 +315,7 @@ export function ProposalCard({ p: initial }: { p: Proposal }) {
                       ? `Commit ${focusLabel}`
                       : "Commit all changes"}
                 </button>
-                <button className="discard" onClick={() => setPrimary("discarded")}>
+                <button className="discard" onClick={() => (onDiscard ? onDiscard() : setPrimary("discarded"))}>
                   Discard
                 </button>
               </>

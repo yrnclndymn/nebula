@@ -48,7 +48,10 @@ export function ActivityModal({ onClose }: { onClose: () => void }) {
   // un-reviewed work, so those confirm first; pending jobs never get the button.
   async function dismiss(job: JobSummary) {
     const target = job.summary.name || job.id;
-    if (job.status === "ready" && !window.confirm(`Dismiss the un-reviewed job for ${target}?`)) {
+    // Committed proposals keep status "ready" by design (two-step commit) — only
+    // genuinely un-reviewed ready jobs get the confirmation.
+    const unreviewed = job.status === "ready" && !job.summary.committed;
+    if (unreviewed && !window.confirm(`Dismiss the un-reviewed job for ${target}?`)) {
       return;
     }
     try {

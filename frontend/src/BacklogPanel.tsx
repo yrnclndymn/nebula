@@ -331,16 +331,9 @@ export function BacklogModal({ onClose }: { onClose: () => void }) {
                       </div>
                     </div>
                   ) : (
-                    <div key={p.proposal_id} className="activity-entry">
-                      <ProposalCard p={p} />
-                      <button
-                        className="discard small activity-dismiss"
-                        onClick={() => dismiss(p)}
-                        title="Remove this job from the activity list"
-                      >
-                        ✕ Dismiss
-                      </button>
-                    </div>
+                    // The card's own Discard is wired to real dismissal here —
+                    // one control, one behaviour (review finding on #74).
+                    <ProposalCard key={p.proposal_id} p={p} onDiscard={() => dismiss(p)} />
                   ),
                 )
               )}
