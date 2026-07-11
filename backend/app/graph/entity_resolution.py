@@ -8,7 +8,9 @@ money, so this module lets a human:
 
   - **merge** variant stubs into a canonical node (relationships re-pointed,
     properties unioned, provenance kept, variant names recorded as aliases);
-  - **alias** extra spellings onto a canonical without a node to delete;
+  - **alias** extra spellings onto a canonical without a node to delete
+    (API-only for now — the review modal emits merge/junk; the endpoint is
+    ready if a UI wants it);
   - **junk-flag** a node so it drops out of the company/backlog lists.
 
 Nothing here writes on its own. Detection (`detect_variant_clusters`) only

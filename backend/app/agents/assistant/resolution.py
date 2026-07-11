@@ -103,5 +103,7 @@ async def commit_resolution(job_id: str, decisions: list[dict]) -> dict:
         elif action == "junk":
             flagged += await er.flag_junk(driver, decision.get("names", []))
 
-    await jobs.update_job(job_id, {**job, "committed": True})
+    # Flip status so a stale double-POST is rejected by the ready-guard above
+    # (the ops are idempotent-safe, but there is no reason to redo them).
+    await jobs.update_job(job_id, {**job, "committed": True}, status="committed")
     return {"merged": merged, "aliased": aliased, "flagged": flagged}
