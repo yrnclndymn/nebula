@@ -9,6 +9,7 @@ which writes the value + a provenance citation.
 import uuid
 from contextvars import ContextVar
 
+from app.budget import BudgetExhausted, budget_for, charge_company, use_budget
 from app.graph import jobs, queries
 from app.graph.driver import get_driver
 from app.tools.field_extract import extract_field
@@ -122,28 +123,61 @@ async def run_backfill_job(job_id: str) -> None:
         missing_key,
         job.get("company") or None,
     )
+    # Per-run budget: defaults for "backfill" from settings, overridable by the
+    # job's payload ("budget" dict). None = unlimited (backwards compatible). The
+    # tool helpers (fetch_page / web_search / generate_with_retry) charge it as
+    # they spend; the companies cap is charged here, per iteration.
+    budget = budget_for("backfill", job.get("budget"))
     rows: list[dict] = []
-    for company in companies:
-        try:
-            result = await extract_field(
-                company["website"], field_def["label"], field_def["description"], field_def["type"]
+    exhausted: BudgetExhausted | None = None
+    with use_budget(budget):
+        for company in companies:
+            try:
+                # Charge the company BEFORE its work: on the cap, stop cleanly
+                # with the rows done so far kept (never lose completed work).
+                charge_company()
+                result = await extract_field(
+                    company["website"],
+                    field_def["label"],
+                    field_def["description"],
+                    field_def["type"],
+                )
+            except BudgetExhausted as exc:
+                # A page/LLM cap tripped mid-company (or the companies cap above):
+                # the partial company is dropped, prior rows stay reviewable.
+                exhausted = exc
+                break
+            except Exception as exc:  # noqa: BLE001
+                result = {
+                    "value": [] if field_def["type"] == "list" else "",
+                    "source": "",
+                    "error": str(exc),
+                }
+            rows.append(
+                {
+                    "company": company["name"],
+                    "value": result["value"],
+                    "source": result.get("source", ""),
+                    "committed": False,
+                }
             )
-        except Exception as exc:  # noqa: BLE001
-            result = {
-                "value": [] if field_def["type"] == "list" else "",
-                "source": "",
-                "error": str(exc),
-            }
-        rows.append(
-            {
-                "company": company["name"],
-                "value": result["value"],
-                "source": result.get("source", ""),
-                "committed": False,
-            }
-        )
-        await jobs.update_job(job_id, {**job, "rows": rows, "done": len(rows)})
-    await jobs.update_job(job_id, {**job, "rows": rows, "done": len(rows)}, status="ready")
+            await jobs.update_job(job_id, {**job, "rows": rows, "done": len(rows)})
+
+    final = {**job, "rows": rows, "done": len(rows)}
+    if exhausted is not None:
+        # Record which cap stopped the run and how far it got. Status stays
+        # "ready" — the completed rows are still reviewable/committable; a budget
+        # cap is a graceful stop, not an error.
+        final["budget_exhausted"] = {
+            "limit": exhausted.limit,
+            "cap": exhausted.cap,
+            "reached": exhausted.count,
+            "done": len(rows),
+            "total": job.get("total", len(companies)),
+        }
+        if budget is not None:
+            final["budget_usage"] = budget.usage()
+    await jobs.update_job(job_id, final, status="ready")
 
 
 async def get_backfill(job_id: str) -> dict | None:
