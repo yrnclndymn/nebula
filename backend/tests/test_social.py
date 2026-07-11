@@ -70,6 +70,14 @@ def test_find_social_links_empty_when_none_present():
     assert find_social_links("<p>no socials here</p>") == {}
 
 
+def test_handles_protocol_relative_hrefs():
+    # Footer icons emitted as //linkedin.com/... must still be found (and canonicalised).
+    html = '<a href="//linkedin.com/company/acme">in</a><a href="//twitter.com/acme">tw</a>'
+    social = find_social_links(html)
+    assert social["linkedin"] == "https://www.linkedin.com/company/acme"
+    assert social["twitter"] == "https://twitter.com/acme"
+
+
 def test_pick_rejects_lookalike_host():
     # A look-alike host must NOT be matched as LinkedIn at the pick layer either, so
     # the two layers agree and nothing gets surfaced as the company's LinkedIn.

@@ -45,6 +45,17 @@ def social_domains_for(label: str) -> tuple[str, ...]:
     return ()
 
 
+def _ensure_scheme(url: str) -> str:
+    """Give a URL a scheme so urlparse populates netloc — handling protocol-relative
+    (`//linkedin.com/...`) and bare (`linkedin.com/...`) hrefs alike."""
+    u = url.strip()
+    if u.startswith("//"):
+        return "https:" + u
+    if "://" not in u:
+        return "https://" + u
+    return u
+
+
 def _href_matches(href: str, fragment: str) -> bool:
     """Does an href match a "host[/path]" domain fragment on HOST BOUNDARIES?
 
@@ -53,7 +64,7 @@ def _href_matches(href: str, fragment: str) -> bool:
     fragment must prefix the href's path (so `/company` is preferred over a bare host).
     """
     host_frag, _, path_frag = fragment.partition("/")
-    parsed = urlparse(href if "://" in href else "https://" + href)
+    parsed = urlparse(_ensure_scheme(href))
     host = parsed.netloc.lower()
     if host != host_frag and not host.endswith("." + host_frag):
         return False
@@ -74,8 +85,8 @@ def pick_social_href(html: str, domains: tuple[str, ...]) -> str | None:
     for pref in domains:  # prefer a company/profile path over a bare domain
         for h in hits:
             if _href_matches(h, pref):
-                return h.split("?")[0]
-    return hits[0].split("?")[0]
+                return _ensure_scheme(h).split("?")[0]
+    return _ensure_scheme(hits[0]).split("?")[0]
 
 
 def normalize_linkedin(url: str) -> str:
@@ -84,8 +95,7 @@ def normalize_linkedin(url: str) -> str:
     slash. A non-LinkedIn URL is returned unchanged."""
     if not url:
         return url
-    raw = url.strip()
-    parsed = urlparse(raw if "://" in raw else "https://" + raw)
+    parsed = urlparse(_ensure_scheme(url))
     host = parsed.netloc.lower()
     # Exact host or a real subdomain only — NOT a substring, so we never rewrite
     # e.g. notlinkedin.com into a fabricated www.linkedin.com URL.
