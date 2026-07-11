@@ -92,6 +92,11 @@ async def _upsert_signal_tx(
         "publishedAtRaw": None if published_dt else record.published_at,
     }
     props = {k: v for k, v in props.items() if v is not None}
+    if published_dt:
+        # A successful parse must also CLEAR any stale raw string from an earlier
+        # unparseable capture: `SET s += map` removes keys whose value is null,
+        # so re-adding the explicit None deletes the property on the node.
+        props["publishedAtRaw"] = None
 
     await tx.run(
         """

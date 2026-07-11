@@ -239,3 +239,58 @@ def test_read_queries_order_newest_first():
     assert recent_news == [jun, mar, jan]
     assert [s["url"] for s in blogs_only] == [blog]  # kind filter
     assert all(s["kind"] == "blog" for s in blogs_only)
+
+
+def test_reparse_clears_stale_raw_date():
+    """A capture with an unparseable date stores publishedAtRaw; a later capture of
+    the same canonical URL WITH a parseable date must set publishedAt AND clear the
+    stale raw string (review finding on #61)."""
+
+    async def scenario():
+        if not await _neo4j_available():
+            return "skip"
+        driver = get_driver()
+        await apply_schema(driver)
+        await _cleanup(driver)
+
+        url = f"https://{MARK}.example.com/raw-then-parsed"
+        await upsert_signal(
+            driver,
+            SignalRecord(
+                url=url,
+                title="t",
+                kind="news",
+                published_at="sometime last week",  # unparseable → raw kept
+                summary="v1",
+                source=SRC,
+            ),
+            companies=[ACME],
+        )
+        await upsert_signal(
+            driver,
+            SignalRecord(
+                url=url,
+                title="t",
+                kind="news",
+                published_at="2026-06-03",  # parseable → raw must be cleared
+                summary="v2",
+                source=SRC,
+            ),
+            companies=[ACME],
+        )
+        async with driver.session() as session:
+            result = await session.run(
+                "MATCH (s:Signal {url: $url}) "
+                "RETURN s.publishedAt AS parsed, s.publishedAtRaw AS raw",
+                url=url,
+            )
+            row = (await result.single()).data()
+        await _cleanup(driver)
+        await close_driver()
+        return row
+
+    out = asyncio.run(scenario())
+    if out == "skip":
+        pytest.skip("Neo4j not reachable — run `make db-up`")
+    assert out["parsed"] is not None
+    assert out["raw"] is None  # stale raw string removed by the re-parse
