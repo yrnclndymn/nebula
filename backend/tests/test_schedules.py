@@ -176,6 +176,11 @@ def test_job_prune_retention_and_uncommitted_exception():
             ("old_uncommitted", "proposal", "ready", old, {"name": "Globex __pytest__"}),
             # Recent uncommitted proposal: inside retention anyway.
             ("new_uncommitted", "proposal", "ready", 0, {"name": "Umbrella __pytest__"}),
+            # Review finding: OTHER job types also await review at status='ready'.
+            # An old ready backfill (rows awaiting commit) must be spared…
+            ("old_backfill_ready", "backfill", "ready", old, {"rows": []}),
+            # …while a committed resolution flips status='committed' → prunable.
+            ("old_res_committed", "resolution", "committed", old, {"committed": True}),
         ]
         async with driver.session() as session:
             await session.run(
@@ -234,6 +239,10 @@ def test_job_prune_retention_and_uncommitted_exception():
     assert f"{RET_PREFIX}_old_done" not in surviving
     assert f"{RET_PREFIX}_old_err" not in surviving
     assert f"{RET_PREFIX}_old_committed" not in surviving
+    # Broadened exception (review finding): ready non-proposal jobs are
+    # protected; committed resolutions (status flipped) are prunable.
+    assert f"{RET_PREFIX}_old_backfill_ready" in surviving
+    assert f"{RET_PREFIX}_old_res_committed" not in surviving
 
 
 def test_errored_job_does_not_block_cadence(monkeypatch):
@@ -303,3 +312,13 @@ def test_errored_job_does_not_block_cadence(monkeypatch):
     assert errored["status"] == "error"
     assert "simulated runner failure" in errored["error"]
     assert len(second["enqueued"]) == 1  # retry allowed despite recent errored job
+
+
+def test_committed_flag_serializer_canary():
+    """The retention predicate matches '"committed": true' as a substring of the
+    job's serialized dataJson. This canary pins the coupling: if the serializer
+    ever changes shape (separators, casing), this fails before retention breaks."""
+    import json
+
+    assert '"committed": true' in json.dumps({"committed": True})
+    assert '"committed": true' in json.dumps({"a": 1, "committed": True, "b": 2})

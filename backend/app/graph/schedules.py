@@ -176,9 +176,18 @@ async def run_cache_prune(job_id: str) -> None:
 # pending jobs of any type, and committed proposals — is fair game.
 # A job is deletable past retention UNLESS it is a ready-but-uncommitted proposal
 # (the kept exception). This is the "OK to delete" half of the WHERE clause.
+# A job is prunable when it is NOT awaiting user review. Review-pending means
+# status='ready' without a commit: proposals mark commits with a `committed`
+# flag in dataJson (their node status deliberately stays 'ready' for the
+# two-step focus/all commit); resolution/classification flip status to
+# 'committed' on commit, so 'ready' alone marks them un-reviewed; backfill jobs
+# stay 'ready' after partial row commits, so they are conservatively protected
+# too (they accumulate only as fast as backfills are run). The committed check
+# is a substring match on the serialized JSON — see the serializer-canary test
+# that pins json.dumps emitting exactly '"committed": true'.
 _RETENTION_DELETABLE = (
-    "NOT (j.type = 'proposal' AND j.status = 'ready' "
-    "AND NOT j.dataJson CONTAINS '\"committed\": true')"
+    "NOT (j.status = 'ready' "
+    "AND NOT (j.type = 'proposal' AND j.dataJson CONTAINS '\"committed\": true'))"
 )
 
 
