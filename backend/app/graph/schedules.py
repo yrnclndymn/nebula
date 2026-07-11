@@ -154,8 +154,79 @@ async def run_cache_prune(job_id: str) -> None:
         )
         pruned = (await result.single())["pruned"]
     job = await jobs.get_job(job_id)
-    await jobs.update_job(job_id, {**(job or {}), "pruned": pruned}, status="done")
+    # `outcome` is the standard human-readable completion line the activity page
+    # (#49) shows for a finished run; `pruned` stays for the numeric detail.
+    await jobs.update_job(
+        job_id,
+        {**(job or {}), "pruned": pruned, "outcome": f"pruned {pruned} stale cache entries"},
+        status="done",
+    )
     logger.info("cache prune %s removed %d stale entries", job_id, pruned)
+
+
+# --- Job-history retention -------------------------------------------------------
+# The activity page (#48) reads :Job nodes, so history grows without bound. This
+# schedule prunes jobs older than `settings.job_retention_days`, with ONE
+# exception: a proposal job that is `ready` but not yet `committed` is un-reviewed
+# work — deleting it would silently discard a prepared enrichment the user never
+# got to accept or reject. Committed proposals keep node status "ready" on purpose
+# (the two-step focus/all commit), so status alone can't tell the two apart; the
+# committed flag lives in dataJson, matched here as a string (json.dumps emits a
+# stable `"committed": true`). Everything else past retention — done/errored/
+# pending jobs of any type, and committed proposals — is fair game.
+# A job is deletable past retention UNLESS it is a ready-but-uncommitted proposal
+# (the kept exception). This is the "OK to delete" half of the WHERE clause.
+# A job is prunable when it is NOT awaiting user review. Review-pending means
+# status='ready' without a commit: proposals mark commits with a `committed`
+# flag in dataJson (their node status deliberately stays 'ready' for the
+# two-step focus/all commit); resolution/classification flip status to
+# 'committed' on commit, so 'ready' alone marks them un-reviewed; backfill jobs
+# stay 'ready' after partial row commits, so they are conservatively protected
+# too (they accumulate only as fast as backfills are run). The committed check
+# is a substring match on the serialized JSON — see the serializer-canary test
+# that pins json.dumps emitting exactly '"committed": true'.
+_RETENTION_DELETABLE = (
+    "NOT (j.status = 'ready' "
+    "AND NOT (j.type = 'proposal' AND j.dataJson CONTAINS '\"committed\": true'))"
+)
+
+
+async def _prunable_jobs_exist(driver: AsyncDriver) -> bool:
+    async with driver.session() as session:
+        result = await session.run(
+            "MATCH (j:Job) "
+            "WHERE j.createdAt < datetime() - duration({days: $days}) "
+            f"AND {_RETENTION_DELETABLE} "
+            "RETURN count(j) AS n LIMIT 1",
+            days=settings.job_retention_days,
+        )
+        record = await result.single()
+    return record["n"] > 0
+
+
+async def run_job_prune(job_id: str) -> None:
+    """Delete :Job nodes older than the retention window, keeping ready-but-
+    uncommitted proposal jobs (un-reviewed work). Records the count + outcome.
+
+    The prune job deletes itself only on a *later* run: it's created fresh each
+    tick, so it's inside the retention window and the age filter spares it."""
+    driver = get_driver()
+    async with driver.session() as session:
+        result = await session.run(
+            "MATCH (j:Job) "
+            "WHERE j.createdAt < datetime() - duration({days: $days}) "
+            f"AND {_RETENTION_DELETABLE} "
+            "DETACH DELETE j RETURN count(j) AS pruned",
+            days=settings.job_retention_days,
+        )
+        pruned = (await result.single())["pruned"]
+    job = await jobs.get_job(job_id)
+    await jobs.update_job(
+        job_id,
+        {**(job or {}), "pruned": pruned, "outcome": f"pruned {pruned} old job records"},
+        status="done",
+    )
+    logger.info("job prune %s removed %d old job records", job_id, pruned)
 
 
 SCHEDULES: list[Schedule] = [
@@ -164,5 +235,11 @@ SCHEDULES: list[Schedule] = [
         cadence_days=7,
         run=run_cache_prune,
         is_due=_stale_cache_exists,
+    ),
+    Schedule(
+        job_type="job_prune",
+        cadence_days=1,
+        run=run_job_prune,
+        is_due=_prunable_jobs_exist,
     ),
 ]

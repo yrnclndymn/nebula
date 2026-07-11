@@ -203,6 +203,8 @@ async def run_proposal_job(proposal_id: str) -> None:
                 "focus_key": focus_key,
                 "focus_label": field_label(focus_key) if focus_key else "",
                 "diff": diff,
+                # Human-readable completion line for the activity page (#49).
+                "outcome": f"proposal ready for {record['name']}",
             },
             status="ready",
         )

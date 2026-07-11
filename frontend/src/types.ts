@@ -159,6 +159,12 @@ export interface JobSummary {
     discovered_website?: string;
     error?: string;
     committed?: boolean; // proposal already committed — not awaiting review
+    // Activity page (#48/#49): human-readable completion line, done/total progress
+    // where a runner tracks it, and the raw error dump behind a friendly error.
+    outcome?: string;
+    done?: number;
+    total?: number;
+    error_detail?: string;
   };
 }
 

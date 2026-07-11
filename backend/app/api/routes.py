@@ -200,8 +200,9 @@ async def list_jobs(
 ) -> list[dict]:
     """Recent durable jobs (newest first), with optional type/status filters.
     Returns id/type/status/createdAt + a compact type-aware summary (for proposals:
-    name, discovered_website, error) — the full dataJson stays on the per-id detail
-    endpoints. Rehydrates in-progress research after a refresh (#66) and backs the
+    name, discovered_website, error; plus outcome/done/total/error_detail on any job
+    that carries them) — the full dataJson stays on the per-id detail endpoints.
+    Rehydrates in-progress research after a refresh (#66) and backs the
     agent-activity page (#48)."""
     return await jobs.list_jobs(get_driver(), type=type, status=status, limit=limit)
 

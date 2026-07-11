@@ -85,6 +85,17 @@ def _job_summary(
         # Generic fallback for other job types (backfill/resolution/…): surface a
         # human label + any error so the shared activity page (#48) can list them.
         fields = {"name": data.get("name"), "error": data.get("error")}
+    # Fields common to every job type for the activity page (#48/#49): a
+    # human-readable `outcome` line runners set on completion, done/total progress
+    # where a runner tracks it, and the raw `error_detail` (collapsed in the UI)
+    # when a friendly error has a raw dump behind it. All null-pruned below, so a
+    # job that carries none of them keeps the same compact summary as before.
+    fields.update(
+        outcome=data.get("outcome"),
+        done=data.get("done"),
+        total=data.get("total"),
+        error_detail=data.get("error_detail"),
+    )
     summary = {k: v for k, v in fields.items() if v is not None}
     return {
         "id": job_id,

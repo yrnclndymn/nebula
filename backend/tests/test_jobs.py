@@ -43,6 +43,58 @@ def test_job_store_roundtrip():
     assert gone is None
 
 
+# --- _job_summary: activity-page fields (outcome / progress / detail) ---------
+# Pure function, no DB: the activity page (#48/#49) needs a compact human-readable
+# view — completion outcome, done/total progress, and a collapsible raw error
+# detail — without ever shipping the full dataJson.
+
+
+def test_job_summary_includes_outcome_and_progress():
+    s = jobs._job_summary(
+        "b1",
+        "backfill",
+        "ready",
+        "2026-07-10T00:00:00Z",
+        json.dumps(
+            {
+                "name": "Acme __pytest__",
+                "outcome": "researched 3 of 4 companies",
+                "done": 3,
+                "total": 4,
+                # A big payload must never leak into the summary.
+                "rows": [{"blob": "x" * 500}],
+            }
+        ),
+    )
+    assert s["summary"] == {
+        "name": "Acme __pytest__",
+        "outcome": "researched 3 of 4 companies",
+        "done": 3,
+        "total": 4,
+    }
+    assert "rows" not in s["summary"]
+
+
+def test_job_summary_surfaces_error_detail():
+    s = jobs._job_summary(
+        "p1",
+        "proposal",
+        "error",
+        "2026-07-10T00:00:00Z",
+        json.dumps(
+            {"name": "Globex __pytest__", "error": "hit the quota", "error_detail": "raw 429 dump"}
+        ),
+    )
+    assert s["summary"]["error"] == "hit the quota"
+    assert s["summary"]["error_detail"] == "raw 429 dump"
+
+
+def test_job_summary_prunes_absent_activity_fields():
+    # A job carrying none of the optional fields keeps the old compact shape.
+    s = jobs._job_summary("p2", "proposal", "pending", "t", json.dumps({"name": "Initech"}))
+    assert s["summary"] == {"name": "Initech"}
+
+
 # --- list_jobs: filters, newest-first order, compact summary (needs Neo4j) ----
 
 LIST_PREFIX = "__pytest_listjobs__"

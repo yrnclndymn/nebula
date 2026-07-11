@@ -17,6 +17,7 @@ import { ChatPanel } from "./ChatPanel";
 import { EntityResolutionModal } from "./EntityResolution";
 import { ClientClassificationModal } from "./ClientClassification";
 import { BacklogModal } from "./BacklogPanel";
+import { ActivityModal } from "./ActivityPanel";
 import { AUTH_ENABLED, signOutUser } from "./firebase";
 
 type SortKey = "name" | "headcount" | "yearFounded" | "partnerCount" | "clientCount";
@@ -77,6 +78,7 @@ export default function App() {
   const [resolveOpen, setResolveOpen] = useState(false);
   const [classifyOpen, setClassifyOpen] = useState(false);
   const [backlogOpen, setBacklogOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
   const [graphSeed, setGraphSeed] = useState<string | null>(null);
   const [graphOpen, setGraphOpen] = useState(false);
 
@@ -222,6 +224,9 @@ export default function App() {
           )}
           <button className="chat-toggle" onClick={() => setBacklogOpen(true)} title="Ranked un-researched stubs — review and research">
             📋 Backlog
+          </button>
+          <button className="chat-toggle" onClick={() => setActivityOpen(true)} title="Live agent job activity — running, completed, failed">
+            📡 Activity
           </button>
           <button className="chat-toggle" onClick={() => setResolveOpen(true)} title="Dedup stub companies">
             🧩 Resolve stubs
@@ -378,6 +383,7 @@ export default function App() {
       {resolveOpen && <EntityResolutionModal onClose={() => setResolveOpen(false)} />}
       {classifyOpen && <ClientClassificationModal onClose={() => setClassifyOpen(false)} />}
       {backlogOpen && <BacklogModal onClose={() => setBacklogOpen(false)} />}
+      {activityOpen && <ActivityModal onClose={() => setActivityOpen(false)} />}
     </div>
   );
 }
