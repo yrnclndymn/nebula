@@ -75,6 +75,10 @@ def _job_summary(
             "name": data.get("name"),
             "discovered_website": data.get("discovered_website"),
             "error": data.get("error"),
+            # Committed proposals keep node status "ready" ON PURPOSE — the
+            # two-step focus/all commit re-commits the same job — so the list
+            # must carry the committed flag for the UI to tell them apart.
+            "committed": data.get("committed"),
         }
     else:
         # Generic fallback for other job types (backfill/resolution/…): surface a

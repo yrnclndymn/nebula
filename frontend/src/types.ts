@@ -158,6 +158,7 @@ export interface JobSummary {
     name?: string;
     discovered_website?: string;
     error?: string;
+    committed?: boolean; // proposal already committed — not awaiting review
   };
 }
 

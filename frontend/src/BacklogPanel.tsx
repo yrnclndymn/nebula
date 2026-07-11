@@ -61,7 +61,11 @@ export function BacklogModal({ onClose }: { onClose: () => void }) {
     async function load() {
       try {
         const jobs = await listJobs({ type: "proposal", limit: ACTIVITY_LIMIT });
-        const hydrated = await Promise.all(jobs.map(hydrate));
+        // Already-committed proposals aren't awaiting anything — showing them as
+        // "ready" would offer a review card for work that's done (their node
+        // status stays "ready" on purpose: the two-step focus/all commit).
+        const open = jobs.filter((j) => !j.summary.committed);
+        const hydrated = await Promise.all(open.map(hydrate));
         if (!stop) setActivity(hydrated);
       } catch {
         /* activity is best-effort; the backlog table still works without it */
@@ -168,7 +172,16 @@ export function BacklogModal({ onClose }: { onClose: () => void }) {
     setNotice(null);
     try {
       const res = await researchBacklog([name]);
-      addPending(res.proposals);
+      // Replace the stale errored entry for this name (cards key off proposal_id,
+      // so without this the old error card lingers next to the fresh pending one).
+      setActivity((a) => [
+        ...res.proposals.map((p) => ({
+          proposal_id: p.proposal_id,
+          name: p.name,
+          status: "pending" as const,
+        })),
+        ...a.filter((p) => !(p.name === name && p.status === "error")),
+      ]);
     } catch (e) {
       setNotice(String(e));
     } finally {
