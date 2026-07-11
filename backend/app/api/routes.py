@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from app.agents.assistant.backfill import commit_backfill, get_backfill
 from app.agents.assistant.proposals import commit_proposal, get_proposal
 from app.agents.assistant.service import respond
-from app.graph import cache, jobs, queries
+from app.graph import cache, jobs, queries, schedules
 from app.graph.driver import check_connectivity, get_driver
 from app.graph.models import APPLIES_TO, KINDS, field_key
 
@@ -134,6 +134,15 @@ async def run_job_endpoint(job_id: str) -> dict:
     Not used in local mode (jobs run inline). Guarded by verify_task (OIDC)."""
     await jobs.run_job(job_id)
     return {"ran": job_id}
+
+
+@tasks_router.post("/jobs/schedule-tick")
+async def schedule_tick() -> dict:
+    """Periodic trigger invoked by Cloud Scheduler (OIDC, verify_task) — selects
+    due work from the schedule registry and enqueues it as durable jobs. Cheap and
+    idempotent: Cloud Scheduler retries, and a double-tick within a cadence window
+    enqueues nothing extra. Locally: `make schedule-tick`."""
+    return await schedules.run_tick()
 
 
 class BackfillCommitRequest(BaseModel):
