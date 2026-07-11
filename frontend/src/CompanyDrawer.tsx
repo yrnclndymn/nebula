@@ -89,8 +89,13 @@ export function CompanyDrawer({
     }
   }
 
+  const [similarError, setSimilarError] = useState<string | null>(null);
+
   function openSimilar(name: string) {
-    fetchCompany(name).then(setDetail).catch(() => {});
+    setSimilarError(null);
+    fetchCompany(name)
+      .then(setDetail)
+      .catch(() => setSimilarError(`Couldn't load ${name} — it may have been renamed or removed.`));
   }
 
   return (
@@ -187,6 +192,7 @@ export function CompanyDrawer({
                 </li>
               ))}
             </ul>
+            {similarError && <div className="muted">{similarError}</div>}
           </div>
         )}
 
