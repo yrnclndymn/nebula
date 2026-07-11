@@ -915,3 +915,99 @@ td.muted {
 .graph-link:hover {
   background: var(--row-hover);
 }
+
+/* Agent activity page (issue #48) — sections of job rows with progress/outcome. */
+.activity-modal {
+  width: min(720px, 94vw);
+}
+.activity-live {
+  color: #16a34a;
+  font-size: 12px;
+  font-weight: 600;
+  margin-left: 0.4rem;
+}
+.activity-section {
+  margin: 0.75rem 0 1rem;
+}
+.activity-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  margin: 0.35rem 0;
+  background: var(--bg);
+}
+.activity-row-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.activity-target {
+  font-weight: 600;
+}
+.activity-when {
+  margin-left: auto;
+}
+.activity-badge {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-radius: 6px;
+  padding: 0.1rem 0.4rem;
+}
+.activity-badge.run {
+  color: #b45309;
+  background: #fef3c7;
+}
+.activity-badge.done {
+  color: #15803d;
+  background: #dcfce7;
+}
+.activity-badge.err {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+.activity-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+.activity-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 4px;
+  background: var(--border);
+  overflow: hidden;
+}
+.activity-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+.activity-outcome {
+  margin-top: 0.35rem;
+  font-size: 13px;
+  color: var(--text);
+}
+.activity-error {
+  margin-top: 0.35rem;
+}
+.activity-detail summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 12px;
+  margin-top: 0.2rem;
+}
+.activity-detail pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem;
+  margin: 0.3rem 0 0;
+  max-height: 160px;
+  overflow: auto;
+}

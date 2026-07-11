@@ -163,7 +163,16 @@ async def run_backfill_job(job_id: str) -> None:
             )
             await jobs.update_job(job_id, {**job, "rows": rows, "done": len(rows)})
 
-    final = {**job, "rows": rows, "done": len(rows)}
+    total = job.get("total", len(companies))
+    # Human-readable completion line for the activity page (#49): "researched X of
+    # Y companies". X counts rows attempted (a per-company research error still
+    # produces a row); the review step is where the user judges each value.
+    final = {
+        **job,
+        "rows": rows,
+        "done": len(rows),
+        "outcome": f"researched {len(rows)} of {total} companies",
+    }
     if exhausted is not None:
         # Record which cap stopped the run and how far it got. Status stays
         # "ready" — the completed rows are still reviewable/committable; a budget

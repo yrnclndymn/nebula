@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     # site copy changes slowly, so weeks is fine.
     cache_ttl_days: int = 21
 
+    # Job-history retention (#49): the scheduled `job_prune` deletes :Job nodes
+    # older than this. Keeps the activity page's history bounded without losing
+    # recent runs. EXCEPTION: a ready-but-uncommitted proposal job is never pruned
+    # (that would destroy un-reviewed work) — see app/graph/schedules.py.
+    job_retention_days: int = 30
+
     # Gemini quota resilience (issue #65). The free tier caps requests/min on the
     # shared key; these keep chat + research jobs from starving each other and 429ing.
     # - gemini_rpm: process-wide requests/min ceiling ALL Gemini callers pace
