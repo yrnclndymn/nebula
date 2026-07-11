@@ -71,6 +71,8 @@ export const commitResolution = (jobId: string, decisions: ResolutionDecision[])
 export const fetchCompanies = () => getJson<CompanyRow[]>("/companies");
 export const fetchCompany = (name: string) =>
   getJson<CompanyDetail>(`/companies/${encodeURIComponent(name)}`);
+export const fetchCompanyGraph = (name: string) =>
+  getJson<import("./types").CompanyGraph>(`/companies/${encodeURIComponent(name)}/graph`);
 export const fetchTopics = () => getJson<string[]>("/topics");
 export const fetchCompanyTypes = () => getJson<string[]>("/company-types");
 export const fetchFields = () => getJson<import("./types").FieldDef[]>("/fields");

@@ -12,6 +12,7 @@ import {
 import type { CompanyDetail, CompanyRow, FieldDef } from "./types";
 import { fieldApplies, formatCustom, KINDS, kindLabel } from "./types";
 import { CompanyDrawer } from "./CompanyDrawer";
+import { GraphView } from "./GraphView";
 import { ChatPanel } from "./ChatPanel";
 import { EntityResolutionModal } from "./EntityResolution";
 import { AUTH_ENABLED, signOutUser } from "./firebase";
@@ -72,6 +73,8 @@ export default function App() {
   const [selected, setSelected] = useState<CompanyDetail | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [resolveOpen, setResolveOpen] = useState(false);
+  const [graphSeed, setGraphSeed] = useState<string | null>(null);
+  const [graphOpen, setGraphOpen] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -193,6 +196,11 @@ export default function App() {
       .catch((e) => setError(String(e)));
   }
 
+  function openGraphFor(name: string) {
+    setGraphSeed(name);
+    setGraphOpen(true);
+  }
+
   return (
     <div className={chatOpen ? "app chat-open" : "app"}>
       <header className="topbar">
@@ -210,6 +218,15 @@ export default function App() {
           )}
           <button className="chat-toggle" onClick={() => setResolveOpen(true)} title="Dedup stub companies">
             🧩 Resolve stubs
+          </button>
+          <button
+            className="chat-toggle"
+            onClick={() => {
+              setGraphSeed((s) => s ?? rows[0]?.name ?? null);
+              setGraphOpen(true);
+            }}
+          >
+            🕸 Graph
           </button>
           <button className="chat-toggle" onClick={() => setChatOpen((v) => !v)}>
             💬 Assistant
@@ -330,12 +347,21 @@ export default function App() {
         </table>
       </div>
 
+      {graphOpen && (
+        <GraphView
+          seed={graphSeed}
+          onClose={() => setGraphOpen(false)}
+          onOpenCompany={openCompany}
+        />
+      )}
+
       {selected && (
         <CompanyDrawer
           company={selected}
           fields={fields}
           onClose={() => setSelected(null)}
           onKindChange={updateCompanyKind}
+          onViewInGraph={openGraphFor}
         />
       )}
       {chatOpen && <ChatPanel onClose={() => setChatOpen(false)} />}

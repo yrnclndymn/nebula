@@ -12,7 +12,7 @@ from app.agents.assistant.resolution import (
     start_resolution,
 )
 from app.agents.assistant.service import respond
-from app.graph import cache, jobs, queries
+from app.graph import cache, jobs, queries, schedules
 from app.graph.driver import check_connectivity, get_driver
 from app.graph.models import APPLIES_TO, KINDS, field_key
 
@@ -86,6 +86,17 @@ async def company_detail(name: str) -> dict:
     return company
 
 
+@router.get("/companies/{name}/graph")
+async def company_graph(name: str) -> dict:
+    """A company node + its 1-hop typed edges (partners, clients, leaders, topics,
+    types) for the interactive graph view. Fetched lazily per node so the client
+    never renders the whole ~700-node graph at once."""
+    result = await queries.company_neighbourhood(get_driver(), name)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"No company named {name!r}")
+    return result
+
+
 class ChatRequest(BaseModel):
     session_id: str
     message: str
@@ -139,6 +150,15 @@ async def run_job_endpoint(job_id: str) -> dict:
     Not used in local mode (jobs run inline). Guarded by verify_task (OIDC)."""
     await jobs.run_job(job_id)
     return {"ran": job_id}
+
+
+@tasks_router.post("/jobs/schedule-tick")
+async def schedule_tick() -> dict:
+    """Periodic trigger invoked by Cloud Scheduler (OIDC, verify_task) — selects
+    due work from the schedule registry and enqueues it as durable jobs. Cheap and
+    idempotent: Cloud Scheduler retries, and a double-tick within a cadence window
+    enqueues nothing extra. Locally: `make schedule-tick`."""
+    return await schedules.run_tick()
 
 
 class BackfillCommitRequest(BaseModel):

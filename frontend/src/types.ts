@@ -159,6 +159,29 @@ export type ResolutionDecision =
   | { action: "alias"; canonical: string; aliases: string[] }
   | { action: "junk"; names: string[] };
 
+// Interactive graph view (issue #50). A node's 1-hop neighbourhood, fetched
+// lazily per node so the client never renders the whole graph at once.
+export interface GraphNode {
+  id: string; // "<Label>:<name>", stable across expansions
+  kind: string; // "Company" | "Person" | "Topic" | "CompanyType"
+  name: string;
+  companyKind: string | null;
+  website: string | null;
+  researched: boolean; // Company tagged to a topic (vs a partner/client stub)
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  type: string; // HAS_CLIENT | PARTNERS_WITH | LEADS | TAGGED_AS | CLASSIFIED_AS
+}
+
+export interface CompanyGraph {
+  center: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
 export interface CompanyDetail {
   name: string;
   priority: string | null;

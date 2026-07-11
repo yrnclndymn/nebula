@@ -32,6 +32,9 @@ chat:             ## Chat with the research assistant. ARGS="a question" for one
 dev:              ## Run the API with reload on :8080 (PORT= to override for a parallel worktree)
 	cd backend && uv run uvicorn app.main:app --reload --port $(if $(PORT),$(PORT),8080)
 
+schedule-tick:    ## Fire the scheduler tick locally (Cloud Scheduler's job in prod). PORT= to match make dev
+	curl -fsS -X POST http://localhost:$(if $(PORT),$(PORT),8080)/jobs/schedule-tick && echo
+
 test:             ## Run backend tests
 	cd backend && uv run pytest
 
@@ -69,4 +72,4 @@ worktree:         ## Isolated worktree + branch for a parallel session. NAME=<sl
 	echo "  non-clashing dev ports:    make dev PORT=8081  |  make frontend-dev PORT=5174"; \
 	echo "  remove when merged:        git worktree remove $$dir && git branch -d $(NAME)"
 
-.PHONY: db-up db-down install db-init import enrich eval chat dev test lint frontend-install frontend-dev worktree
+.PHONY: db-up db-down install db-init import enrich eval chat dev schedule-tick test lint frontend-install frontend-dev worktree

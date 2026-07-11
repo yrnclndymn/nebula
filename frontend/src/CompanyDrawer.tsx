@@ -36,11 +36,13 @@ export function CompanyDrawer({
   fields,
   onClose,
   onKindChange,
+  onViewInGraph,
 }: {
   company: CompanyDetail;
   fields: FieldDef[];
   onClose: () => void;
   onKindChange: (name: string, kind: string | null) => void;
+  onViewInGraph: (name: string) => void;
 }) {
   const customFields = fields.filter((f) => fieldApplies(f, company.kind));
   async function changeKind(value: string) {
@@ -79,6 +81,9 @@ export function CompanyDrawer({
           </select>
         </div>
         <div className="drawer-links">
+          <button className="graph-link" onClick={() => onViewInGraph(company.name)}>
+            🕸 View in graph
+          </button>
           {company.website && (
             <a href={company.website} target="_blank" rel="noreferrer">
               Website ↗
