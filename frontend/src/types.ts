@@ -198,6 +198,18 @@ export interface CompanyGraph {
   edges: GraphEdge[];
 }
 
+// Similarity search (issue #32): another researched company that overlaps with a
+// given one, with each scoring component returned so the "why" is explainable.
+export interface SimilarCompany {
+  name: string;
+  score: number;
+  shared_clients: number;
+  shared_partners: number;
+  shared_topics: number;
+  same_kind: boolean;
+  same_country: boolean;
+}
+
 export interface CompanyDetail {
   name: string;
   priority: string | null;
