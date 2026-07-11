@@ -38,6 +38,19 @@ class Settings(BaseSettings):
     # site copy changes slowly, so weeks is fine.
     cache_ttl_days: int = 21
 
+    # Gemini quota resilience (issue #65). The free tier caps requests/min on the
+    # shared key; these keep chat + research jobs from starving each other and 429ing.
+    # - gemini_rpm: process-wide requests/min ceiling ALL Gemini callers pace
+    #   against (see app/ratelimit.py). Free-tier flash-lite default; set 0 to
+    #   disable limiting entirely (paid tier / no ceiling).
+    # - research_stagger_seconds: gap between successive backlog-batch proposal
+    #   enqueues, so "research 4 selected" doesn't fire all at once.
+    # - quota_retry_attempts: bounded re-runs of an enrichment run that 429s with
+    #   RESOURCE_EXHAUSTED before it surfaces as a quota error on the Job.
+    gemini_rpm: int = 15
+    research_stagger_seconds: float = 8.0
+    quota_retry_attempts: int = 3
+
     # Long jobs (propose / back-fill). "local" runs them inline (dev, single
     # long-lived process); "cloudtasks" enqueues to Cloud Tasks so they survive
     # Cloud Run scale-to-zero. The cloudtasks fields are only read in that mode.

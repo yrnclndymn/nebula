@@ -14,6 +14,7 @@ imports avoid an import cycle). Poll/commit read the job from the graph.
 import asyncio
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 
 from neo4j import AsyncDriver
 
@@ -159,16 +160,20 @@ async def run_job(job_id: str) -> None:
             await schedules.run_scheduled(job_id, job["type"])
 
 
-async def enqueue(job_id: str) -> None:
+async def enqueue(job_id: str, delay: float = 0.0) -> None:
     """Trigger a created job. Inline locally; via Cloud Tasks in prod. A failed
     enqueue must not be silent: log it and mark the job errored so the UI shows it
-    (rather than a proposal that hangs 'pending' forever)."""
+    (rather than a proposal that hangs 'pending' forever).
+
+    `delay` (seconds) staggers the start so a batch of jobs doesn't all fire at
+    once and burn the same minute's Gemini quota (issue #65): Cloud Tasks gets a
+    `schedule_time`; local mode sleeps before running the inline task."""
     if settings.job_mode != "cloudtasks":
-        asyncio.create_task(run_job(job_id))
+        asyncio.create_task(_run_after(job_id, delay))
         return
     try:
-        await _enqueue_cloud_task(job_id)
-        logger.info("enqueued Cloud Task for job %s", job_id)
+        await _enqueue_cloud_task(job_id, delay)
+        logger.info("enqueued Cloud Task for job %s (delay %.1fs)", job_id, delay)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Cloud Tasks enqueue failed for job %s", job_id)
         job = await get_job(job_id)
@@ -176,7 +181,14 @@ async def enqueue(job_id: str) -> None:
             await update_job(job_id, {**job, "error": f"could not start: {exc}"}, status="error")
 
 
-async def _enqueue_cloud_task(job_id: str) -> None:
+async def _run_after(job_id: str, delay: float) -> None:
+    """Local-mode staggered start: wait `delay` seconds, then run the job inline."""
+    if delay > 0:
+        await asyncio.sleep(delay)
+    await run_job(job_id)
+
+
+async def _enqueue_cloud_task(job_id: str, delay: float = 0.0) -> None:
     # Imported lazily so local/dev doesn't need the Cloud Tasks client.
     from google.cloud import tasks_v2
 
@@ -186,11 +198,18 @@ async def _enqueue_cloud_task(job_id: str) -> None:
     )
     url = f"{settings.service_url}/jobs/run/{job_id}"
     logger.info("creating Cloud Task -> %s (queue %s)", url, parent)
-    task = {
+    task: dict = {
         "http_request": {
             "http_method": tasks_v2.HttpMethod.POST,
             "url": url,
             "oidc_token": {"service_account_email": settings.tasks_service_account},
         }
     }
+    if delay > 0:
+        # Stagger the batch: tell Cloud Tasks not to dispatch until `delay` from now.
+        from google.protobuf import timestamp_pb2
+
+        schedule = timestamp_pb2.Timestamp()
+        schedule.FromDatetime(datetime.now(timezone.utc) + timedelta(seconds=delay))
+        task["schedule_time"] = schedule
     await client.create_task(parent=parent, task=task)

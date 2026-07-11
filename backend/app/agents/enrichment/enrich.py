@@ -15,6 +15,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
+from app import ratelimit
 from app.agents.enrichment.agent import root_agent
 from app.config import ensure_gemini_env
 from app.graph.driver import close_driver
@@ -33,6 +34,12 @@ class EnrichResult:
 async def enrich(name: str, website: str, topic: str, *, verbose: bool = True) -> EnrichResult:
     """Research and save one company; return the agent's result + trajectory."""
     ensure_gemini_env()
+    # Pace against the shared free-tier rpm ceiling. ADK doesn't expose per-turn
+    # hooks, so we can only acquire ONCE per run here (a run makes several model
+    # calls internally) — coarse, but it keeps a burst of parallel runs from all
+    # starting into the same minute's quota. Per-request pacing on the direct
+    # (non-ADK) calls happens inside generate_with_retry.
+    await ratelimit.acquire()
     session_service = InMemorySessionService()
     await session_service.create_session(app_name=APP_NAME, user_id="cli", session_id="s1")
     runner = Runner(agent=root_agent, app_name=APP_NAME, session_service=session_service)
