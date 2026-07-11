@@ -785,6 +785,47 @@ td.muted {
   color: var(--muted);
 }
 
+/* Research backlog page (issue #31) — wider modal with filters + a review area. */
+.backlog-modal {
+  width: min(960px, 96vw);
+}
+.backlog-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.backlog-filters label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 12px;
+  color: var(--muted);
+}
+.backlog-filters input[type="number"] {
+  width: 4rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: inherit;
+}
+.backlog-filters select {
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: inherit;
+}
+.backlog-review {
+  margin: 1rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
 /* Interactive graph view (issue #50) — full-screen overlay under the drawer. */
 .graph-overlay {
   position: fixed;

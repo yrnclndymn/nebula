@@ -8,8 +8,10 @@ Cloud Run scale-to-zero: `propose_enrichment` creates a pending job and enqueues
 it; the client polls `get_proposal` until ready; the user commits.
 """
 
+import asyncio
 import uuid
 from contextvars import ContextVar
+from urllib.parse import urlparse
 
 from app.agents.assistant.proposal_diff import (
     citation_matches_focus,
@@ -24,6 +26,7 @@ from app.graph.driver import get_driver
 from app.graph.models import Citation, CompanyRecord
 from app.graph.repository import upsert_company
 from app.tools.graph_tools import proposal_sink
+from app.tools.web import web_search
 
 # Proposals started during the current chat turn (read by the /chat endpoint).
 turn_proposals: ContextVar[list | None] = ContextVar("nebula_turn_proposals", default=None)
@@ -64,6 +67,73 @@ async def propose_enrichment(
     return {"proposal_id": proposal_id, "name": name, "status": "researching in the background"}
 
 
+# Hosts that are never a company's own official site — social networks,
+# directories, encyclopaedias, app stores, review/press sites. When discovering a
+# website from search results we skip these and take the first result that isn't
+# one of them.
+_NON_OFFICIAL_HOSTS = (
+    "linkedin.com",
+    "twitter.com",
+    "x.com",
+    "facebook.com",
+    "instagram.com",
+    "youtube.com",
+    "wikipedia.org",
+    "crunchbase.com",
+    "bloomberg.com",
+    "pitchbook.com",
+    "github.com",
+    "medium.com",
+    "glassdoor.com",
+    "indeed.com",
+    "g2.com",
+    "trustpilot.com",
+    "reddit.com",
+    "apps.apple.com",
+    "play.google.com",
+    "owler.com",
+    "zoominfo.com",
+    "craft.co",
+    "producthunt.com",
+    "similarweb.com",
+    "clutch.co",
+)
+
+
+def _official_host(url: str) -> str | None:
+    """The bare host of a search-result URL if it plausibly is a company's own
+    site, else None (a social/directory/press host we should skip)."""
+    if not url:
+        return None
+    host = urlparse(url if "://" in url else "https://" + url).netloc.lower()
+    # Defensive: netloc may carry userinfo (user@host) or a port (host:1234) —
+    # neither belongs in a discovered website / blocklist comparison.
+    host = host.split("@")[-1].split(":")[0]
+    host = host.removeprefix("www.")
+    if not host:
+        return None
+    if any(host == bad or host.endswith("." + bad) for bad in _NON_OFFICIAL_HOSTS):
+        return None
+    return host
+
+
+async def discover_website(name: str) -> str | None:
+    """Find a company's official website via web search — for backlog stubs that
+    arrive with no website. Returns a bare domain (e.g. "acme.com") or None.
+
+    Deliberately simple: search for the company's official site and take the first
+    organic result whose host isn't a social network / directory / press site. The
+    pick is untrusted input — it only seeds the enrichment crawl, and the user sees
+    and reviews the discovered site (and everything derived from it) before any
+    commit. No auto-write, so a wrong guess costs a discard, not bad data."""
+    results = (await asyncio.to_thread(web_search, f"{name} official website")).get("results", [])
+    for hit in results:
+        host = _official_host(hit.get("url", ""))
+        if host:
+            return host
+    return None
+
+
 async def run_proposal_job(proposal_id: str) -> None:
     """Job runner: research the company (capture, don't write) and fill in the job."""
     job = await jobs.get_job(proposal_id)
@@ -72,6 +142,23 @@ async def run_proposal_job(proposal_id: str) -> None:
     sink: list = []
     token = proposal_sink.set(sink)
     try:
+        # Backlog stubs are enqueued with no website. Discover the official site
+        # first so the enrichment agent has a domain to crawl; record it on the
+        # job so the user sees which site the research is based on. Inside the
+        # try so a discovery MISS *and* a discovery FAILURE (e.g. a search
+        # network error) both error the proposal instead of escaping the runner
+        # and leaving the job stuck pending.
+        if not (job.get("website") or "").strip():
+            discovered = await discover_website(job["name"])
+            if not discovered:
+                await jobs.update_job(
+                    proposal_id,
+                    {**job, "error": f"could not find an official website for {job['name']}"},
+                    status="error",
+                )
+                return
+            job = {**job, "website": discovered, "discovered_website": discovered}
+            await jobs.update_job(proposal_id, job)  # persist before the slow research
         result = await enrich(job["name"], job["website"], job["topic"], verbose=False)
         if not sink:
             await jobs.update_job(

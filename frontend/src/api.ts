@@ -1,6 +1,7 @@
 import { getIdToken } from "./firebase";
 import type {
   Backfill,
+  BacklogRow,
   Classification,
   CompanyDetail,
   CompanyRow,
@@ -77,6 +78,14 @@ export const getClassification = (jobId: string) =>
 
 export const commitClassification = (jobId: string, names: string[]) =>
   postJson<{ classified?: number; error?: string }>(`/classification/${jobId}/commit`, { names });
+
+export const fetchBacklog = (limit = 200) => getJson<BacklogRow[]>(`/backlog?limit=${limit}`);
+
+export const researchBacklog = (names: string[]) =>
+  postJson<{ proposals: { name: string; proposal_id: string }[]; cap: number }>(
+    "/backlog/research",
+    { names },
+  );
 
 export const fetchCompanies = () => getJson<CompanyRow[]>("/companies");
 export const fetchCompany = (name: string) =>
