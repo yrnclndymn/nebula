@@ -31,13 +31,25 @@ def test_backlog_research_rejects_empty():
     assert resp.status_code == 422
 
 
-def test_backlog_research_dedupes_before_cap():
-    # 11 entries but only 10 distinct (case-insensitive) → under the cap. Without a
-    # DB the enqueue fails, but we only assert validation let it through (not 422).
+def test_backlog_research_dedupes_before_cap(monkeypatch):
+    # 11 entries but only 10 distinct (case-insensitive) → under the cap. Mock the
+    # proposal call (needs Neo4j) so we can assert the EXACT dedup outcome: 200 and
+    # ten proposals — not merely "validation didn't 422" (a 500 must not pass).
+    from app.api import routes
+
+    started: list[str] = []
+
+    async def fake_propose(name: str, website: str, topic: str = "", focus: str = "") -> dict:
+        started.append(name)
+        return {"proposal_id": f"p{len(started)}", "name": name, "status": "pending"}
+
+    monkeypatch.setattr(routes, "propose_enrichment", fake_propose)
     names = [f"Co {i} __pytest__" for i in range(10)] + ["co 0 __pytest__"]
     with TestClient(app, raise_server_exceptions=False) as client:
         resp = client.post("/backlog/research", json={"names": names})
-    assert resp.status_code != 422
+    assert resp.status_code == 200
+    assert len(started) == 10  # the 11th (case-variant duplicate) was deduped
+    assert len(resp.json()["proposals"]) == 10
 
 
 def test_backlog_research_requires_auth():

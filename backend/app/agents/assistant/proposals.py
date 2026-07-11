@@ -91,6 +91,12 @@ _NON_OFFICIAL_HOSTS = (
     "reddit.com",
     "apps.apple.com",
     "play.google.com",
+    "owler.com",
+    "zoominfo.com",
+    "craft.co",
+    "producthunt.com",
+    "similarweb.com",
+    "clutch.co",
 )
 
 
@@ -100,6 +106,9 @@ def _official_host(url: str) -> str | None:
     if not url:
         return None
     host = urlparse(url if "://" in url else "https://" + url).netloc.lower()
+    # Defensive: netloc may carry userinfo (user@host) or a port (host:1234) —
+    # neither belongs in a discovered website / blocklist comparison.
+    host = host.split("@")[-1].split(":")[0]
     host = host.removeprefix("www.")
     if not host:
         return None
