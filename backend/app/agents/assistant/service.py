@@ -15,6 +15,7 @@ from google.genai import types
 from app.agents.assistant.agent import root_agent
 from app.agents.assistant.backfill import turn_backfills
 from app.agents.assistant.memory import load_memories
+from app.agents.assistant.merge import turn_merges
 from app.agents.assistant.proposals import turn_proposals
 from app.config import ensure_gemini_env
 
@@ -27,6 +28,7 @@ class ChatTurn:
     reply: str
     proposals: list[dict] = field(default_factory=list)
     backfills: list[dict] = field(default_factory=list)
+    merges: list[dict] = field(default_factory=list)
 
 
 _sessions: InMemorySessionService | None = None
@@ -65,8 +67,10 @@ async def respond(session_id: str, message: str) -> ChatTurn:
 
     proposals: list[dict] = []
     backfills: list[dict] = []
+    merges: list[dict] = []
     p_token = turn_proposals.set(proposals)
     b_token = turn_backfills.set(backfills)
+    m_token = turn_merges.set(merges)
     content = types.Content(role="user", parts=[types.Part(text=text)])
     reply = ""
     try:
@@ -78,4 +82,5 @@ async def respond(session_id: str, message: str) -> ChatTurn:
     finally:
         turn_proposals.reset(p_token)
         turn_backfills.reset(b_token)
-    return ChatTurn(reply=reply, proposals=proposals, backfills=backfills)
+        turn_merges.reset(m_token)
+    return ChatTurn(reply=reply, proposals=proposals, backfills=backfills, merges=merges)

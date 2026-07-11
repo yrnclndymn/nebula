@@ -85,6 +85,12 @@ async def commit_resolution(job_id: str, decisions: list[dict]) -> dict:
         return {"error": "resolution job not found or not ready"}
     driver = get_driver()
 
+    # A scoped, user-named merge job (see merge.py) relaxes the promoted-variant
+    # guard: the user explicitly named these records as the same organisation, so a
+    # researched variant is intended. Scan jobs keep the guard (allow_researched
+    # stays False), so a stale scan can never delete a node that became researched.
+    allow_researched = bool(job.get("scoped_merge"))
+
     merged = 0
     aliased = 0
     flagged = 0
@@ -92,7 +98,10 @@ async def commit_resolution(job_id: str, decisions: list[dict]) -> dict:
         action = decision.get("action")
         if action == "merge":
             result = await er.merge_companies(
-                driver, decision.get("canonical", ""), decision.get("variants", [])
+                driver,
+                decision.get("canonical", ""),
+                decision.get("variants", []),
+                allow_researched=allow_researched,
             )
             merged += len(result.get("merged", []))
         elif action == "alias":

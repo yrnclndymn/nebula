@@ -179,7 +179,12 @@ async def chat(req: ChatRequest) -> dict:
     session_id per client to keep multi-turn context. May return `proposals` —
     enrichment the assistant prepared for the user to review and commit."""
     turn = await respond(req.session_id, req.message)
-    return {"reply": turn.reply, "proposals": turn.proposals, "backfills": turn.backfills}
+    return {
+        "reply": turn.reply,
+        "proposals": turn.proposals,
+        "backfills": turn.backfills,
+        "merges": turn.merges,
+    }
 
 
 @router.get("/proposals/{proposal_id}")
