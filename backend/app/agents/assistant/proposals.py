@@ -139,24 +139,26 @@ async def run_proposal_job(proposal_id: str) -> None:
     job = await jobs.get_job(proposal_id)
     if job is None:
         return
-    # Backlog stubs are enqueued with no website. Discover the official site first
-    # so the enrichment agent has a domain to crawl; record it on the job so the
-    # user sees which site the research is based on. A discovery miss errors the
-    # proposal gracefully rather than running enrichment blind.
-    if not (job.get("website") or "").strip():
-        discovered = await discover_website(job["name"])
-        if not discovered:
-            await jobs.update_job(
-                proposal_id,
-                {**job, "error": f"could not find an official website for {job['name']}"},
-                status="error",
-            )
-            return
-        job = {**job, "website": discovered, "discovered_website": discovered}
-        await jobs.update_job(proposal_id, job)  # persist discovery before the slow research
     sink: list = []
     token = proposal_sink.set(sink)
     try:
+        # Backlog stubs are enqueued with no website. Discover the official site
+        # first so the enrichment agent has a domain to crawl; record it on the
+        # job so the user sees which site the research is based on. Inside the
+        # try so a discovery MISS *and* a discovery FAILURE (e.g. a search
+        # network error) both error the proposal instead of escaping the runner
+        # and leaving the job stuck pending.
+        if not (job.get("website") or "").strip():
+            discovered = await discover_website(job["name"])
+            if not discovered:
+                await jobs.update_job(
+                    proposal_id,
+                    {**job, "error": f"could not find an official website for {job['name']}"},
+                    status="error",
+                )
+                return
+            job = {**job, "website": discovered, "discovered_website": discovered}
+            await jobs.update_job(proposal_id, job)  # persist before the slow research
         result = await enrich(job["name"], job["website"], job["topic"], verbose=False)
         if not sink:
             await jobs.update_job(
