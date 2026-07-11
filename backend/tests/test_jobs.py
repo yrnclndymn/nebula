@@ -231,3 +231,34 @@ def test_list_jobs_endpoint_passes_filters_and_returns_summaries(monkeypatch):
     body = resp.json()
     assert body[0]["summary"] == {"name": "Acme __pytest__", "discovered_website": "acme.example"}
     assert "record" not in body[0] and "dataJson" not in body[0]
+
+
+def test_dismiss_job_endpoint(monkeypatch):
+    """DELETE /jobs/{id}: 404 unknown, 409 pending (still queued), 200 otherwise
+    (#73). Backed by mocks — the graph delete itself is a one-line DETACH DELETE."""
+    from app.api import routes
+
+    store = {
+        "gone": None,
+        "queued": {"status": "pending"},
+        "failed": {"status": "error", "error": "x"},
+    }
+    deleted: list[str] = []
+
+    async def fake_get(job_id):
+        return store.get(job_id)
+
+    async def fake_delete(job_id):
+        deleted.append(job_id)
+        return True
+
+    monkeypatch.setattr(routes.jobs, "get_job", fake_get)
+    monkeypatch.setattr(routes.jobs, "delete_job", fake_delete)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        assert client.delete("/jobs/gone").status_code == 404
+        assert client.delete("/jobs/queued").status_code == 409
+        ok = client.delete("/jobs/failed")
+    assert ok.status_code == 200
+    assert ok.json() == {"dismissed": "failed"}
+    assert deleted == ["failed"]

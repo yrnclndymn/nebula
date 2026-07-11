@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { listJobs } from "./api";
+import { dismissJob, listJobs } from "./api";
 import type { JobSummary } from "./types";
 
 // How many recent jobs to show, and how often to poll while anything is active.
@@ -44,6 +44,24 @@ export function ActivityModal({ onClose }: { onClose: () => void }) {
     return () => clearInterval(iv);
   }, [active.length]);
 
+  // Dismiss a finished/errored job from history (#73). Ready jobs may hold
+  // un-reviewed work, so those confirm first; pending jobs never get the button.
+  async function dismiss(job: JobSummary) {
+    const target = job.summary.name || job.id;
+    // Committed proposals keep status "ready" by design (two-step commit) — only
+    // genuinely un-reviewed ready jobs get the confirmation.
+    const unreviewed = job.status === "ready" && !job.summary.committed;
+    if (unreviewed && !window.confirm(`Dismiss the un-reviewed job for ${target}?`)) {
+      return;
+    }
+    try {
+      await dismissJob(job.id);
+      setJobs((js) => js.filter((j) => j.id !== job.id));
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   return (
     <div className="backfill-overlay" onClick={onClose}>
       <div className="backfill-modal activity-modal" onClick={(e) => e.stopPropagation()}>
@@ -71,8 +89,13 @@ export function ActivityModal({ onClose }: { onClose: () => void }) {
           ) : (
             <>
               <Section title="Active" jobs={active} empty="Nothing running right now." />
-              <Section title="Recently completed" jobs={completed} empty="No completed jobs yet." />
-              <Section title="Failed" jobs={failed} empty="No failures. 🎉" />
+              <Section
+                title="Recently completed"
+                jobs={completed}
+                empty="No completed jobs yet."
+                onDismiss={dismiss}
+              />
+              <Section title="Failed" jobs={failed} empty="No failures. 🎉" onDismiss={dismiss} />
             </>
           )}
         </div>
@@ -87,7 +110,17 @@ export function ActivityModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function Section({ title, jobs, empty }: { title: string; jobs: JobSummary[]; empty: string }) {
+function Section({
+  title,
+  jobs,
+  empty,
+  onDismiss,
+}: {
+  title: string;
+  jobs: JobSummary[];
+  empty: string;
+  onDismiss?: (job: JobSummary) => void;
+}) {
   return (
     <div className="activity-section">
       <div className="diff-group-h">
@@ -96,13 +129,13 @@ function Section({ title, jobs, empty }: { title: string; jobs: JobSummary[]; em
       {jobs.length === 0 ? (
         <div className="muted small">{empty}</div>
       ) : (
-        jobs.map((j) => <JobRow key={j.id} job={j} />)
+        jobs.map((j) => <JobRow key={j.id} job={j} onDismiss={onDismiss} />)
       )}
     </div>
   );
 }
 
-function JobRow({ job }: { job: JobSummary }) {
+function JobRow({ job, onDismiss }: { job: JobSummary; onDismiss?: (job: JobSummary) => void }) {
   const { name, outcome, done, total, error, error_detail } = job.summary;
   const target = name || job.id;
   const showProgress = typeof done === "number" && typeof total === "number" && total > 0;
@@ -113,6 +146,15 @@ function JobRow({ job }: { job: JobSummary }) {
         <span className="activity-target">{target}</span>
         <StatusBadge status={job.status} />
         <span className="muted small activity-when">{relativeTime(job.createdAt)}</span>
+        {onDismiss && (
+          <button
+            className="discard small activity-dismiss"
+            onClick={() => onDismiss(job)}
+            title="Remove this job from history"
+          >
+            ✕
+          </button>
+        )}
       </div>
       {showProgress && (
         <div className="activity-progress">

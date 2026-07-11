@@ -87,6 +87,9 @@ export const fetchBacklog = (limit = 200) => getJson<BacklogRow[]>(`/backlog?lim
 
 // Recent durable jobs, newest first (issue #66) — rehydrates in-progress
 // research after a refresh. Full dataJson stays on the per-id detail endpoints.
+export const dismissJob = (jobId: string) =>
+  request<{ dismissed: string }>("DELETE", `/jobs/${encodeURIComponent(jobId)}`);
+
 export const listJobs = (params: { type?: string; status?: string; limit?: number } = {}) => {
   const qs = new URLSearchParams();
   if (params.type) qs.set("type", params.type);

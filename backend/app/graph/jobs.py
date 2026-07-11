@@ -62,6 +62,19 @@ async def update_job(job_id: str, data: dict, status: str | None = None) -> None
         )
 
 
+async def delete_job(job_id: str) -> bool:
+    """Dismiss a job: delete its node. Returns whether anything was deleted.
+    The CALLER gates on status first (the endpoint refuses pending jobs — they're
+    still queued to run); jobs are operational records, so a hard delete is fine
+    (retention prunes them eventually anyway)."""
+    async with get_driver().session() as session:
+        result = await session.run(
+            "MATCH (j:Job {id: $id}) DETACH DELETE j RETURN count(*) AS n", id=job_id
+        )
+        record = await result.single()
+    return bool(record and record["n"])
+
+
 def _job_summary(
     job_id: str, job_type: str, status: str, created_at, data_json: str | None
 ) -> dict:
