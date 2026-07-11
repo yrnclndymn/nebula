@@ -17,6 +17,7 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
+from app import budget
 from app.config import settings
 from app.genai_retry import generate_with_retry
 from app.graph import cache
@@ -36,6 +37,7 @@ def web_search(query: str) -> dict:
     a company's HQ, headcount, founding year, funding, partners, clients, or
     leadership when they aren't on the company's own site.
     """
+    budget.charge_search()  # charge the active per-run budget; no-op if unbudgeted
     with DDGS() as ddgs:
         hits = ddgs.text(query, max_results=6)
     return {
@@ -102,6 +104,10 @@ async def fetch_page(url: str) -> dict:
     cached = await cache.get_cached_page(driver, url)
     if cached is not None:
         return cached
+    # Charge the active per-run budget only for a real network fetch — a cache hit
+    # is the cheap path the cache exists to provide, so it costs nothing. No-op
+    # (unlimited) when no budget is installed on the context.
+    budget.charge_page()
     page = await asyncio.to_thread(_fetch_page_live, url)
     if "error" not in page:
         await cache.store_page(driver, page)

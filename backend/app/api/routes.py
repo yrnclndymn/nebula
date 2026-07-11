@@ -68,6 +68,18 @@ async def companies(
     )
 
 
+@router.get("/backlog")
+async def backlog(
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict]:
+    """Ranked research backlog: un-researched stub companies (no topic tag, no
+    website) referenced by researched companies, ranked by mention count with a
+    boost for cloud_provider/isv partnerships. Excludes junk and end-customer
+    (kind='client') stubs. Paginated via limit/offset."""
+    return await queries.research_backlog(get_driver(), limit=limit, offset=offset)
+
+
 class KindRequest(BaseModel):
     kind: str | None
 
