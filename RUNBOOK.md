@@ -11,6 +11,7 @@ Placeholders `<LIKE_THIS>` come from a console step; fill them as you go.
 gcloud auth login
 gcloud config set project emergent-strategies
 gcloud services enable run.googleapis.com cloudtasks.googleapis.com \
+  cloudscheduler.googleapis.com \
   secretmanager.googleapis.com cloudbuild.googleapis.com identitytoolkit.googleapis.com
 npm i -g firebase-tools && firebase login
 ```
@@ -67,6 +68,28 @@ gcloud run services update nebula-api --region europe-west2 --update-env-vars=SE
 gcloud run services add-iam-policy-binding nebula-api --region europe-west2 \
   --member=serviceAccount:$TASK_SA --role=roles/run.invoker
 curl -s $SERVICE_URL/health   # expect {"status":"ok"}
+```
+
+## 5b. Cloud Scheduler (periodic trigger → durable jobs)
+Cloud Scheduler POSTs `/jobs/schedule-tick` on a cadence; the endpoint selects due
+work from the schedule registry (`app/graph/schedules.py`) and enqueues durable
+jobs. It's OIDC-authed by the **same** `verify_task` guard as the Cloud Tasks
+callback, so it reuses `nebula-tasks` as the invoker (already granted `run.invoker`
+in step 5). The tick is cheap and idempotent — Scheduler retries are safe.
+```bash
+# Daily at 04:00; OIDC token minted as the tasks SA (audience = the service URL so
+# verify_oauth2_token accepts it, and claims.email == TASKS_SERVICE_ACCOUNT).
+gcloud scheduler jobs create http nebula-schedule-tick \
+  --location=europe-west2 \
+  --schedule="0 4 * * *" --time-zone="Etc/UTC" \
+  --uri="$SERVICE_URL/jobs/schedule-tick" --http-method=POST \
+  --oidc-service-account-email=$TASK_SA \
+  --oidc-token-audience=$SERVICE_URL \
+  --attempt-deadline=320s
+# Verify it end to end (runs the tick once now):
+gcloud scheduler jobs run nebula-schedule-tick --location=europe-west2
+# Adjust cadence later:  gcloud scheduler jobs update http nebula-schedule-tick \
+#   --location=europe-west2 --schedule="0 */6 * * *"
 ```
 
 ## 6. Firebase Auth + Hosting (nebula subdomain)
