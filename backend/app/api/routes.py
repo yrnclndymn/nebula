@@ -207,6 +207,20 @@ async def list_jobs(
     return await jobs.list_jobs(get_driver(), type=type, status=status, limit=limit)
 
 
+@router.delete("/jobs/{job_id}")
+async def dismiss_job(job_id: str) -> dict:
+    """Dismiss (delete) a finished/errored job from the activity views (#73).
+    Pending jobs are refused — they're still queued to run. The UI confirms
+    before dismissing a ready (un-reviewed) job."""
+    job = await jobs.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="unknown job")
+    if job.get("status") == "pending":
+        raise HTTPException(status_code=409, detail="job is still running — not dismissable")
+    await jobs.delete_job(job_id)
+    return {"dismissed": job_id}
+
+
 @router.get("/proposals/{proposal_id}")
 async def proposal_status(proposal_id: str) -> dict:
     """Poll a background enrichment proposal until status is 'ready' (or 'error')."""

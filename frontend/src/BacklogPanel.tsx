@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchBacklog, getProposal, listJobs, researchBacklog } from "./api";
+import { dismissJob, fetchBacklog, getProposal, listJobs, researchBacklog } from "./api";
 import type { BacklogRow, JobSummary, Proposal } from "./types";
 import { ProposalCard } from "./ChatPanel";
 
@@ -189,6 +189,20 @@ export function BacklogModal({ onClose }: { onClose: () => void }) {
     }
   }
 
+  // Dismiss a non-pending entry (#73): removes the durable job. Ready proposals
+  // are un-reviewed work, so those confirm first.
+  async function dismiss(p: Proposal) {
+    if (p.status === "ready" && !window.confirm(`Dismiss the un-reviewed proposal for ${p.name}?`)) {
+      return;
+    }
+    try {
+      await dismissJob(p.proposal_id);
+      setActivity((a) => a.filter((x) => x.proposal_id !== p.proposal_id));
+    } catch (e) {
+      setNotice(String(e));
+    }
+  }
+
   return (
     <div className="backfill-overlay" onClick={onClose}>
       <div className="backfill-modal backlog-modal" onClick={(e) => e.stopPropagation()}>
@@ -310,11 +324,23 @@ export function BacklogModal({ onClose }: { onClose: () => void }) {
                       <div className="proposal-foot">
                         <button className="commit" disabled={busy} onClick={() => retry(p.name)}>
                           Retry
+                        </button>{" "}
+                        <button className="discard" onClick={() => dismiss(p)}>
+                          Dismiss
                         </button>
                       </div>
                     </div>
                   ) : (
-                    <ProposalCard key={p.proposal_id} p={p} />
+                    <div key={p.proposal_id} className="activity-entry">
+                      <ProposalCard p={p} />
+                      <button
+                        className="discard small activity-dismiss"
+                        onClick={() => dismiss(p)}
+                        title="Remove this job from the activity list"
+                      >
+                        ✕ Dismiss
+                      </button>
+                    </div>
                   ),
                 )
               )}

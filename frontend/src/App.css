@@ -1011,3 +1011,21 @@ td.muted {
   max-height: 160px;
   overflow: auto;
 }
+
+/* Dismiss (#73) */
+.activity-dismiss {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 0.1rem 0.5rem;
+  cursor: pointer;
+  font-size: 12px;
+  margin-left: auto;
+}
+.activity-entry {
+  position: relative;
+}
+.activity-entry .activity-dismiss {
+  margin: 0.25rem 0 0.5rem;
+}
