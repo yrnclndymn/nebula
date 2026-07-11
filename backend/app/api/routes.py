@@ -5,6 +5,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.agents.assistant.backfill import commit_backfill, get_backfill
+from app.agents.assistant.classification import (
+    commit_classification,
+    get_classification,
+    start_classification,
+)
 from app.agents.assistant.proposals import commit_proposal, get_proposal
 from app.agents.assistant.resolution import (
     commit_resolution,
@@ -69,7 +74,8 @@ class KindRequest(BaseModel):
 
 @router.patch("/companies/{name}/kind")
 async def set_kind(name: str, req: KindRequest) -> dict:
-    """Set a company's kind (service_provider / isv / cloud_provider), or null."""
+    """Set a company's kind (service_provider / isv / cloud_provider / client), or
+    null. Validated against KINDS, so 'client' is accepted automatically."""
     if req.kind is not None and req.kind not in KINDS:
         raise HTTPException(status_code=422, detail=f"kind must be one of {KINDS}")
     if not await queries.set_company_kind(get_driver(), name, req.kind):
@@ -200,6 +206,38 @@ class ResolutionCommitRequest(BaseModel):
 async def resolution_commit(job_id: str, req: ResolutionCommitRequest) -> dict:
     """Apply reviewed entity-resolution decisions (merge / alias / junk)."""
     result = await commit_resolution(job_id, req.decisions)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.post("/classification/scan")
+async def classification_scan() -> dict:
+    """Start a background scan proposing kind='client' for end-customer stubs
+    (only-inbound-HAS_CLIENT, no other signal). Returns a job id to poll; nothing
+    is written until the user commits an approved subset."""
+    return await start_classification()
+
+
+@router.get("/classification/{job_id}")
+async def classification_status(job_id: str) -> dict:
+    """Poll a client-classification scan; proposed candidates fill in when ready."""
+    job = await get_classification(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="unknown classification job")
+    return job
+
+
+class ClassificationCommitRequest(BaseModel):
+    # Names the reviewer approved for kind='client'. Human-in-the-loop commit step;
+    # the mutation re-checks each is still an unclassified stub before writing.
+    names: list[str]
+
+
+@router.post("/classification/{job_id}/commit")
+async def classification_commit(job_id: str, req: ClassificationCommitRequest) -> dict:
+    """Apply kind='client' to the user-approved candidate names."""
+    result = await commit_classification(job_id, req.names)
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
     return result

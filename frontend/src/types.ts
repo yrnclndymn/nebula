@@ -23,12 +23,13 @@ export interface CompanyRow {
   custom: Record<string, unknown>;
 }
 
-export const KINDS = ["service_provider", "isv", "cloud_provider"] as const;
+export const KINDS = ["service_provider", "isv", "cloud_provider", "client"] as const;
 
 export function kindLabel(kind: string | null): string {
   if (kind === "service_provider") return "Service provider";
   if (kind === "isv") return "ISV";
   if (kind === "cloud_provider") return "Cloud provider";
+  if (kind === "client") return "Client";
   return "—";
 }
 
@@ -158,6 +159,21 @@ export type ResolutionDecision =
   | { action: "merge"; canonical: string; variants: string[] }
   | { action: "alias"; canonical: string; aliases: string[] }
   | { action: "junk"; names: string[] };
+
+// --- Client-kind classification (bulk-label end-customer stubs) ---------------
+
+export interface ClientCandidate {
+  name: string;
+  inbound: number; // count of inbound HAS_CLIENT edges
+}
+
+export interface Classification {
+  job_id: string;
+  status: "pending" | "ready" | "error";
+  candidates: ClientCandidate[];
+  stub_count: number;
+  error?: string;
+}
 
 // Interactive graph view (issue #50). A node's 1-hop neighbourhood, fetched
 // lazily per node so the client never renders the whole graph at once.
