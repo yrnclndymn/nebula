@@ -145,6 +145,23 @@ export interface BacklogRow {
   rank_score: number;
 }
 
+// --- Durable job listing (issue #66) -----------------------------------------
+// Compact, newest-first view of :Job nodes for rehydrating research activity
+// after a refresh; reused by the agent-activity page (#48). The full dataJson
+// stays on the per-id detail endpoints — this carries only a small summary.
+export interface JobSummary {
+  id: string;
+  type: string;
+  status: string;
+  createdAt: string;
+  summary: {
+    name?: string;
+    discovered_website?: string;
+    error?: string;
+    committed?: boolean; // proposal already committed — not awaiting review
+  };
+}
+
 // --- Entity resolution (stub dedup / alias / junk) ---------------------------
 
 export interface ResolutionMember {
