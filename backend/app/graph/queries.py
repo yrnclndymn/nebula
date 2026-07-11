@@ -356,6 +356,89 @@ async def company_neighbourhood(driver: AsyncDriver, name: str) -> dict | None:
     return {"center": center_id, "nodes": list(nodes.values()), "edges": edges}
 
 
+# Extra weight added to a stub's score for each researched cloud_provider/isv that
+# names it as a PARTNER. A plain mention (client-of or partner-of) is worth 1; a
+# cloud/isv partnership is worth 1 (the base partner mention) + this boost, i.e. a
+# total of 3 at boost=2 — a deliberate, explainable multiplier chosen so a single
+# strategic partner outranks two ordinary mentions without drowning them out.
+_CLOUD_ISV_PARTNER_BOOST = 2
+
+# Company kinds that trigger the partner boost (coalesce-safe against unset kind).
+_BOOST_KINDS = ["cloud_provider", "isv"]
+
+
+async def research_backlog(
+    driver: AsyncDriver,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    """Un-researched stub companies, ranked as a research backlog (issue #30).
+
+    A backlog stub is a `:Company` that is *not* researched (no TAGGED_AS topic and
+    no website) yet is referenced by researched companies through inbound
+    HAS_CLIENT / PARTNERS_WITH edges. Enrichment only ever writes edges *out* of the
+    company being researched, so every edge touching a stub is an inbound mention
+    from a researched company — those mentions are the ranking signal.
+
+    Excluded, with coalesce-safe checks so the query is correct whether or not the
+    property is set:
+      - junk-flagged stubs (`c.junk`, from entity resolution);
+      - stubs classified as an end-customer (`c.kind = 'client'`, story #57).
+
+    Ranking is explainable — each row returns the scoring components plus a
+    deterministic score:
+
+        client_mentions            distinct researched companies with (m)-[:HAS_CLIENT]->(c)
+        partner_mentions           distinct researched companies with (m)-[:PARTNERS_WITH]->(c)
+        cloud_isv_partner_mentions subset of partner_mentions where m.kind is cloud_provider/isv
+        rank_score = client_mentions + partner_mentions
+                     + _CLOUD_ISV_PARTNER_BOOST * cloud_isv_partner_mentions
+
+    So the base score is the raw mention tally across both relationship kinds, and a
+    cloud/isv partnership adds an extra `_CLOUD_ISV_PARTNER_BOOST` on top of its base
+    partner mention. `mention_count` is the distinct number of researched companies
+    that reference the stub (a company that both partners-with and has-as-client the
+    stub counts once here, but contributes to both breakdown counts). Rows are
+    ordered by score, then mention_count, then name — fully deterministic for stable
+    pagination.
+    """
+    cypher = """
+        MATCH (c:Company)
+        WHERE NOT (c)-[:TAGGED_AS]->(:Topic)
+          AND c.website IS NULL
+          AND NOT coalesce(c.junk, false)
+          AND coalesce(c.kind, '') <> 'client'
+        MATCH (m:Company)-[rel:HAS_CLIENT|PARTNERS_WITH]->(c)
+        WHERE EXISTS { (m)-[:TAGGED_AS]->(:Topic) }
+        WITH c,
+             count(DISTINCT m) AS mention_count,
+             count(DISTINCT CASE WHEN type(rel) = 'HAS_CLIENT' THEN m END) AS client_mentions,
+             count(DISTINCT CASE WHEN type(rel) = 'PARTNERS_WITH' THEN m END) AS partner_mentions,
+             count(DISTINCT CASE
+                 WHEN type(rel) = 'PARTNERS_WITH' AND coalesce(m.kind, '') IN $boostKinds
+                 THEN m END) AS cloud_isv_partner_mentions
+        RETURN c.name AS name,
+               mention_count,
+               client_mentions,
+               partner_mentions,
+               cloud_isv_partner_mentions,
+               client_mentions + partner_mentions
+                   + $boost * cloud_isv_partner_mentions AS rank_score
+        ORDER BY rank_score DESC, mention_count DESC, name ASC
+        SKIP $offset LIMIT $limit
+    """
+    async with driver.session() as session:
+        result = await session.run(
+            cypher,
+            boost=_CLOUD_ISV_PARTNER_BOOST,
+            boostKinds=_BOOST_KINDS,
+            offset=offset,
+            limit=limit,
+        )
+        return [record.data() async for record in result]
+
+
 # Reject anything that could mutate the graph; run_read_cypher is read-only.
 _WRITE_KEYWORDS = re.compile(
     r"\b(CREATE|MERGE|DELETE|SET|REMOVE|DROP|FOREACH|LOAD\s+CSV|CALL\s*\{)\b",
