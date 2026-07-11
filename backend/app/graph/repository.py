@@ -52,13 +52,18 @@ async def _upsert_tx(tx: AsyncManagedTransaction, record: CompanyRecord) -> None
             types=record.company_types,
         )
 
-    # 3. Org-to-org edges. Partners/clients become :Company stubs if new.
+    # 3. Org-to-org edges. Partners/clients become :Company stubs if new. A name
+    #    that entity resolution recorded as an alias of a canonical node resolves
+    #    to that canonical, so re-enrichment hits the merged node instead of
+    #    re-creating the variant stub (coalesce falls back to the raw name).
     if record.partnerships:
         await tx.run(
             """
             MATCH (c:Company {name: $name})
             UNWIND $partners AS partner
-              MERGE (p:Company {name: partner})
+              OPTIONAL MATCH (canon:Company) WHERE partner IN canon.aliases
+              WITH c, partner, collect(canon.name)[0] AS canonName
+              MERGE (p:Company {name: coalesce(canonName, partner)})
               MERGE (c)-[:PARTNERS_WITH]->(p)
             """,
             name=record.name,
@@ -69,7 +74,9 @@ async def _upsert_tx(tx: AsyncManagedTransaction, record: CompanyRecord) -> None
             """
             MATCH (c:Company {name: $name})
             UNWIND $clients AS client
-              MERGE (cl:Company {name: client})
+              OPTIONAL MATCH (canon:Company) WHERE client IN canon.aliases
+              WITH c, client, collect(canon.name)[0] AS canonName
+              MERGE (cl:Company {name: coalesce(canonName, client)})
               MERGE (c)-[:HAS_CLIENT]->(cl)
             """,
             name=record.name,

@@ -72,6 +72,10 @@ async def run_job(job_id: str) -> None:
         from app.agents.assistant.backfill import run_backfill_job
 
         await run_backfill_job(job_id)
+    elif job["type"] == "resolution":
+        from app.agents.assistant.resolution import run_resolution_job
+
+        await run_resolution_job(job_id)
     else:
         # Periodic job types (Cloud Scheduler → schedule-tick) dispatch via the
         # schedule registry; late import avoids a cycle (schedules imports jobs).

@@ -1,5 +1,12 @@
 import { getIdToken } from "./firebase";
-import type { Backfill, CompanyDetail, CompanyRow, Proposal } from "./types";
+import type {
+  Backfill,
+  CompanyDetail,
+  CompanyRow,
+  Proposal,
+  Resolution,
+  ResolutionDecision,
+} from "./types";
 
 // Backend base URL. Override in production via VITE_API_BASE (e.g. "/api").
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8080";
@@ -49,6 +56,17 @@ export const commitProposal = (proposalId: string, scope: "focus" | "all" = "all
     proposal_id: proposalId,
     scope,
   });
+
+export const scanResolution = () =>
+  postJson<{ job_id: string; status: string }>("/resolution/scan", {});
+
+export const getResolution = (jobId: string) => getJson<Resolution>(`/resolution/${jobId}`);
+
+export const commitResolution = (jobId: string, decisions: ResolutionDecision[]) =>
+  postJson<{ merged?: number; aliased?: number; flagged?: number; error?: string }>(
+    `/resolution/${jobId}/commit`,
+    { decisions },
+  );
 
 export const fetchCompanies = () => getJson<CompanyRow[]>("/companies");
 export const fetchCompany = (name: string) =>

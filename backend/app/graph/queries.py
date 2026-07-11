@@ -27,7 +27,8 @@ async def list_companies(
     headcount_min: int | None = None,
     headcount_max: int | None = None,
 ) -> list[dict]:
-    conditions: list[str] = []
+    # Junk-flagged stubs (from entity resolution) never appear in the list.
+    conditions: list[str] = ["NOT coalesce(c.junk, false)"]
     params: dict = {}
     if topic:
         conditions.append("t0.name = $topic")

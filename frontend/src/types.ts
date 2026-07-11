@@ -132,6 +132,33 @@ export interface Proposal {
   error?: string;
 }
 
+// --- Entity resolution (stub dedup / alias / junk) ---------------------------
+
+export interface ResolutionMember {
+  name: string;
+  edges: number;
+}
+
+export interface ResolutionCluster {
+  canonical: string;
+  members: ResolutionMember[];
+  reason: "normalized" | "containment";
+}
+
+export interface Resolution {
+  job_id: string;
+  status: "pending" | "ready" | "error";
+  clusters: ResolutionCluster[];
+  junk: ResolutionMember[];
+  stub_count: number;
+  error?: string;
+}
+
+export type ResolutionDecision =
+  | { action: "merge"; canonical: string; variants: string[] }
+  | { action: "alias"; canonical: string; aliases: string[] }
+  | { action: "junk"; names: string[] };
+
 // Interactive graph view (issue #50). A node's 1-hop neighbourhood, fetched
 // lazily per node so the client never renders the whole graph at once.
 export interface GraphNode {
