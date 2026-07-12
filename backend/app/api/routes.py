@@ -24,7 +24,7 @@ from app.agents.discovery.discovery import (
 )
 from app.capture.job import get_signal_capture, start_signal_capture
 from app.config import settings
-from app.graph import cache, jobs, queries, retention, schedules
+from app.graph import cache, jobs, queries, retention, schedules, signals
 from app.graph.driver import check_connectivity, get_driver
 from app.graph.models import APPLIES_TO, KINDS, field_key
 
@@ -477,3 +477,24 @@ async def capture_signals_status(job_id: str) -> dict:
     if job is None:
         raise HTTPException(status_code=404, detail="unknown signal-capture job")
     return job
+
+
+@router.get("/companies/{name}/signals")
+async def company_signals(
+    name: str,
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[dict]:
+    """A company's activity timeline (#38): signals mentioning it, newest-first,
+    each kind-badged and carrying its source links. Empty list if none captured yet."""
+    return await signals.signals_for_company(get_driver(), name, limit=limit)
+
+
+@router.get("/signals")
+async def recent_signals(
+    kind: str | None = None,
+    topic: str | None = None,
+    limit: int = Query(default=40, ge=1, le=200),
+) -> list[dict]:
+    """The What's-new feed (#38): recent signals across all companies, newest-first,
+    optionally filtered by kind (news/blog/event) and/or topic."""
+    return await signals.recent_signals_filtered(get_driver(), limit=limit, kind=kind, topic=topic)

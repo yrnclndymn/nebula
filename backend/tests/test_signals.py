@@ -16,6 +16,7 @@ from app.graph.schema import apply_schema
 from app.graph.signals import (
     parse_published_at,
     recent_signals,
+    recent_signals_filtered,
     signals_for_company,
     upsert_signal,
 )
@@ -124,6 +125,9 @@ async def _neo4j_available() -> bool:
         return False
 
 
+TOPIC = f"Topic {MARK}"
+
+
 async def _cleanup(driver):
     async with driver.session() as session:
         await session.run(f"MATCH (s:Signal) WHERE s.url CONTAINS '{MARK}' DETACH DELETE s")
@@ -131,6 +135,7 @@ async def _cleanup(driver):
             "MATCH (c:Company) WHERE c.name IN $names DETACH DELETE c", names=[ACME, GLOBEX]
         )
         await session.run(f"MATCH (src:Source) WHERE src.url CONTAINS '{MARK}' DETACH DELETE src")
+        await session.run("MATCH (t:Topic {name: $name}) DETACH DELETE t", name=TOPIC)
 
 
 def test_upsert_dedup_and_mention_union():
@@ -239,6 +244,61 @@ def test_read_queries_order_newest_first():
     assert recent_news == [jun, mar, jan]
     assert [s["url"] for s in blogs_only] == [blog]  # kind filter
     assert all(s["kind"] == "blog" for s in blogs_only)
+
+
+def test_recent_signals_topic_filter():
+    """recent_signals_filtered narrows to signals mentioning a company tagged to the
+    given topic, still honouring the kind filter and newest-first ordering (#38)."""
+
+    async def scenario():
+        if not await _neo4j_available():
+            return "skip"
+        driver = get_driver()
+        await apply_schema(driver)
+        await _cleanup(driver)
+
+        acme_url = f"https://{MARK}.example.com/acme-news"
+        globex_url = f"https://{MARK}.example.com/globex-news"
+        acme_blog = f"https://{MARK}.example.com/acme-blog"
+        await upsert_signal(
+            driver,
+            SignalRecord(url=acme_url, title="a", kind="news", published_at="2026-05-01"),
+            companies=[ACME],
+        )
+        await upsert_signal(
+            driver,
+            SignalRecord(url=acme_blog, title="ab", kind="blog", published_at="2026-05-02"),
+            companies=[ACME],
+        )
+        await upsert_signal(
+            driver,
+            SignalRecord(url=globex_url, title="g", kind="news", published_at="2026-05-03"),
+            companies=[GLOBEX],
+        )
+        # Only Acme is tagged to the topic.
+        async with driver.session() as session:
+            await session.run(
+                "MATCH (c:Company {name: $name}) "
+                "MERGE (t:Topic {name: $topic}) MERGE (c)-[:TAGGED_AS]->(t)",
+                name=ACME,
+                topic=TOPIC,
+            )
+
+        by_topic = await recent_signals_filtered(driver, limit=10, topic=TOPIC)
+        by_topic_news = await recent_signals_filtered(driver, limit=10, topic=TOPIC, kind="news")
+
+        await _cleanup(driver)
+        await close_driver()
+        return by_topic, by_topic_news, (acme_url, acme_blog, globex_url)
+
+    out = asyncio.run(scenario())
+    if out == "skip":
+        pytest.skip("Neo4j not reachable — run `make db-up`")
+    by_topic, by_topic_news, (acme_url, acme_blog, globex_url) = out
+
+    topic_urls = {s["url"] for s in by_topic}
+    assert topic_urls == {acme_url, acme_blog}  # Globex (other topic) excluded
+    assert [s["url"] for s in by_topic_news] == [acme_url]  # topic AND kind
 
 
 def test_reparse_clears_stale_raw_date():

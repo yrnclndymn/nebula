@@ -201,3 +201,44 @@ async def recent_signals(
         result = await session.run(cypher, **params)
         rows = [record.data() async for record in result]
     return [_shape(r["signal"], r["companies"], r["sources"]) for r in rows]
+
+
+async def recent_signals_filtered(
+    driver: AsyncDriver,
+    limit: int = 20,
+    kind: str | None = None,
+    topic: str | None = None,
+) -> list[dict]:
+    """Recent signals across all companies, newest-first, filtered by kind and/or topic.
+
+    A `topic` matches a signal when any company that mentions it is tagged to that
+    topic (Company-[:TAGGED_AS]->Topic). Appended rather than folded into
+    `recent_signals` so the existing #33 read helper stays untouched for its callers;
+    this adds the topic dimension the #38 What's-new feed needs.
+    """
+    conditions: list[str] = []
+    params: dict = {"limit": limit}
+    if kind:
+        conditions.append("s.kind = $kind")
+        params["kind"] = kind
+    if topic:
+        conditions.append(
+            "EXISTS { MATCH (tc:Company)-[:MENTIONED_IN]->(s) "
+            "WHERE (tc)-[:TAGGED_AS]->(:Topic {name: $topic}) }"
+        )
+        params["topic"] = topic
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    cypher = f"""
+        MATCH (s:Signal)
+        {where}
+        OPTIONAL MATCH (c:Company)-[:MENTIONED_IN]->(s)
+        OPTIONAL MATCH (s)-[:FROM_SOURCE]->(src:Source)
+        WITH s, collect(DISTINCT c.name) AS companies, collect(DISTINCT src.url) AS sources
+        ORDER BY coalesce(s.publishedAt, s.capturedAt) DESC
+        LIMIT $limit
+        RETURN {_SIGNAL_PROPS} AS signal, companies, sources
+    """
+    async with driver.session() as session:
+        result = await session.run(cypher, **params)
+        rows = [record.data() async for record in result]
+    return [_shape(r["signal"], r["companies"], r["sources"]) for r in rows]

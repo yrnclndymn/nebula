@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { fetchCompany, fetchSimilar, setKind } from "./api";
 import { DiscoveryPanel } from "./DiscoveryPanel";
-import { SignalCaptureButton } from "./SignalCaptureButton";
+import { SignalsSection } from "./SignalsSection";
 import type { CompanyDetail, FieldDef, SimilarCompany } from "./types";
 import { fieldApplies, formatCustom, KINDS, kindLabel } from "./types";
 
@@ -199,7 +199,7 @@ export function CompanyDrawer({
           </div>
         )}
 
-        {detail.website && <SignalCaptureButton key={detail.name} name={detail.name} />}
+        <SignalsSection key={detail.name} name={detail.name} hasWebsite={!!detail.website} />
 
         {detail.notes && <Field label="Notes" value={detail.notes} />}
 
