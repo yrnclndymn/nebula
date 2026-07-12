@@ -35,7 +35,7 @@ import:           ## Import a sheet CSV. Usage: make import CSV=data/x.csv TOPIC
 normalize-linkedin: ## Canonicalise stored LinkedIn URLs (uk.->www., trailing slash). ARGS=--dry-run
 	cd backend && uv run python scripts/normalize_linkedin.py $(ARGS)
 
-migrate-person-identity: ## Re-key Person on canonical LinkedIn URL: canonicalise + merge same-URL dups. ARGS=--dry-run
+migrate-person-identity: ## Re-key Person on LinkedIn URL (dry-run by default). ARGS=--commit to apply
 	cd backend && uv run python -m app.graph.person_identity $(ARGS)
 
 discover-leader-linkedin: ## Discover leaders' LinkedIn profiles (reviewable dry-run). ARGS="--commit --limit N --company NAME"
