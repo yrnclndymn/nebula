@@ -4,6 +4,21 @@
 db-up:            ## Start local Neo4j (requires Docker)
 	docker compose up -d neo4j
 
+db-ephemeral:     ## Throwaway Neo4j for THIS worktree (needs Docker) — prints the NEO4J_URI to export
+	@docker info >/dev/null 2>&1 || { echo "error: docker daemon not running — graph tests will skip; CI is the arbiter"; exit 1; }
+	@set -e; name="nebula-eph-$$(pwd | cksum | cut -d' ' -f1)"; \
+	docker rm -f "$$name" >/dev/null 2>&1 || true; \
+	docker run -d --rm --name "$$name" -e NEO4J_AUTH=neo4j/nebula-local-dev -p 127.0.0.1:0:7687 neo4j:5 >/dev/null; \
+	port=$$(docker port "$$name" 7687/tcp | head -1 | awk -F: '{print $$NF}'); \
+	printf 'waiting for bolt on :%s ' "$$port"; \
+	for i in $$(seq 1 45); do \
+	  docker exec "$$name" cypher-shell -u neo4j -p nebula-local-dev "RETURN 1" >/dev/null 2>&1 && break; \
+	  printf '.'; sleep 2; \
+	done; echo " up"; \
+	echo "export NEO4J_URI=bolt://localhost:$$port"; \
+	echo "run:  NEO4J_URI=bolt://localhost:$$port make test"; \
+	echo "stop: docker rm -f $$name"
+
 db-down:          ## Stop local Neo4j
 	docker compose down
 
@@ -72,4 +87,4 @@ worktree:         ## Isolated worktree + branch for a parallel session. NAME=<sl
 	echo "  non-clashing dev ports:    make dev PORT=8081  |  make frontend-dev PORT=5174"; \
 	echo "  remove when merged:        git worktree remove $$dir && git branch -d $(NAME)"
 
-.PHONY: db-up db-down install db-init import enrich eval chat dev schedule-tick test lint frontend-install frontend-dev worktree
+.PHONY: db-up db-ephemeral db-down install db-init import enrich eval chat dev schedule-tick test lint frontend-install frontend-dev worktree

@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Merge-queue entries: required checks must report on the queue's merge
+  # commits or queued PRs can never merge.
+  merge_group:
 
 jobs:
   backend:
