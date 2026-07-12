@@ -196,6 +196,25 @@ def test_find_section_pages_groups_and_caps():
     assert "event" not in grouped
 
 
+# --- Pure: same-site guard ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("item_url", "kept"),
+    [
+        ("https://acme.example/news/a", True),  # same domain
+        ("https://blog.acme.example/post", True),  # own subdomain (blogs live there)
+        ("https://www.acme.example/news/b", True),  # www-stripped
+        ("https://evil.example/acme.example", False),  # foreign domain
+        ("https://notacme.example/x", False),  # suffix trick, not a subdomain
+    ],
+)
+def test_build_record_same_site_guard(item_url, kept):
+    item = capture_job.FeedItem(title="Acme ships", url=item_url)
+    record = capture_job._build_record(item, "news", "https://acme.example/feed", "acme.example")
+    assert (record is not None) is kept
+
+
 # --- Integration: durable capture job (needs Neo4j; network/LLM stubbed) ----
 
 MARK = "__pytest_capture__"

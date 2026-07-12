@@ -138,8 +138,10 @@ def _build_record(item: FeedItem, kind: str, source: str, home_domain: str) -> S
     if not canonical or not title:
         return None
     # Only the company's OWN site — never let a feed/page inject arbitrary external
-    # URLs as this company's signals (untrusted-content guardrail).
-    if cache.domain_of(canonical) != home_domain:
+    # URLs as this company's signals (untrusted-content guardrail). Subdomains of
+    # the company's domain count as its own site (blogs often live on one).
+    item_domain = cache.domain_of(canonical)
+    if item_domain != home_domain and not item_domain.endswith("." + home_domain):
         return None
     if kind not in ("news", "blog", "event"):
         kind = "news"
