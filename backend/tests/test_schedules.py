@@ -17,6 +17,8 @@ from app.main import app
 STALE_URL = "__pytest_sched_stale__"
 FRESH_URL = "__pytest_sched_fresh__"
 RET_PREFIX = "__pytest_retention__"
+SIG_PREFIX = "__pytest_signal__"
+SIG_COMPANIES = ["Acme __pytest_sig__", "Globex __pytest_sig__"]
 
 
 def test_schedule_tick_rejects_unauthenticated():
@@ -312,6 +314,125 @@ def test_errored_job_does_not_block_cadence(monkeypatch):
     assert errored["status"] == "error"
     assert "simulated runner failure" in errored["error"]
     assert len(second["enqueued"]) == 1  # retry allowed despite recent errored job
+
+
+def test_signal_prune_enforces_caps_and_protects_unreviewed(monkeypatch):
+    """The signal_prune runner deletes signals past the count/age caps, keeps a
+    shared story that's still within cap for another company, and never deletes a
+    signal cited by un-reviewed work. Skip-guarded on Neo4j."""
+    # Small caps so fixtures stay tiny; real defaults are far larger.
+    monkeypatch.setattr(settings, "signal_max_per_company", 2)
+    monkeypatch.setattr(settings, "signal_max_age_days", 365)
+
+    acme, globex = SIG_COMPANIES
+
+    def u(name: str) -> str:
+        return f"{SIG_PREFIX}{name}"
+
+    # (url, kind, age_days, companies) — Acme news group has 6 entries (cap 2).
+    seed = [
+        (u("n0"), "news", 1, [acme]),  # rank 1 → keep
+        (u("n1"), "news", 2, [acme]),  # rank 2 → keep
+        (u("n2"), "news", 3, [acme]),  # rank 3 → over count → prune
+        (u("old"), "news", 400, [acme]),  # over count AND too old → prune
+        (u("b0"), "blog", 1, [acme]),  # separate kind, rank 1 → keep
+        (u("shared"), "news", 9, [acme, globex]),  # Acme-overflow but Globex rank 1 → keep
+        (u("orphan"), "news", 1, []),  # no company → clears no cap → prune
+        (u("cited"), "news", 400, [acme]),  # too old, but cited by un-reviewed job → keep
+    ]
+    job_id = f"{SIG_PREFIX}prune"
+    unreviewed_job = f"{SIG_PREFIX}proposal"
+
+    async def scenario():
+        try:
+            await check_connectivity()
+        except Exception:
+            return "skip"
+        driver = get_driver()
+        links = [{"url": url, "company": c} for (url, _k, _a, cs) in seed for c in cs]
+        async with driver.session() as session:
+            await _clean_signals(session)
+            await session.run(
+                "UNWIND $rows AS r CREATE (s:Signal {url: r.url, kind: r.kind, "
+                "capturedAt: datetime() - duration({days: r.age})})",
+                rows=[{"url": url, "kind": k, "age": a} for (url, k, a, _cs) in seed],
+            )
+            await session.run(
+                "UNWIND $links AS l MATCH (s:Signal {url: l.url}) "
+                "MERGE (c:Company {name: l.company}) MERGE (c)-[:MENTIONED_IN]->(s)",
+                links=links,
+            )
+            # An un-reviewed proposal (ready, not committed) citing the `cited` URL.
+            await session.run(
+                "CREATE (:Job {id: $id, type: 'proposal', status: 'ready', "
+                "dataJson: $data, createdAt: datetime()})",
+                id=unreviewed_job,
+                data=json.dumps({"name": acme, "evidence": u("cited")}),
+            )
+            # Provenance sources: one serving only a doomed signal (stranded by the
+            # prune → swept), one serving a survivor (kept).
+            await session.run(
+                "MATCH (dead:Signal {url: $dead}) MATCH (live:Signal {url: $live}) "
+                "CREATE (dead)-[:FROM_SOURCE]->(:Source {url: $deadsrc}) "
+                "CREATE (live)-[:FROM_SOURCE]->(:Source {url: $livesrc})",
+                dead=u("old"),
+                live=u("n0"),
+                deadsrc=u("src_dead"),
+                livesrc=u("src_live"),
+            )
+
+        due_before = await schedules._prunable_signals_exist(driver)
+
+        await jobs.create_job(job_id, "signal_prune", {"status": "pending"})
+        await schedules.run_signal_prune(job_id)
+        prune_job = await jobs.get_job(job_id)
+
+        async with driver.session() as session:
+            r = await session.run(
+                "MATCH (s:Signal) WHERE s.url STARTS WITH $p RETURN collect(s.url) AS urls",
+                p=SIG_PREFIX,
+            )
+            surviving = set((await r.single())["urls"])
+            r = await session.run(
+                "MATCH (src:Source) WHERE src.url STARTS WITH $p RETURN collect(src.url) AS urls",
+                p=SIG_PREFIX,
+            )
+            surviving_sources = set((await r.single())["urls"])
+            await _clean_signals(session)
+            await session.run(
+                "MATCH (j:Job) WHERE j.id STARTS WITH $p DETACH DELETE j", p=SIG_PREFIX
+            )
+        await close_driver()
+        return due_before, prune_job, surviving, surviving_sources
+
+    out = asyncio.run(scenario())
+    if out == "skip":
+        pytest.skip("Neo4j not reachable — run `make db-up`")
+    due_before, prune_job, surviving, surviving_sources = out
+
+    assert due_before is True  # Acme news group of 6 > cap 2
+    assert prune_job["status"] == "done"
+    # Deleted exactly the three: over-count n2, too-old `old`, and the orphan.
+    assert prune_job["pruned"] == 3
+    assert prune_job["prunedByKind"] == {"news": 3}
+    assert prune_job["protected"] == 1  # the cited signal was spared
+    assert "pruned 3 signals" in prune_job["outcome"]
+    assert prune_job["graphSize"]["nodeCap"] == 200_000
+    # Survivors: within-cap news, the blog, the shared story, and the cited one.
+    assert surviving == {u("n0"), u("n1"), u("b0"), u("shared"), u("cited")}
+    # The source stranded by the prune was swept; the survivor's source stays.
+    assert prune_job["orphanSources"] >= 1
+    assert surviving_sources == {u("src_live")}
+
+
+async def _clean_signals(session):
+    await session.run("MATCH (s:Signal) WHERE s.url STARTS WITH $p DETACH DELETE s", p=SIG_PREFIX)
+    await session.run(
+        "MATCH (src:Source) WHERE src.url STARTS WITH $p DETACH DELETE src", p=SIG_PREFIX
+    )
+    await session.run(
+        "MATCH (c:Company) WHERE c.name IN $names DETACH DELETE c", names=SIG_COMPANIES
+    )
 
 
 def test_committed_flag_serializer_canary():

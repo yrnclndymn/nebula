@@ -44,6 +44,17 @@ class Settings(BaseSettings):
     # (that would destroy un-reviewed work) — see app/graph/schedules.py.
     job_retention_days: int = 30
 
+    # Signal retention (#37): periodic capture grows the graph without bound, and
+    # Aura Free caps at 200K nodes, so the scheduled `signal_prune` enforces two
+    # caps (see app/graph/retention.py + the RETENTION section of the graph
+    # README). Defaults are deliberately generous yet safe: worst-case Signal
+    # nodes = companies x kinds(3) x signal_max_per_company. At ~200 tracked
+    # companies that is 200 x 3 x 50 = 30K signals — comfortably under 200K even
+    # counting linked :Source nodes and relationships. The age cap ages stale
+    # news out for companies that never reach the count cap.
+    signal_max_per_company: int = 50  # keep newest N per company per kind
+    signal_max_age_days: int = 365  # drop signals older than this
+
     # Gemini quota resilience (issue #65). The free tier caps requests/min on the
     # shared key; these keep chat + research jobs from starving each other and 429ing.
     # - gemini_rpm: process-wide requests/min ceiling ALL Gemini callers pace
