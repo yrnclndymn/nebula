@@ -19,6 +19,7 @@ import { ClientClassificationModal } from "./ClientClassification";
 import { BacklogModal } from "./BacklogPanel";
 import { ActivityModal } from "./ActivityPanel";
 import { WhatsNewModal } from "./WhatsNew";
+import { DigestModal } from "./DigestPanel";
 import { AUTH_ENABLED, signOutUser } from "./firebase";
 
 type SortKey = "name" | "headcount" | "yearFounded" | "partnerCount" | "clientCount";
@@ -81,6 +82,7 @@ export default function App() {
   const [backlogOpen, setBacklogOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
+  const [digestOpen, setDigestOpen] = useState(false);
   const [graphSeed, setGraphSeed] = useState<string | null>(null);
   const [graphOpen, setGraphOpen] = useState(false);
 
@@ -232,6 +234,9 @@ export default function App() {
           </button>
           <button className="chat-toggle" onClick={() => setWhatsNewOpen(true)} title="Recent signals across all companies — news, blog posts, events">
             🆕 What's new
+          </button>
+          <button className="chat-toggle" onClick={() => setDigestOpen(true)} title="Weekly digest — what changed: new signals, newly-researched companies, notable changes">
+            📰 Digest
           </button>
           <button className="chat-toggle" onClick={() => setResolveOpen(true)} title="Dedup stub companies">
             🧩 Resolve stubs
@@ -390,6 +395,7 @@ export default function App() {
       {backlogOpen && <BacklogModal onClose={() => setBacklogOpen(false)} />}
       {activityOpen && <ActivityModal onClose={() => setActivityOpen(false)} />}
       {whatsNewOpen && <WhatsNewModal topics={topics} onClose={() => setWhatsNewOpen(false)} />}
+      {digestOpen && <DigestModal onClose={() => setDigestOpen(false)} />}
     </div>
   );
 }

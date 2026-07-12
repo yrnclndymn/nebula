@@ -25,7 +25,7 @@ from app.agents.discovery.discovery import (
 from app.capture.job import get_signal_capture, start_signal_capture
 from app.capture.news import get_news_capture, start_news_capture
 from app.config import settings
-from app.graph import cache, jobs, queries, retention, schedules, signals
+from app.graph import cache, digest, jobs, queries, retention, schedules, signals
 from app.graph.driver import check_connectivity, get_driver
 from app.graph.models import APPLIES_TO, KINDS, field_key
 
@@ -521,3 +521,20 @@ async def recent_signals(
     """The What's-new feed (#38): recent signals across all companies, newest-first,
     optionally filtered by kind (news/blog/event) and/or topic."""
     return await signals.recent_signals_filtered(get_driver(), limit=limit, kind=kind, topic=topic)
+
+
+@router.get("/digests")
+async def digests_list(limit: int = Query(default=52, ge=1, le=200)) -> list[dict]:
+    """Weekly digests (#51), newest-first — a browsable history of what changed.
+    Compact rows (totals + prose summary); the per-id endpoint carries the payload."""
+    return await digest.list_digests(get_driver(), limit=limit)
+
+
+@router.get("/digests/{digest_id}")
+async def digest_detail(digest_id: str) -> dict:
+    """One weekly digest's full detail (#51): the rendered summary plus the grouped
+    deltas payload (new signals by company, newly-researched, notable changes)."""
+    result = await digest.get_digest(get_driver(), digest_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"no digest {digest_id!r}")
+    return result

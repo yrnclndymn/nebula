@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from neo4j import AsyncDriver
 
 from app.config import settings
-from app.graph import jobs, retention
+from app.graph import digest, jobs, retention
 from app.graph.driver import get_driver
 
 logger = logging.getLogger("nebula.schedules")
@@ -378,5 +378,14 @@ SCHEDULES: list[Schedule] = [
         cadence_days=7,
         run=run_signal_prune,
         is_due=_prunable_signals_exist,
+    ),
+    # Weekly digest (#51): generate + store a "what changed" summary each week. Its
+    # runner + delta queries live in app/graph/digest.py; dispatch is via the
+    # schedules.owns() fallback in jobs.run_job (no jobs.py change needed).
+    Schedule(
+        job_type="digest",
+        cadence_days=7,
+        run=digest.run_digest_job,
+        is_due=digest.digest_due,
     ),
 ]
