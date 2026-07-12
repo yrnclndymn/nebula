@@ -18,7 +18,7 @@ from app.agents.assistant.resolution import (
 )
 from app.agents.assistant.service import respond
 from app.config import settings
-from app.graph import cache, jobs, queries, schedules
+from app.graph import cache, jobs, queries, retention, schedules
 from app.graph.driver import check_connectivity, get_driver
 from app.graph.models import APPLIES_TO, KINDS, field_key
 
@@ -401,3 +401,14 @@ async def company_types() -> list[str]:
 @router.get("/countries")
 async def countries() -> list[str]:
     return await queries.list_countries(get_driver())
+
+
+@public_router.get("/health/graph/size")
+async def graph_size() -> JSONResponse:
+    """Graph size metrics (#37): node/relationship totals against the Aura Free
+    200K node cap, plus the signal breakdown that retention bounds. Public, like
+    the other /health probes; 503 if the graph is unreachable."""
+    try:
+        return JSONResponse(content=await retention.graph_size(get_driver()))
+    except Exception as exc:  # noqa: BLE001 — surface any driver/connection error
+        return JSONResponse(status_code=503, content={"status": "unavailable", "detail": str(exc)})

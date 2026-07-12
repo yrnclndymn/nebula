@@ -23,11 +23,12 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from neo4j import AsyncDriver
 
 from app.config import settings
-from app.graph import jobs
+from app.graph import jobs, retention
 from app.graph.driver import get_driver
 
 logger = logging.getLogger("nebula.schedules")
@@ -229,6 +230,126 @@ async def run_job_prune(job_id: str) -> None:
     logger.info("job prune %s removed %d old job records", job_id, pruned)
 
 
+# --- Signal retention (#37) ------------------------------------------------------
+# Periodic signal capture grows the graph without bound; Aura Free caps at 200K
+# nodes. This schedule enforces the retention policy: keep the newest
+# `signal_max_per_company` signals per company per kind, and drop anything older
+# than `signal_max_age_days`. The *selection* (which signals survive) is pure and
+# unit-tested in app/graph/retention.py; this runner reads candidate data, applies
+# it, spares any signal cited by un-reviewed work, and batch-deletes the rest,
+# reporting per-kind counts. Page-cache entries from signal crawls are ordinary
+# :Page nodes already pruned by `cache_prune` — no second cache pruner here.
+
+# A signal is protected from pruning when it is referenced by a :Job that is
+# awaiting user review — the exact negation of the job-retention "deletable"
+# predicate (single source of truth), so proposals/backfills that are `ready` but
+# not yet committed can't have their cited signals deleted out from under them.
+_UNREVIEWED_JOB = f"NOT ({_RETENTION_DELETABLE})"
+
+# DETACH DELETE batch size — irreversible, so chunk it rather than delete in one
+# unbounded statement.
+_PRUNE_BATCH = 500
+
+
+async def _prunable_signals_exist(driver: AsyncDriver) -> bool:
+    """Cheap, slightly optimistic due-check: is there any age-violating signal, or
+    any (company, kind) group over the count cap? The runner is the precise
+    arbiter — a rare over-trigger just runs an empty prune."""
+    async with driver.session() as session:
+        result = await session.run(
+            "MATCH (s:Signal) "
+            "WHERE coalesce(s.publishedAt, s.capturedAt) "
+            "< datetime() - duration({days: $age}) "
+            "RETURN count(s) AS n LIMIT 1",
+            age=settings.signal_max_age_days,
+        )
+        if (await result.single())["n"] > 0:
+            return True
+        result = await session.run(
+            "MATCH (c:Company)-[:MENTIONED_IN]->(s:Signal) "
+            "WITH c, s.kind AS kind, count(s) AS n "
+            "WHERE n > $cap RETURN count(*) AS groups",
+            cap=settings.signal_max_per_company,
+        )
+        return (await result.single())["groups"] > 0
+
+
+async def _signals_protected_by_unreviewed_work(driver: AsyncDriver, urls: list[str]) -> set[str]:
+    """Of the given candidate URLs, which are cited in an un-reviewed job's data?
+    Those must never be pruned (wave-4 job_prune lesson, applied to signals)."""
+    if not urls:
+        return set()
+    async with driver.session() as session:
+        result = await session.run(
+            "UNWIND $urls AS u "
+            f"MATCH (j:Job) WHERE {_UNREVIEWED_JOB} AND j.dataJson CONTAINS u "
+            "RETURN collect(DISTINCT u) AS protected",
+            urls=urls,
+        )
+        record = await result.single()
+    return set(record["protected"] or [])
+
+
+async def run_signal_prune(job_id: str) -> None:
+    """Apply the signal retention policy and record what was removed.
+
+    Reads all signals, computes the prune set with the pure selector, removes any
+    URL cited by un-reviewed work, then batch DETACH-DELETEs. The job's `outcome`
+    (shown on the activity page) and log line carry per-kind counts + resulting
+    graph size, so pruning is observable."""
+    driver = get_driver()
+    refs = await retention.load_signal_refs(driver)
+    candidates = retention.select_signals_to_prune(
+        refs,
+        max_per_company=settings.signal_max_per_company,
+        max_age_days=settings.signal_max_age_days,
+        now=datetime.now(timezone.utc),
+    )
+    protected = await _signals_protected_by_unreviewed_work(driver, candidates)
+    to_delete = [u for u in candidates if u not in protected]
+
+    by_kind: dict[str, int] = {}
+    kind_of = {r.url: r.kind for r in refs}
+    for url in to_delete:
+        kind = kind_of.get(url, "unknown")
+        by_kind[kind] = by_kind.get(kind, 0) + 1
+
+    pruned = 0
+    for start in range(0, len(to_delete), _PRUNE_BATCH):
+        batch = to_delete[start : start + _PRUNE_BATCH]
+        async with driver.session() as session:
+            result = await session.run(
+                "UNWIND $urls AS u MATCH (s:Signal {url: u}) "
+                "DETACH DELETE s RETURN count(s) AS pruned",
+                urls=batch,
+            )
+            pruned += (await result.single())["pruned"]
+
+    size = await retention.graph_size(driver)
+    detail = ", ".join(f"{k}: {n}" for k, n in sorted(by_kind.items())) or "none"
+    job = await jobs.get_job(job_id)
+    await jobs.update_job(
+        job_id,
+        {
+            **(job or {}),
+            "pruned": pruned,
+            "prunedByKind": by_kind,
+            "protected": len(protected),
+            "graphSize": size,
+            "outcome": f"pruned {pruned} signals ({detail}); "
+            f"{size['nodes']}/{size['nodeCap']} nodes",
+        },
+        status="done",
+    )
+    logger.info(
+        "signal prune %s removed %d signals (%s); graph now %d nodes",
+        job_id,
+        pruned,
+        detail,
+        size["nodes"],
+    )
+
+
 SCHEDULES: list[Schedule] = [
     Schedule(
         job_type="cache_prune",
@@ -241,5 +362,11 @@ SCHEDULES: list[Schedule] = [
         cadence_days=1,
         run=run_job_prune,
         is_due=_prunable_jobs_exist,
+    ),
+    Schedule(
+        job_type="signal_prune",
+        cadence_days=7,
+        run=run_signal_prune,
+        is_due=_prunable_signals_exist,
     ),
 ]
