@@ -26,7 +26,17 @@ from neo4j import AsyncDriver
 # Byte sequences that only appear when UTF-8 multibyte characters were decoded as
 # ISO-8859-1: ``â€…`` fronts the curly quotes / dashes / ellipsis, ``Ã…``/``Â…`` the
 # accented Latin letters and symbols. A clean English string won't contain these.
+# Visible CP1252-style artefacts…
 _MOJIBAKE_MARKERS = ("â€", "Ã", "Â")
+# …and the form requests' true ISO-8859-1 decode actually produces: UTF-8
+# continuation bytes 0x80-0x9F land on C1 CONTROL characters (invisible), so
+# "\u2019" becomes "â" + U+0080 + U+0099 with no visible marker at all. C1
+# controls never occur in legitimate text — their presence is the smoking gun.
+
+
+def _has_c1_controls(text: str) -> bool:
+    return any("\x80" <= ch <= "\x9f" for ch in text)
+
 
 # The fields on a :Signal that hold human-readable captured text.
 _TEXT_FIELDS = ("title", "summary")
@@ -41,7 +51,9 @@ def demojibake(text: str | None) -> str | None:
     latin-1 encode and is left untouched. Idempotent: feeding it repaired text
     yields None.
     """
-    if not text or not any(marker in text for marker in _MOJIBAKE_MARKERS):
+    if not text:
+        return None
+    if not (_has_c1_controls(text) or any(marker in text for marker in _MOJIBAKE_MARKERS)):
         return None
     try:
         repaired = text.encode("latin-1").decode("utf-8")
