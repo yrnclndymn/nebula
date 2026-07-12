@@ -137,6 +137,36 @@ def test_to_record_drops_untitled_or_unlinked():
     assert news._to_record(NewsHit(title="A story", url=""), "Acme") is None
 
 
+def test_outlet_source_prefers_domain_shaped_outlet_over_aggregator_host():
+    """On aggregator redirect URLs the article host is the aggregator; a
+    domain-shaped DDGS outlet identifies the real publisher instead. A display-name
+    outlet is never fabricated into a domain (#86 review)."""
+    redirect = NewsHit(
+        title="t",
+        url="https://www.msn.example/en-us/news/story-id",
+        outlet="realpaper.example",
+    )
+    assert news._outlet_source(redirect) == "https://realpaper.example"
+    display_name = NewsHit(
+        title="t",
+        url="https://www.msn.example/en-us/news/story-id",
+        outlet="Real Paper Weekly",
+    )
+    assert news._outlet_source(display_name) == "https://msn.example"
+
+
+def test_llm_filter_fails_safe_on_error(monkeypatch):
+    """A quota/model error must return the pure shortlist unchanged — the job
+    never depends on the LLM confirm (#86 review)."""
+    hits = [NewsHit(title="Acme ships", url="https://a.example/1")]
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("simulated 429")
+
+    monkeypatch.setattr(news, "generate_with_retry", boom)
+    assert asyncio.run(news.llm_filter_subjects("Acme", hits)) == hits
+
+
 # --- Integration: durable news-capture job (needs Neo4j; net + LLM stubbed) --
 
 # The company name is the subject term the (fictional) articles actually use, so

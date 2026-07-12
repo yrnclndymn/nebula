@@ -345,9 +345,19 @@ async def llm_filter_subjects(name: str, hits: list[NewsHit]) -> list[NewsHit]:
 
 
 def _outlet_source(hit: NewsHit) -> str | None:
-    """The third-party outlet's identity for the Source node: the article host as
-    a URL (``https://<host>``), so all coverage from one outlet shares a Source.
-    None when the URL has no host."""
+    """The third-party outlet's identity for the Source node, as a URL
+    (``https://<host>``) so all coverage from one outlet shares a Source.
+
+    Prefers DDGS's ``outlet`` field when it is domain-shaped — on aggregator
+    redirect URLs (MSN/Bing) the article host is the aggregator, not the real
+    publisher. Falls back to the article host; a display-name outlet ("Some
+    Weekly") is never turned into a fabricated domain. None when neither yields
+    a host."""
+    outlet = (hit.outlet or "").strip().lower()
+    if outlet and " " not in outlet and "." in outlet:
+        outlet_host = cache.domain_of(outlet)
+        if outlet_host:
+            return f"https://{outlet_host}"
     host = cache.domain_of(hit.url)
     return f"https://{host}" if host else None
 
@@ -411,17 +421,20 @@ async def gather_company_news(
 # --- durable job ------------------------------------------------------------
 
 
-async def _company_website(driver, name: str) -> tuple[bool, str | None]:
-    """(exists, website) for a company by name. ``exists`` distinguishes an unknown
-    company from a known one with no website (news search still works without it)."""
+async def _company_profile(driver, name: str) -> tuple[bool, str | None, tuple[str, ...]]:
+    """(exists, website, aliases) for a company by name. ``exists`` distinguishes an
+    unknown company from a known one with no website (news search still works
+    without it); aliases recorded by entity resolution feed the relevance filter."""
     async with driver.session() as session:
         result = await session.run(
-            "MATCH (c:Company {name: $name}) RETURN c.website AS website", name=name
+            "MATCH (c:Company {name: $name}) "
+            "RETURN c.website AS website, coalesce(c.aliases, []) AS aliases",
+            name=name,
         )
         record = await result.single()
     if record is None:
-        return False, None
-    return True, record["website"]
+        return False, None, ()
+    return True, record["website"], tuple(a for a in record["aliases"] if a)
 
 
 async def _existing_signal_urls(driver, urls: list[str]) -> set[str]:
@@ -442,7 +455,7 @@ async def start_news_capture(name: str) -> dict:
     immediately with a job id to poll; nothing runs synchronously. 404-shaped
     ``error`` when the company is unknown."""
     driver = get_driver()
-    exists, website = await _company_website(driver, name)
+    exists, website, aliases = await _company_profile(driver, name)
     if not exists:
         return {"error": f"no company named {name!r} to search news for"}
     job_id = uuid.uuid4().hex[:8]
@@ -454,6 +467,7 @@ async def start_news_capture(name: str) -> dict:
             "status": "pending",
             "name": name,
             "website": website,
+            "aliases": list(aliases),
             "captured": 0,
             "new": 0,
         },
@@ -472,7 +486,9 @@ async def run_news_capture_job(job_id: str) -> None:
     run_budget = budget.budget_for("news_capture", job.get("budget"))
     try:
         with budget.use_budget(run_budget):
-            records = await gather_company_news(job["name"], job.get("website"))
+            records = await gather_company_news(
+                job["name"], job.get("website"), aliases=tuple(job.get("aliases") or ())
+            )
     except Exception as exc:  # noqa: BLE001 — surface search/capture failures on the job
         await jobs.update_job(
             job_id,
