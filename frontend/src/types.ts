@@ -323,3 +323,14 @@ export interface CompanyDetail {
   citations: Citation[];
   custom: Record<string, unknown>;
 }
+
+// Own-site signal capture job (issue #34), polled by the drawer's capture button.
+export interface SignalCapture {
+  job_id: string;
+  status: string;
+  name: string;
+  captured?: number;
+  new?: number;
+  outcome?: string;
+  error?: string;
+}

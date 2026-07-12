@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { fetchCompany, fetchSimilar, setKind } from "./api";
 import { DiscoveryPanel } from "./DiscoveryPanel";
+import { SignalCaptureButton } from "./SignalCaptureButton";
 import type { CompanyDetail, FieldDef, SimilarCompany } from "./types";
 import { fieldApplies, formatCustom, KINDS, kindLabel } from "./types";
 
@@ -197,6 +198,8 @@ export function CompanyDrawer({
             <DiscoveryPanel key={detail.name} seed={detail.name} />
           </div>
         )}
+
+        {detail.website && <SignalCaptureButton key={detail.name} name={detail.name} />}
 
         {detail.notes && <Field label="Notes" value={detail.notes} />}
 
