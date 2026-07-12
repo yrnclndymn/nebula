@@ -11,17 +11,17 @@ from app.agents.assistant.classification import (
     start_classification,
 )
 from app.agents.assistant.proposals import commit_proposal, get_proposal, propose_enrichment
-from app.agents.discovery.discovery import (
-    get_discovery,
-    research_candidates,
-    start_discovery,
-)
 from app.agents.assistant.resolution import (
     commit_resolution,
     get_resolution,
     start_resolution,
 )
 from app.agents.assistant.service import respond
+from app.agents.discovery.discovery import (
+    get_discovery,
+    research_candidates,
+    start_discovery,
+)
 from app.capture.job import get_signal_capture, start_signal_capture
 from app.config import settings
 from app.graph import cache, jobs, queries, retention, schedules

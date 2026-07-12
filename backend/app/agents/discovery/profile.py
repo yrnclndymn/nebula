@@ -12,6 +12,7 @@ model. The model call is isolated behind `summarise_cohort` so callers can mock 
 `build_profile` reads the graph and stitches the two together.
 """
 
+import logging
 from collections import Counter
 from dataclasses import dataclass, field
 
@@ -21,6 +22,8 @@ from google.genai import types
 from app.config import settings
 from app.genai_retry import generate_with_retry
 from app.graph import queries
+
+logger = logging.getLogger("nebula.discovery")
 
 # Human-readable category words per ecosystem kind, used to phrase queries
 # ("<category> companies in <country>"). Falls back to a neutral word.
@@ -153,5 +156,9 @@ async def build_profile(driver, seed_name: str, cohort_names: list[str]) -> Coho
     cohort_rows = [by_name[n] for n in cohort_names if n in by_name]
 
     profile = derive_profile_facts(seed_row, cohort_rows)
-    profile.summary = await summarise_cohort(seed_name, [seed_row, *cohort_rows])
+    try:
+        profile.summary = await summarise_cohort(seed_name, [seed_row, *cohort_rows])
+    except Exception:  # noqa: BLE001 — a failed summary (quota, safety block) must
+        # not fail the whole job; query generation runs on the facts alone.
+        logger.exception("cohort summary failed for %s; continuing with facts only", seed_name)
     return profile
