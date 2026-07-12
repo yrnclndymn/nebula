@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from neo4j import AsyncDriver
 
 from app.config import settings
-from app.graph import jobs, retention
+from app.graph import jobs, refresh, retention
 from app.graph.driver import get_driver
 
 logger = logging.getLogger("nebula.schedules")
@@ -360,6 +360,116 @@ async def run_signal_prune(job_id: str) -> None:
     )
 
 
+# --- Periodic signal refresh (#36) ---------------------------------------------
+# Signals go stale between captures: a company's own-site feed (#34) and third-party
+# coverage (#35) move on, but capture only runs when triggered. This schedule
+# re-captures — WITHOUT any manual trigger — the companies whose freshest signal is
+# older than `signal_refresh_staleness_days` (or that have none yet). It never
+# captures anything itself: it fans out the EXISTING per-company capture jobs (one
+# signal_capture + one news_capture each), staggered so the batch doesn't burst the
+# shared free-tier Gemini RPM ceiling. The selection (which companies are due,
+# stalest-first, capped at the batch budget) is pure + unit-tested in
+# app/graph/refresh.py.
+#
+# Cadence: the Schedule ticks daily (cadence_days=1); per-company weekly spacing
+# comes from the 7-day staleness — a just-refreshed company's capturedAt updates,
+# so it isn't due again for a week, and successive daily batches cover the set.
+#
+# Budget rail: `signal_refresh_batch` hard-caps companies-per-run — the only spend
+# a refresh triggers is its child capture jobs, each already bounded by its own
+# per-run budget (signal_capture / news_capture in settings.job_budgets), so the
+# refresh needs no page/search/LLM budget of its own (it does none).
+#
+# No unbounded retries: an errored refresh is excluded from the cadence guard (like
+# every schedule — see `_cadence_elapsed`), so the NEXT daily tick simply retries
+# it — one attempt per tick, never a loop. The fanned-out children fail
+# independently onto their own :Job nodes (visible in the activity view) and never
+# retry unboundedly either.
+
+# The capture job types a refresh fans out, one of each per due company.
+_REFRESH_CAPTURE_TYPES = ("signal_capture", "news_capture")
+
+
+async def _signal_refresh_due(driver: AsyncDriver) -> bool:
+    return await refresh.companies_due_exist(
+        driver, staleness_days=settings.signal_refresh_staleness_days
+    )
+
+
+async def run_signal_refresh(job_id: str) -> None:
+    """Select companies due for a signal refresh and fan out their capture jobs.
+
+    Reads refreshable companies with the pure selector (stalest-first, capped at the
+    batch budget), then for each due company creates + enqueues one own-site
+    (signal_capture) and one third-party-news (news_capture) job, staggered by a
+    global slot counter so the whole batch doesn't fire at once. Records an outcome
+    summary (companies checked / refreshed, jobs enqueued) on this run's :Job node;
+    the children report their own captured/new counts on their own nodes.
+    """
+    driver = get_driver()
+    candidates = await refresh.load_refresh_candidates(driver)
+    due = refresh.select_companies_to_refresh(
+        candidates,
+        staleness_days=settings.signal_refresh_staleness_days,
+        now=datetime.now(timezone.utc),
+        batch_size=settings.signal_refresh_batch,
+    )
+
+    enqueued: list[dict] = []
+    slot = 0  # global enqueue slot → each child starts `slot * stagger` seconds in
+    for company in due:
+        for capture_type in _REFRESH_CAPTURE_TYPES:
+            child_id = f"{capture_type}-{uuid.uuid4().hex[:8]}"
+            # Minimal payload the capture runners read (name/website; news reads an
+            # optional aliases list, absent here — the periodic path relies on the
+            # name + website-brand entity floor, keeping the fan-out a single read).
+            await jobs.create_job(
+                child_id,
+                capture_type,
+                {
+                    "job_id": child_id,
+                    "status": "pending",
+                    "name": company.name,
+                    "website": company.website,
+                    "captured": 0,
+                    "new": 0,
+                    "refreshOrigin": job_id,  # provenance: which refresh run fanned it
+                },
+            )
+            await jobs.enqueue(child_id, delay=slot * settings.signal_refresh_stagger_seconds)
+            enqueued.append({"type": capture_type, "name": company.name, "job_id": child_id})
+            slot += 1
+
+    site = sum(1 for e in enqueued if e["type"] == "signal_capture")
+    news = sum(1 for e in enqueued if e["type"] == "news_capture")
+    outcome = (
+        f"refreshed {len(due)} companies ({site} site + {news} news captures enqueued)"
+        if due
+        else f"no companies due for refresh ({len(candidates)} checked)"
+    )
+    job = await jobs.get_job(job_id)
+    await jobs.update_job(
+        job_id,
+        {
+            **(job or {}),
+            "companiesChecked": len(candidates),
+            "companiesRefreshed": len(due),
+            "jobsEnqueued": len(enqueued),
+            "stalenessDays": settings.signal_refresh_staleness_days,
+            "batch": settings.signal_refresh_batch,
+            "outcome": outcome,
+        },
+        status="done",
+    )
+    logger.info(
+        "signal refresh %s fanned out %d capture jobs for %d/%d companies",
+        job_id,
+        len(enqueued),
+        len(due),
+        len(candidates),
+    )
+
+
 SCHEDULES: list[Schedule] = [
     Schedule(
         job_type="cache_prune",
@@ -378,5 +488,12 @@ SCHEDULES: list[Schedule] = [
         cadence_days=7,
         run=run_signal_prune,
         is_due=_prunable_signals_exist,
+    ),
+    # Ticks daily; the 7-day staleness gives ~weekly-per-company refresh (see above).
+    Schedule(
+        job_type="signal_refresh",
+        cadence_days=1,
+        run=run_signal_refresh,
+        is_due=_signal_refresh_due,
     ),
 ]
