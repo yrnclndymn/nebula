@@ -1094,3 +1094,72 @@ td.muted {
 .capture-signals .error {
   color: #c0392b;
 }
+
+/* Signals UI (#38): drawer activity timeline + What's-new feed */
+.signals-section .capture-signals {
+  margin: 0.5rem 0 0.75rem;
+}
+.signal-list {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.signal-item {
+  border-left: 2px solid var(--border);
+  padding-left: 0.75rem;
+}
+.signal-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.signal-title {
+  font-weight: 600;
+  line-height: 1.3;
+}
+.signal-kind {
+  flex: none;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--chip-bg, rgba(120, 120, 140, 0.16));
+  color: var(--muted);
+}
+.signal-kind.kind-news {
+  background: rgba(52, 120, 220, 0.16);
+  color: #2f6fd0;
+}
+.signal-kind.kind-blog {
+  background: rgba(120, 80, 200, 0.16);
+  color: #7a50c8;
+}
+.signal-kind.kind-event {
+  background: rgba(40, 160, 110, 0.16);
+  color: #1f9e68;
+}
+.signal-when {
+  margin-top: 0.15rem;
+}
+.signal-summary {
+  margin: 0.3rem 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.signal-companies {
+  margin-top: 0.35rem;
+}
+.signal-sources {
+  margin-top: 0.25rem;
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.whatsnew-filters {
+  padding: 0.75rem 1.25rem 0;
+}

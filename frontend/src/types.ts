@@ -324,6 +324,31 @@ export interface CompanyDetail {
   custom: Record<string, unknown>;
 }
 
+// A captured news/blog/event item (issue #38): the drawer's company timeline and
+// the cross-company "What's new" feed both render these. Fields mirror the graph
+// read helpers' `_shape` output. `url`/`title` come from crawled feeds — untrusted,
+// so the UI only turns `url` into a link when it's an http(s) URL.
+export interface Signal {
+  url: string | null;
+  title: string | null;
+  kind: string; // news | blog | event
+  summary: string | null;
+  publishedAt: string | null; // ISO, when the feed date parsed
+  publishedAtRaw: string | null; // the raw date string when it didn't
+  capturedAt: string | null;
+  companies: string[];
+  sources: string[];
+}
+
+export const SIGNAL_KINDS = ["news", "blog", "event"] as const;
+
+export function signalKindLabel(kind: string): string {
+  if (kind === "news") return "News";
+  if (kind === "blog") return "Blog";
+  if (kind === "event") return "Event";
+  return kind;
+}
+
 // Own-site signal capture job (issue #34), polled by the drawer's capture button.
 export interface SignalCapture {
   job_id: string;

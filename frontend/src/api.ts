@@ -11,6 +11,7 @@ import type {
   Proposal,
   Resolution,
   ResolutionDecision,
+  Signal,
   SignalCapture,
 } from "./types";
 
@@ -146,3 +147,17 @@ export const startSignalCapture = (name: string) =>
 
 export const getSignalCapture = (jobId: string) =>
   getJson<SignalCapture>(`/signals/capture/${jobId}`);
+
+// Signals UI (issue #38): a company's activity timeline, and the cross-company
+// "What's new" feed (filterable by kind/topic). Both newest-first.
+export const fetchCompanySignals = (name: string, limit = 20) =>
+  getJson<Signal[]>(`/companies/${encodeURIComponent(name)}/signals?limit=${limit}`);
+
+export const fetchSignals = (params: { kind?: string; topic?: string; limit?: number } = {}) => {
+  const qs = new URLSearchParams();
+  if (params.kind) qs.set("kind", params.kind);
+  if (params.topic) qs.set("topic", params.topic);
+  if (params.limit) qs.set("limit", String(params.limit));
+  const q = qs.toString();
+  return getJson<Signal[]>(`/signals${q ? `?${q}` : ""}`);
+};

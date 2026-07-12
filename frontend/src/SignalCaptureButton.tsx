@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { getSignalCapture, startSignalCapture } from "./api";
 
 // Trigger own-site signal capture (issue #34) from the company drawer: one
-// button → durable job → captured/new counts when done. Signals aren't surfaced
-// in the UI yet (issue #38); until then the outcome line here and the activity
-// page are the feedback.
+// button → durable job → captured/new counts when done. Lives inside the drawer's
+// Signals section (issue #38); `onDone` lets that section refresh its timeline once
+// a capture completes, so newly-captured items appear without reopening the drawer.
 
 type Phase = "idle" | "running" | "done" | "error";
 
-export function SignalCaptureButton({ name }: { name: string }) {
+export function SignalCaptureButton({ name, onDone }: { name: string; onDone?: () => void }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [outcome, setOutcome] = useState<string>("");
   const stop = useRef(false);
@@ -28,6 +28,7 @@ export function SignalCaptureButton({ name }: { name: string }) {
       if (job.status === "done") {
         setOutcome(job.outcome ?? `captured ${job.captured ?? 0} items`);
         setPhase("done");
+        onDone?.();
         return;
       }
       if (job.status === "error") {
