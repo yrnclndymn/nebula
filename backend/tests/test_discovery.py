@@ -134,6 +134,19 @@ def test_extract_candidates_excludes_domains():
     assert extract_candidates(results, terms=[], exclude_domains={"acme.example"}) == []
 
 
+def test_extract_candidates_drops_non_http_urls():
+    """`sources` is rendered as links in the review UI — a hostile result with a
+    javascript:/data: scheme (or anything schemeless-weird) must never survive."""
+    results = [
+        {"title": "Evil Co", "url": "javascript:alert(1)", "snippet": "x"},
+        {"title": "Evil Data", "url": "data:text/html,<script>1</script>", "snippet": "x"},
+        {"title": "Fine Co", "url": "https://fine.example", "snippet": "x"},
+    ]
+    cands = extract_candidates(results, terms=[])
+    assert [c["name"] for c in cands] == ["Fine Co"]
+    assert all(s.startswith("https://") for c in cands for s in c["sources"])
+
+
 # --- Dedup against the graph (pure matcher) -----------------------------------
 
 

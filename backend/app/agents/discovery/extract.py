@@ -99,6 +99,10 @@ def extract_candidates(
 
     for hit in results:
         url = hit.get("url", "") or ""
+        # Only real web URLs: `sources` is rendered as links in the review UI, so a
+        # hostile result with a javascript:/data: scheme must never get through.
+        if not url.lower().startswith(("http://", "https://")):
+            continue
         domain = official_domain(url)
         if not domain or domain in exclude:
             continue
