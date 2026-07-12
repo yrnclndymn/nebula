@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from urllib.parse import urljoin
 from xml.etree import ElementTree as ET
 
+import defusedxml.ElementTree as SafeET
+
 from bs4 import BeautifulSoup
 
 # Feed MIME substrings we accept on a rel="alternate" <link> tag.
@@ -130,9 +132,11 @@ def parse_feed(xml_text: str, base_url: str = "") -> list[FeedItem]:
     """
     if not xml_text or not xml_text.strip():
         return []
+    # Feed XML is untrusted external input: defusedxml blocks entity-expansion
+    # bombs (billion laughs / quadratic blowup) that stock ElementTree allows.
     try:
-        root = ET.fromstring(xml_text.strip())
-    except ET.ParseError:
+        root = SafeET.fromstring(xml_text.strip())
+    except (ET.ParseError, ValueError):
         return []
     items = [
         _parse_entry(el, base_url) for el in root.iter() if _local(el.tag) in ("item", "entry")

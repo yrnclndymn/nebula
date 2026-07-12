@@ -112,6 +112,18 @@ def test_parse_feed_relative_links_absolutised():
     assert items[0].url == "https://acme.example/news/x"
 
 
+def test_parse_feed_rejects_entity_expansion_bomb():
+    """Untrusted feed XML with DTD entity expansion (billion laughs) must be
+    refused by the safe parser, not expanded — it yields no items."""
+    bomb = (
+        '<?xml version="1.0"?>'
+        "<!DOCTYPE lolz [<!ENTITY lol \"lol\"><!ENTITY lol2 \"&lol;&lol;&lol;&lol;\">]>"
+        "<rss><channel><item><title>&lol2;</title>"
+        "<link>https://acme.example/x</link></item></channel></rss>"
+    )
+    assert parse_feed(bomb, "https://acme.example") == []
+
+
 def test_parse_feed_bad_xml_returns_empty():
     assert parse_feed("not xml at all", "https://acme.example") == []
     assert parse_feed("", "https://acme.example") == []
