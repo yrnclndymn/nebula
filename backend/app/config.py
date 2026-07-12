@@ -120,6 +120,15 @@ class Settings(BaseSettings):
             "max_llm_calls": 3,
             "max_companies": 0,
         },
+        # Person enrichment (#40) is one person per run: a couple of targeted
+        # searches, a few evidence-page fetches, and a single structured extraction
+        # call. Modest caps keep a scheduled/ambient people run off the shared
+        # Gemini quota while leaving headroom for the gather.
+        "person_enrichment": {
+            "max_pages": 8,
+            "max_searches": 4,
+            "max_llm_calls": 3,
+        },
     }
 
 
