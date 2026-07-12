@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getDiscovery, researchDiscovery, startDiscovery } from "./api";
 import type { Discovery } from "./types";
 
@@ -20,6 +20,15 @@ export function DiscoveryPanel({ seed }: { seed: string }) {
   const [researching, setResearching] = useState(false);
   const [startedCount, setStartedCount] = useState<number | null>(null);
   const stop = useRef(false);
+
+  // The drawer unmounts this panel on close/company-switch; without this the
+  // poll loop keeps hitting the API and calling setState on a dead component.
+  useEffect(() => {
+    stop.current = false;
+    return () => {
+      stop.current = true;
+    };
+  }, []);
 
   async function poll(jobId: string) {
     try {
