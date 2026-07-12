@@ -100,6 +100,16 @@ def test_build_payload_notable_changes_only_include_jobs_with_outcome():
     assert payload["notableChanges"][0]["outcome"] == "found 3 items"
 
 
+def test_housekeeping_types_exclude_all_scheduled_orchestrators():
+    """Every scheduled job type whose outcome is self-referential housekeeping —
+    including #36's signal_refresh fan-out orchestrator — must be excluded from
+    "notable changes" (#93 review): the per-company capture outcomes are the news."""
+    from app.graph.schedules import SCHEDULES
+
+    for sched in SCHEDULES:
+        assert sched.job_type in digest._HOUSEKEEPING_TYPES
+
+
 def test_has_deltas_false_on_empty_week():
     payload = digest.build_payload(_window(), [], [], [])
     assert digest.has_deltas(payload) is False

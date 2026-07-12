@@ -48,7 +48,9 @@ _MAX_NOTABLE = 25
 
 # Housekeeping/self job types excluded from "notable changes" — they're internal
 # retention chores, not activity a reader cares about.
-_HOUSEKEEPING_TYPES = ["digest", "cache_prune", "job_prune", "signal_prune"]
+# signal_refresh is the fan-out orchestrator (#36): its own "refreshed N companies"
+# line is housekeeping — the per-company capture outcomes it enqueues are the news.
+_HOUSEKEEPING_TYPES = ["digest", "cache_prune", "job_prune", "signal_prune", "signal_refresh"]
 
 
 @dataclass(frozen=True)
