@@ -41,6 +41,9 @@ migrate-person-identity: ## Re-key Person on canonical LinkedIn URL: canonicalis
 discover-leader-linkedin: ## Discover leaders' LinkedIn profiles (reviewable dry-run). ARGS="--commit --limit N --company NAME"
 	cd backend && uv run python -m app.graph.person_discovery $(ARGS)
 
+repair-mojibake:  ## Repair UTF-8-as-Latin-1 mojibake in stored Signal titles/summaries (dry-run). ARGS=--commit
+	cd backend && uv run python -m app.graph.repair_mojibake $(ARGS)
+
 enrich:           ## Research one company via the ADK agent. NAME= WEBSITE= [TOPIC=]
 	cd backend && uv run python -m app.agents.enrichment.enrich "$(NAME)" "$(WEBSITE)" $(if $(TOPIC),"$(TOPIC)",)
 
@@ -93,4 +96,4 @@ worktree:         ## Isolated worktree + branch for a parallel session. NAME=<sl
 	echo "  non-clashing dev ports:    make dev PORT=8081  |  make frontend-dev PORT=5174"; \
 	echo "  remove when merged:        git worktree remove $$dir && git branch -d $(NAME)"
 
-.PHONY: db-up db-ephemeral db-down install db-init import normalize-linkedin migrate-person-identity discover-leader-linkedin enrich eval chat dev schedule-tick test lint frontend-install frontend-dev worktree
+.PHONY: db-up db-ephemeral db-down install db-init import normalize-linkedin migrate-person-identity discover-leader-linkedin repair-mojibake enrich eval chat dev schedule-tick test lint frontend-install frontend-dev worktree

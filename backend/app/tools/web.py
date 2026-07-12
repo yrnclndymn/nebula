@@ -22,6 +22,7 @@ from app.config import settings
 from app.genai_retry import generate_with_retry
 from app.graph import cache
 from app.graph.driver import get_driver
+from app.tools.encoding import response_text
 from app.tools.social import find_social_links
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; NebulaResearchBot/0.1)"}
@@ -55,7 +56,9 @@ def _fetch_page_live(url: str) -> dict:
     except Exception as exc:  # noqa: BLE001 — hand any fetch error back to the model
         return {"url": url, "error": str(exc)}
 
-    soup = BeautifulSoup(resp.text, "lxml")
+    # Decode UTF-8-safely: a charset-less body must not fall back to ISO-8859-1 (#89).
+    html = response_text(resp)
+    soup = BeautifulSoup(html, "lxml")
     domain = urlparse(url).netloc
 
     links, seen_l = [], set()
@@ -81,7 +84,7 @@ def _fetch_page_live(url: str) -> dict:
 
     # The company's own social/profile links (LinkedIn etc.) — found from the raw
     # HTML because the same-domain filter above drops these external hrefs.
-    social = find_social_links(resp.text)
+    social = find_social_links(html)
 
     for tag in soup(["script", "style", "noscript", "svg"]):
         tag.decompose()
