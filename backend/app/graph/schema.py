@@ -11,8 +11,11 @@ from neo4j import AsyncDriver
 
 # Controlled-vocabulary nodes get a UNIQUE constraint so MERGE-by-name dedupes.
 # Company is the human key from the sheet; Topic/CompanyType/Tool are tags.
-# Person is only INDEXed (not unique): people are deduped by name for now, which
-# is imperfect — the enrichment agent will re-key them by LinkedIn URL later.
+# Person.linkedin is the canonical identity where known (story #39): the URL is
+# stored in canonical form (see person_identity.canonical_linkedin) and the UNIQUE
+# constraint dedupes people who share a profile. It is nullable-safe — Neo4j
+# property-uniqueness ignores nulls, so name-only people (no LinkedIn yet) are
+# unaffected; person_name stays an INDEX for display/name-fallback keying.
 SCHEMA_STATEMENTS = [
     "CREATE CONSTRAINT company_name IF NOT EXISTS FOR (c:Company) REQUIRE c.name IS UNIQUE",
     "CREATE CONSTRAINT topic_name IF NOT EXISTS FOR (t:Topic) REQUIRE t.name IS UNIQUE",
@@ -26,6 +29,10 @@ SCHEMA_STATEMENTS = [
     # Signal.url stores the *canonical* URL (see models.canonicalise_url); the
     # uniqueness constraint is what dedupes the same story captured twice.
     "CREATE CONSTRAINT signal_url IF NOT EXISTS FOR (s:Signal) REQUIRE s.url IS UNIQUE",
+    # Person.linkedin stores the *canonical* profile URL (see person_identity);
+    # nullable-safe (Neo4j ignores nulls) so name-only people are unconstrained.
+    # Run `make migrate-person-identity` before this on already-dirty data.
+    "CREATE CONSTRAINT person_linkedin IF NOT EXISTS FOR (p:Person) REQUIRE p.linkedin IS UNIQUE",
     "CREATE INDEX company_website IF NOT EXISTS FOR (c:Company) ON (c.website)",
     "CREATE INDEX company_hqcountry IF NOT EXISTS FOR (c:Company) ON (c.hqCountry)",
     "CREATE INDEX person_name IF NOT EXISTS FOR (p:Person) ON (p.name)",

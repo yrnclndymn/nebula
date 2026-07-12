@@ -48,6 +48,11 @@ class FieldDef(BaseModel):
 class Leader(BaseModel):
     name: str
     title: str | None = None
+    # Canonical identity where known (story #39). When present the write path keys
+    # the :Person on this URL instead of the name; canonicalised before keying (see
+    # person_identity.canonical_linkedin). Populated only via the deterministic
+    # own-site / search-evidence discovery path — never a bare crawled link.
+    linkedin: str | None = None
 
 
 class Citation(BaseModel):
