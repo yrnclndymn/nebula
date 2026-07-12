@@ -11,6 +11,7 @@ import type {
   Proposal,
   Resolution,
   ResolutionDecision,
+  SignalCapture,
 } from "./types";
 
 // Backend base URL. Override in production via VITE_API_BASE (e.g. "/api").
@@ -134,3 +135,14 @@ export const fetchTopics = () => getJson<string[]>("/topics");
 export const fetchCompanyTypes = () => getJson<string[]>("/company-types");
 export const fetchFields = () => getJson<import("./types").FieldDef[]>("/fields");
 export const fetchCountries = () => getJson<string[]>("/countries");
+
+// Own-site signal capture (issue #34): start returns a durable job id; poll it
+// for captured/new counts. The job also appears on the activity page.
+export const startSignalCapture = (name: string) =>
+  postJson<{ job_id: string; status: string }>(
+    `/companies/${encodeURIComponent(name)}/signals/capture`,
+    {},
+  );
+
+export const getSignalCapture = (jobId: string) =>
+  getJson<SignalCapture>(`/signals/capture/${jobId}`);
