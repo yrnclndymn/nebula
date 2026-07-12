@@ -325,6 +325,15 @@ async def run_signal_prune(job_id: str) -> None:
             )
             pruned += (await result.single())["pruned"]
 
+    # Deleting signals can strand :Source nodes that served only them. Sources are
+    # shared provenance (companies CITE them too), so only sweep nodes left with no
+    # relationships at all — otherwise they leak against the same 200K cap.
+    async with driver.session() as session:
+        result = await session.run(
+            "MATCH (src:Source) WHERE NOT (src)--() DELETE src RETURN count(src) AS n"
+        )
+        orphan_sources = (await result.single())["n"]
+
     size = await retention.graph_size(driver)
     detail = ", ".join(f"{k}: {n}" for k, n in sorted(by_kind.items())) or "none"
     job = await jobs.get_job(job_id)
@@ -335,6 +344,7 @@ async def run_signal_prune(job_id: str) -> None:
             "pruned": pruned,
             "prunedByKind": by_kind,
             "protected": len(protected),
+            "orphanSources": orphan_sources,
             "graphSize": size,
             "outcome": f"pruned {pruned} signals ({detail}); "
             f"{size['nodes']}/{size['nodeCap']} nodes",

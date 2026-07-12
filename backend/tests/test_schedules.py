@@ -369,6 +369,17 @@ def test_signal_prune_enforces_caps_and_protects_unreviewed(monkeypatch):
                 id=unreviewed_job,
                 data=json.dumps({"name": acme, "evidence": u("cited")}),
             )
+            # Provenance sources: one serving only a doomed signal (stranded by the
+            # prune → swept), one serving a survivor (kept).
+            await session.run(
+                "MATCH (dead:Signal {url: $dead}) MATCH (live:Signal {url: $live}) "
+                "CREATE (dead)-[:FROM_SOURCE]->(:Source {url: $deadsrc}) "
+                "CREATE (live)-[:FROM_SOURCE]->(:Source {url: $livesrc})",
+                dead=u("old"),
+                live=u("n0"),
+                deadsrc=u("src_dead"),
+                livesrc=u("src_live"),
+            )
 
         due_before = await schedules._prunable_signals_exist(driver)
 
@@ -382,17 +393,22 @@ def test_signal_prune_enforces_caps_and_protects_unreviewed(monkeypatch):
                 p=SIG_PREFIX,
             )
             surviving = set((await r.single())["urls"])
+            r = await session.run(
+                "MATCH (src:Source) WHERE src.url STARTS WITH $p RETURN collect(src.url) AS urls",
+                p=SIG_PREFIX,
+            )
+            surviving_sources = set((await r.single())["urls"])
             await _clean_signals(session)
             await session.run(
                 "MATCH (j:Job) WHERE j.id STARTS WITH $p DETACH DELETE j", p=SIG_PREFIX
             )
         await close_driver()
-        return due_before, prune_job, surviving
+        return due_before, prune_job, surviving, surviving_sources
 
     out = asyncio.run(scenario())
     if out == "skip":
         pytest.skip("Neo4j not reachable — run `make db-up`")
-    due_before, prune_job, surviving = out
+    due_before, prune_job, surviving, surviving_sources = out
 
     assert due_before is True  # Acme news group of 6 > cap 2
     assert prune_job["status"] == "done"
@@ -404,10 +420,16 @@ def test_signal_prune_enforces_caps_and_protects_unreviewed(monkeypatch):
     assert prune_job["graphSize"]["nodeCap"] == 200_000
     # Survivors: within-cap news, the blog, the shared story, and the cited one.
     assert surviving == {u("n0"), u("n1"), u("b0"), u("shared"), u("cited")}
+    # The source stranded by the prune was swept; the survivor's source stays.
+    assert prune_job["orphanSources"] >= 1
+    assert surviving_sources == {u("src_live")}
 
 
 async def _clean_signals(session):
     await session.run("MATCH (s:Signal) WHERE s.url STARTS WITH $p DETACH DELETE s", p=SIG_PREFIX)
+    await session.run(
+        "MATCH (src:Source) WHERE src.url STARTS WITH $p DETACH DELETE src", p=SIG_PREFIX
+    )
     await session.run(
         "MATCH (c:Company) WHERE c.name IN $names DETACH DELETE c", names=SIG_COMPANIES
     )
