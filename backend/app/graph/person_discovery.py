@@ -32,6 +32,7 @@ from app.graph.person_identity import (
     extract_person_linkedins,
     linkedin_slug_matches_name,
 )
+from app.tools.encoding import response_text
 from app.tools.web import web_search
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; NebulaResearchBot/0.1)"}
@@ -62,7 +63,7 @@ def _fetch(url: str) -> str:
     try:
         resp = requests.get(url, timeout=15, headers=_HEADERS)
         resp.raise_for_status()
-        return resp.text
+        return response_text(resp)  # UTF-8-safe; no ISO-8859-1 mojibake (#89)
     except Exception:  # noqa: BLE001 — a dead/blocked page just yields no evidence
         return ""
 

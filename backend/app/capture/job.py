@@ -50,18 +50,22 @@ _TITLE_MAX = 300
 # --- direct fetch (feed XML + homepage head, which fetch_page can't expose) --
 
 
-def _get_raw_live(url: str) -> str | None:
-    """Blocking GET of raw response text (feed XML / page HTML), or None on error."""
+def _get_raw_live(url: str) -> bytes | None:
+    """Blocking GET of the raw response BYTES (feed XML / page HTML), or None on
+    error. Bytes — not ``resp.text`` — so the feed XML prolog / HTML meta-charset is
+    honoured by the parser instead of requests' ISO-8859-1 fallback mangling UTF-8
+    into mojibake (#89); ``discover_feeds``/``parse_feed`` both sniff the encoding
+    from the bytes they're given."""
     try:
         resp = requests.get(url, timeout=_TIMEOUT, headers=_HEADERS)
         resp.raise_for_status()
     except Exception:  # noqa: BLE001 — a dead feed just captures nothing
         return None
-    return resp.text
+    return resp.content
 
 
-async def _fetch_raw(url: str) -> str | None:
-    """Raw text for a feed or a page's ``<head>`` — needed because ``fetch_page``
+async def _fetch_raw(url: str) -> bytes | None:
+    """Raw bytes for a feed or a page's ``<head>`` — needed because ``fetch_page``
     strips ``<link>`` tags and parses HTML (it can't return feed XML). Charges the
     per-run page budget like any other network fetch."""
     budget.charge_page()
@@ -180,7 +184,7 @@ async def capture_company(name: str, website: str) -> list[SignalRecord]:
     try:
         # 1) Feeds — autodiscover from the homepage <head>, then parse each.
         home_html = await _fetch_raw(start)
-        feed_urls = discover_feeds(home_html or "", start)[:_MAX_FEEDS]
+        feed_urls = discover_feeds(home_html or b"", start)[:_MAX_FEEDS]
         for feed_url in feed_urls:
             xml = await _fetch_raw(feed_url)
             if xml is None:
