@@ -248,16 +248,20 @@ async def migrate_person_identity(driver: AsyncDriver, *, dry_run: bool = True) 
 
 
 async def attach_linkedin(
-    driver: AsyncDriver, name: str, url: str, *, dry_run: bool = True
+    driver: AsyncDriver, name: str, url: str, *, company: str, dry_run: bool = True
 ) -> dict:
     """Attach a discovered canonical LinkedIn URL to the name-only Person(s) called
-    ``name``. The reviewable commit for enrichment-discovered URLs on EXISTING
-    people (story #39) — never called silently from a write path.
+    ``name`` who lead ``company``. The reviewable commit for enrichment-discovered
+    URLs on EXISTING people (story #39) — never called silently from a write path.
 
-    Only nodes that currently have no ``linkedin`` are touched, so a person already
-    keyed on a profile is never overwritten. If a node already holds the canonical
-    URL, the name-only node(s) are merged into it (dedup); otherwise the URL is set
-    on one node and any name-siblings fold into it. Returns the action taken.
+    The evidence behind a discovered URL is specific to ONE company (its team page,
+    its slug-gated search), so candidates are scoped to that company's leaders —
+    a genuine namesake leading an unrelated company is never touched (#87 review).
+    Only nodes that currently have no ``linkedin`` are considered, so a person
+    already keyed on a profile is never overwritten. If a node already holds the
+    canonical URL, the scoped name-only node(s) merge into it (dedup); otherwise
+    the URL is set on one node and same-company name-siblings (true duplicates)
+    fold into it. Returns the action taken.
     """
     canon = canonical_linkedin(url)
     if canon is None:
@@ -266,15 +270,22 @@ async def attach_linkedin(
     async with driver.session() as session:
         result = await session.run(
             """
-            MATCH (p:Person {name: $name}) WHERE p.linkedin IS NULL
+            MATCH (p:Person {name: $name})-[:LEADS]->(:Company {name: $company})
+            WHERE p.linkedin IS NULL
+            WITH DISTINCT p
             OPTIONAL MATCH (p)-[r:LEADS]->()
             RETURN elementId(p) AS eid, count(r) AS leads
             """,
             name=name,
+            company=company,
         )
         candidates = [dict(rec) async for rec in result]
         if not candidates:
-            return {"name": name, "action": "skipped", "reason": "no name-only Person to attach"}
+            return {
+                "name": name,
+                "action": "skipped",
+                "reason": f"no name-only Person leading {company!r} to attach",
+            }
 
         # An existing node may already own this canonical URL (e.g. a prior run).
         result = await session.run(

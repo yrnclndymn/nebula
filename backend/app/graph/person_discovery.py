@@ -147,7 +147,9 @@ async def _run(commit: bool, limit: int, company: str | None) -> None:
         else:
             attached = 0
             for row in rows:
-                result = await attach_linkedin(driver, row["person"], row["url"], dry_run=False)
+                result = await attach_linkedin(
+                    driver, row["person"], row["url"], company=row["company"], dry_run=False
+                )
                 print(
                     f"  {result['action']}: {row['person']} [{result.get('canonical', row['url'])}]"
                 )

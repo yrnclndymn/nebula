@@ -20,6 +20,7 @@ from app.graph.schema import apply_schema
 
 CO_A = "Nebula Test Co A __pytest39__"
 CO_B = "Nebula Test Co B __pytest39__"
+CO_C = "Nebula Test Co C __pytest39__"
 SLUG = "jane-placeholder-pytest39"
 CANON = f"https://www.linkedin.com/in/{SLUG}"
 NAME_ONLY = "John Standin __pytest39__"
@@ -42,10 +43,10 @@ async def _neo4j_available() -> bool:
 
 async def _cleanup(session) -> None:
     await session.run(
-        "MATCH (c:Company) WHERE c.name IN $names DETACH DELETE c", names=[CO_A, CO_B]
+        "MATCH (c:Company) WHERE c.name IN $names DETACH DELETE c", names=[CO_A, CO_B, CO_C]
     )
     await session.run(
-        "MATCH (p:Person) WHERE p.linkedin CONTAINS $slug OR p.name = $name DETACH DELETE p",
+        "MATCH (p:Person) WHERE p.linkedin CONTAINS $slug OR p.name IN [$name, 'Jane Placeholder'] DETACH DELETE p",
         slug=SLUG,
         name=NAME_ONLY,
     )
@@ -174,25 +175,29 @@ def test_attach_linkedin_reviewable_set_and_merge(event_loop):
             await _cleanup(session)
             # A name-only leader (no URL yet) plus an already-keyed node for the
             # SAME human at a different company — attaching should dedup onto the
-            # keyed node, not create a rival.
+            # keyed node, not create a rival. A NAMESAKE (different human, same
+            # name) leading an unrelated company must survive untouched: the
+            # evidence is scoped to coA (#87 review).
             await session.run(
                 """
                 CREATE (:Person {name: 'Jane Placeholder'})-[:LEADS {title:'CEO'}]->(:Company {name:$coA})
                 CREATE (:Person {name: 'Jane Placeholder', linkedin:$canon})-[:LEADS {title:'Chair'}]->(:Company {name:$coB})
+                CREATE (:Person {name: 'Jane Placeholder'})-[:LEADS {title:'CTO'}]->(:Company {name:$coC})
                 """,
                 coA=CO_A,
                 coB=CO_B,
+                coC=CO_C,
                 canon=CANON,
             )
 
-        dry = await attach_linkedin(driver, "Jane Placeholder", CANON, dry_run=True)
+        dry = await attach_linkedin(driver, "Jane Placeholder", CANON, company=CO_A, dry_run=True)
         async with driver.session() as session:
             res = await session.run(
                 "MATCH (p:Person {name:'Jane Placeholder'}) RETURN count(p) AS n"
             )
             after_dry = (await res.single())["n"]
 
-        await attach_linkedin(driver, "Jane Placeholder", CANON, dry_run=False)
+        await attach_linkedin(driver, "Jane Placeholder", CANON, company=CO_A, dry_run=False)
         async with driver.session() as session:
             res = await session.run(
                 "MATCH (p:Person {name:'Jane Placeholder'}) "
@@ -200,12 +205,19 @@ def test_attach_linkedin_reviewable_set_and_merge(event_loop):
                 "RETURN count(DISTINCT p) AS people, count(DISTINCT c) AS companies"
             )
             after = dict(await res.single())
+            res = await session.run(
+                "MATCH (p:Person {name:'Jane Placeholder'})-[:LEADS]->(:Company {name:$coC}) "
+                "RETURN p.linkedin AS url",
+                coC=CO_C,
+            )
+            namesake = await res.single()
             await _cleanup(session)
         await close_driver()
-        return dry, after_dry, after
+        return dry, after_dry, after, namesake
 
-    dry, after_dry, after = event_loop.run_until_complete(scenario())
+    dry, after_dry, after, namesake = event_loop.run_until_complete(scenario())
     assert dry["action"] == "merged" and dry["dry_run"] is True
-    assert after_dry == 2  # dry-run wrote nothing
-    assert after["people"] == 1  # collapsed onto the keyed node
-    assert after["companies"] == 2  # both LEADS edges kept
+    assert after_dry == 3  # dry-run wrote nothing
+    assert after["people"] == 2  # coA leader folded onto the keyed node; namesake apart
+    assert namesake is not None and namesake["url"] is None  # untouched, still name-only
+    assert after["companies"] == 3  # keyed node leads A+B; namesake still leads C
