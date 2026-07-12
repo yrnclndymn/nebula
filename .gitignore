@@ -29,5 +29,8 @@ backend/evals/artifacts/
 # Neo4j dump for migration (data)
 *.dump
 
-# Local Claude Code config (not for the public repo)
-.claude/
+# Local Claude Code state stays out of the public repo, but the codified
+# process (custom agents + skills) is versioned like any other code.
+.claude/*
+!.claude/agents/
+!.claude/skills/
