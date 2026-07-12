@@ -341,12 +341,16 @@ async def _main() -> None:
     parser = argparse.ArgumentParser(
         description="Re-key Person identity on canonical LinkedIn URL."
     )
-    parser.add_argument("--dry-run", action="store_true", help="show the plan without writing")
+    parser.add_argument(
+        "--commit",
+        action="store_true",
+        help="apply the migration (default: dry-run report only)",
+    )
     args = parser.parse_args()
 
     driver = get_driver()
     try:
-        report = await migrate_person_identity(driver, dry_run=args.dry_run)
+        report = await migrate_person_identity(driver, dry_run=not args.commit)
         _print_report(report)
     finally:
         await close_driver()
