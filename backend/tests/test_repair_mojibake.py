@@ -41,6 +41,17 @@ def test_only_repairs_when_marker_present():
     assert demojibake("Cafe resume") is None
 
 
+def test_repairs_true_latin1_decode_with_invisible_c1_controls():
+    """The form prod ACTUALLY produced (#89 follow-up): requests decoded UTF-8 with
+    true ISO-8859-1, mapping continuation bytes to INVISIBLE C1 controls — no
+    visible "â€" marker. Fixture built exactly as the corruption happened."""
+    corrupted = "Acme’s update… continue reading".encode("utf-8").decode("latin-1")
+    assert "€" not in corrupted  # no CP1252-visible marker present
+    assert demojibake(corrupted) == "Acme’s update… continue reading"
+    # Genuine Latin-1-safe accents (no C1 controls, fails round-trip) stay put.
+    assert demojibake("château and pâté stay put") is None
+
+
 def test_does_not_double_repair():
     # Running the detector on already-repaired text is a no-op (idempotent).
     assert demojibake(demojibake(_MOJIBAKE)) is None
