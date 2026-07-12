@@ -528,6 +528,26 @@ async def similar_companies(
         return [record.data() async for record in result]
 
 
+async def cohort_profile_rows(driver: AsyncDriver, names: list[str]) -> list[dict]:
+    """Lean profile fields for a set of companies (seed + its similar cohort), for
+    the web-discovery profile builder (issue #75). One round trip: name, about,
+    kind, hqCountry, and the topic names each is TAGGED_AS. Unknown names are
+    silently absent from the result. Read-only."""
+    if not names:
+        return []
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (c:Company) WHERE c.name IN $names
+            OPTIONAL MATCH (c)-[:TAGGED_AS]->(t:Topic)
+            RETURN c.name AS name, c.about AS about, c.kind AS kind,
+                   c.hqCountry AS hqCountry, collect(DISTINCT t.name) AS topics
+            """,
+            names=names,
+        )
+        return [record.data() async for record in result]
+
+
 # Reject anything that could mutate the graph; run_read_cypher is read-only.
 _WRITE_KEYWORDS = re.compile(
     r"\b(CREATE|MERGE|DELETE|SET|REMOVE|DROP|FOREACH|LOAD\s+CSV|CALL\s*\{)\b",

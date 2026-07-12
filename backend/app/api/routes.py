@@ -11,6 +11,11 @@ from app.agents.assistant.classification import (
     start_classification,
 )
 from app.agents.assistant.proposals import commit_proposal, get_proposal, propose_enrichment
+from app.agents.discovery.discovery import (
+    get_discovery,
+    research_candidates,
+    start_discovery,
+)
 from app.agents.assistant.resolution import (
     commit_resolution,
     get_resolution,
@@ -396,6 +401,44 @@ async def topics() -> list[str]:
 @router.get("/company-types")
 async def company_types() -> list[str]:
     return await queries.list_company_types(get_driver())
+
+
+# --- Web discovery (#75): find similar companies NOT yet in the graph -----------
+
+
+@router.post("/companies/{name}/discover")
+async def discover(name: str) -> dict:
+    """Start web discovery for a researched company: use its in-graph similar cohort
+    as a template to search the web for MORE companies like it that aren't captured
+    yet. Returns a durable job id to poll (nothing is written); 404 if unknown."""
+    result = await start_discovery(name)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.get("/discovery/{job_id}")
+async def discovery_status(job_id: str) -> dict:
+    """Poll a discovery job; the reviewed candidate list fills in when ready."""
+    job = await get_discovery(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="unknown discovery job")
+    return job
+
+
+class DiscoveryResearchRequest(BaseModel):
+    names: list[str]
+
+
+@router.post("/discovery/{job_id}/research")
+async def discovery_research(job_id: str, req: DiscoveryResearchRequest) -> dict:
+    """Feed selected discovery candidates into the existing research pipeline
+    (propose→review→commit, ≤10 cap). Only names from this job's reviewed list are
+    accepted; each returns a proposal id to poll. Nothing is written until commit."""
+    result = await research_candidates(job_id, req.names)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
 
 
 @router.get("/countries")

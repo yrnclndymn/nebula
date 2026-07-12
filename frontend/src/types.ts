@@ -263,6 +263,41 @@ export interface SimilarCompany {
   same_country: boolean;
 }
 
+// Web discovery (issue #75): a company found on the web that matches the seed's
+// cohort profile but is NOT yet in the graph. `why` are the profile terms it
+// echoed; `sources` are the search-result links (evidence for the reviewer).
+export interface DiscoveryCandidate {
+  name: string;
+  website: string;
+  why: string[];
+  sources: string[];
+}
+
+export interface DiscoveryProfile {
+  seed: string;
+  kind: string | null;
+  country: string | null;
+  topics: string[];
+  cohort: string[];
+  terms: string[];
+  summary: string;
+}
+
+// A durable discovery job: the cohort profile, the queries it ran, and the
+// deduped candidate list the user reviews. Nothing is written until selected
+// candidates are fed into the research pipeline (propose→review→commit).
+export interface Discovery {
+  job_id: string;
+  status: string; // pending | ready | error
+  seed: string;
+  candidates: DiscoveryCandidate[];
+  queries?: string[];
+  profile?: DiscoveryProfile;
+  total_found?: number;
+  outcome?: string;
+  error?: string;
+}
+
 export interface CompanyDetail {
   name: string;
   priority: string | null;
