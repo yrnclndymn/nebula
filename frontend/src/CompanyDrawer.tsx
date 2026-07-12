@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { fetchCompany, fetchSimilar, setKind } from "./api";
+import { DiscoveryPanel } from "./DiscoveryPanel";
 import type { CompanyDetail, FieldDef, SimilarCompany } from "./types";
 import { fieldApplies, formatCustom, KINDS, kindLabel } from "./types";
 
@@ -193,6 +194,7 @@ export function CompanyDrawer({
               ))}
             </ul>
             {similarError && <div className="muted">{similarError}</div>}
+            <DiscoveryPanel key={detail.name} seed={detail.name} />
           </div>
         )}
 

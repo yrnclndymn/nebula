@@ -98,6 +98,15 @@ class Settings(BaseSettings):
             "max_searches": 0,
             "max_llm_calls": 8,
         },
+        # Web discovery (#75): a handful of targeted searches + one cohort-summary
+        # LLM call. No page crawls (discovery only reads search snippets), so pages
+        # is capped at 0. Searches has headroom over the ~5 generated queries.
+        "discovery": {
+            "max_pages": 0,
+            "max_searches": 8,
+            "max_llm_calls": 3,
+            "max_companies": 0,
+        },
     }
 
 

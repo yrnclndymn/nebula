@@ -5,6 +5,7 @@ import type {
   Classification,
   CompanyDetail,
   CompanyRow,
+  Discovery,
   JobSummary,
   MergeProposal,
   Proposal,
@@ -112,6 +113,23 @@ export const fetchCompanyGraph = (name: string) =>
   getJson<import("./types").CompanyGraph>(`/companies/${encodeURIComponent(name)}/graph`);
 export const fetchSimilar = (name: string) =>
   getJson<import("./types").SimilarCompany[]>(`/companies/${encodeURIComponent(name)}/similar`);
+
+// Web discovery (issue #75): search the web for companies like a seed that aren't
+// in the graph yet. Start returns a durable job id (or a note if there's no
+// cohort to search from); poll it, then feed selected candidates to research.
+export const startDiscovery = (name: string) =>
+  postJson<{ job_id?: string; seed: string; cohort?: number; candidates?: number; note?: string }>(
+    `/companies/${encodeURIComponent(name)}/discover`,
+    {},
+  );
+
+export const getDiscovery = (jobId: string) => getJson<Discovery>(`/discovery/${jobId}`);
+
+export const researchDiscovery = (jobId: string, names: string[]) =>
+  postJson<{ proposals: { name: string; proposal_id: string }[]; cap: number }>(
+    `/discovery/${jobId}/research`,
+    { names },
+  );
 export const fetchTopics = () => getJson<string[]>("/topics");
 export const fetchCompanyTypes = () => getJson<string[]>("/company-types");
 export const fetchFields = () => getJson<import("./types").FieldDef[]>("/fields");
