@@ -175,6 +175,10 @@ async def run_job(job_id: str) -> None:
         from app.agents.assistant.classification import run_classification_job
 
         await run_classification_job(job_id)
+    elif job["type"] == "signal_capture":
+        from app.capture.job import run_signal_capture_job
+
+        await run_signal_capture_job(job_id)
     elif job["type"] == "discovery":
         from app.agents.discovery.discovery import run_discovery_job
 

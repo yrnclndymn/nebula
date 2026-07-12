@@ -22,6 +22,7 @@ from app.agents.assistant.resolution import (
     start_resolution,
 )
 from app.agents.assistant.service import respond
+from app.capture.job import get_signal_capture, start_signal_capture
 from app.config import settings
 from app.graph import cache, jobs, queries, schedules
 from app.graph.driver import check_connectivity, get_driver
@@ -444,3 +445,24 @@ async def discovery_research(job_id: str, req: DiscoveryResearchRequest) -> dict
 @router.get("/countries")
 async def countries() -> list[str]:
     return await queries.list_countries(get_driver())
+
+
+@router.post("/companies/{name}/signals/capture")
+async def capture_signals(name: str) -> dict:
+    """Capture recent news/blog/events from a company's OWN site (#34): autodiscover
+    RSS/Atom feeds (index-page LLM crawl as fallback) and store items as Signals with
+    provenance. Returns a job id to poll; re-runs only add items not already captured
+    (canonical-URL dedup). 404 if the company is unknown or has no website."""
+    result = await start_signal_capture(name)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.get("/signals/capture/{job_id}")
+async def capture_signals_status(job_id: str) -> dict:
+    """Poll a signal-capture job; `captured`/`new`/`outcome` fill in when done."""
+    job = await get_signal_capture(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="unknown signal-capture job")
+    return job

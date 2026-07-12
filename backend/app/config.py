@@ -80,6 +80,13 @@ class Settings(BaseSettings):
             "max_llm_calls": 40,
             "max_companies": 25,
         },
+        # Signal capture (#34) is one company per run: a handful of feed/index
+        # fetches and, only on the LLM fallback, a few extraction calls.
+        "signal_capture": {
+            "max_pages": 30,
+            "max_searches": 0,
+            "max_llm_calls": 8,
+        },
         # Web discovery (#75): a handful of targeted searches + one cohort-summary
         # LLM call. No page crawls (discovery only reads search snippets), so pages
         # is capped at 0. Searches has headroom over the ~5 generated queries.
