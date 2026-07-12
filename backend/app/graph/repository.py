@@ -10,6 +10,7 @@ enrichment updates in place instead of duplicating.
 from neo4j import AsyncDriver, AsyncManagedTransaction
 
 from app.graph.models import CompanyRecord
+from app.graph.person_identity import canonical_linkedin
 
 
 async def upsert_company(driver: AsyncDriver, record: CompanyRecord) -> None:
@@ -84,19 +85,45 @@ async def _upsert_tx(tx: AsyncManagedTransaction, record: CompanyRecord) -> None
         )
 
     # 4. Leadership. Title lives on the relationship (a person may lead more than
-    #    one company, in different roles).
+    #    one company, in different roles). Identity keys on the canonical LinkedIn
+    #    URL when the leader carries one (story #39) — the name is display-only —
+    #    and falls back to name-keying (with the caller's variant reconciliation)
+    #    otherwise. The two are split so each UNWIND has a single MERGE key.
     if record.leadership:
-        await tx.run(
-            """
-            MATCH (c:Company {name: $name})
-            UNWIND $leaders AS leader
-              MERGE (person:Person {name: leader.name})
-              MERGE (person)-[r:LEADS]->(c)
-              SET r.title = leader.title
-            """,
-            name=record.name,
-            leaders=[leader.model_dump() for leader in record.leadership],
-        )
+        keyed, by_name = [], []
+        for leader in record.leadership:
+            canon = canonical_linkedin(leader.linkedin)
+            entry = {"name": leader.name, "title": leader.title}
+            if canon:
+                keyed.append({**entry, "linkedin": canon})
+            else:
+                by_name.append(entry)
+        if keyed:
+            await tx.run(
+                """
+                MATCH (c:Company {name: $name})
+                UNWIND $leaders AS leader
+                  MERGE (person:Person {linkedin: leader.linkedin})
+                    ON CREATE SET person.name = leader.name
+                  SET person.name = coalesce(person.name, leader.name)
+                  MERGE (person)-[r:LEADS]->(c)
+                  SET r.title = leader.title
+                """,
+                name=record.name,
+                leaders=keyed,
+            )
+        if by_name:
+            await tx.run(
+                """
+                MATCH (c:Company {name: $name})
+                UNWIND $leaders AS leader
+                  MERGE (person:Person {name: leader.name})
+                  MERGE (person)-[r:LEADS]->(c)
+                  SET r.title = leader.title
+                """,
+                name=record.name,
+                leaders=by_name,
+            )
 
     # 5. Provenance. Each citation ties a field's value to a Source (+ its date),
     #    so a figure can be checked back to where the agent found it.
