@@ -61,6 +61,24 @@ class Settings(BaseSettings):
     signal_max_per_company: int = 50  # keep newest N per company per kind
     signal_max_age_days: int = 365  # drop signals older than this
 
+    # Periodic signal refresh (#36): the scheduled `signal_refresh` job re-captures
+    # each company's signals (own-site #34 + third-party #35) on a cadence, with no
+    # manual trigger. Cloud Scheduler ticks daily; the schedule's own cadence guard
+    # + these knobs shape the actual work (see app/graph/refresh.py + schedules.py):
+    # - signal_refresh_staleness_days: a company is due when its newest signal was
+    #   captured longer ago than this (or it has none yet). 7 → ~weekly per company.
+    # - signal_refresh_batch: hard cap on companies refreshed per run — the BUDGET
+    #   RAIL. It bounds the fan-out (and thus downstream Gemini spend) one tick can
+    #   trigger; the stalest companies go first, so successive daily ticks cover the
+    #   whole set. Keep batch x staleness_days >= tracked-company count for full
+    #   weekly coverage (25 x 7 = 175; raise batch if the set grows past that).
+    # - signal_refresh_stagger_seconds: gap between successive fan-out enqueues
+    #   (the #65 research_stagger precedent), so a batch of capture jobs doesn't
+    #   burst the shared free-tier Gemini RPM ceiling all at once.
+    signal_refresh_staleness_days: float = 7.0
+    signal_refresh_batch: int = 25
+    signal_refresh_stagger_seconds: float = 8.0
+
     # Gemini quota resilience (issue #65). The free tier caps requests/min on the
     # shared key; these keep chat + research jobs from starving each other and 429ing.
     # - gemini_rpm: process-wide requests/min ceiling ALL Gemini callers pace

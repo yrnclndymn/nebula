@@ -443,3 +443,185 @@ def test_committed_flag_serializer_canary():
 
     assert '"committed": true' in json.dumps({"committed": True})
     assert '"committed": true' in json.dumps({"a": 1, "committed": True, "b": 2})
+
+
+# --- Periodic signal refresh (#36): due-selection + capture fan-out ------------
+
+REF_PREFIX = "Zeta __pytest_refresh__ "  # company-name prefix, fictional (public repo)
+
+
+def test_signal_refresh_fans_out_capture_jobs_for_due_companies(monkeypatch):
+    """The signal_refresh runner selects refreshable companies whose newest signal
+    is stale (or absent), fans out one signal_capture + one news_capture per due
+    company (staggered), excludes junk/client/website-less companies, and records a
+    companies-checked/refreshed outcome. Skip-guarded on Neo4j."""
+    monkeypatch.setattr(settings, "signal_refresh_staleness_days", 7.0)
+    monkeypatch.setattr(settings, "signal_refresh_batch", 25)
+    monkeypatch.setattr(settings, "signal_refresh_stagger_seconds", 8.0)
+
+    def name(sfx: str) -> str:
+        return REF_PREFIX + sfx
+
+    # (name suffix, website, junk, kind, newest-signal age in days or None)
+    # refreshable + due: never-captured stub-free co, and a stale one.
+    # refreshable + fresh: not due. Excluded: junk, client-kind, no-website.
+    seed = [
+        ("never", "https://never.example", False, None, None),  # due (no signals)
+        ("stale", "https://stale.example", False, None, 30),  # due (30d > 7d)
+        ("fresh", "https://fresh.example", False, None, 1),  # not due
+        ("junky", "https://junk.example", True, None, 400),  # excluded: junk
+        ("client", "https://client.example", False, "client", 400),  # excluded: client
+        ("stub", None, False, None, 400),  # excluded: no website
+    ]
+
+    # Capture the fanned-out child enqueues (id + delay) instead of running them.
+    enq: list[tuple[str, float]] = []
+
+    async def fake_enqueue(job_id: str, delay: float = 0.0) -> None:
+        enq.append((job_id, delay))
+
+    monkeypatch.setattr(jobs, "enqueue", fake_enqueue)
+
+    refresh_job = f"{REF_PREFIX}refresh_run"
+
+    async def scenario():
+        try:
+            await check_connectivity()
+        except Exception:
+            return "skip"
+        driver = get_driver()
+        async with driver.session() as session:
+            await _clean_refresh(session)
+            for sfx, website, junk, kind, age in seed:
+                await session.run(
+                    "CREATE (c:Company {name: $name, junk: $junk}) "
+                    "SET c.website = $website, c.kind = $kind",
+                    name=name(sfx),
+                    website=website,
+                    junk=junk,
+                    kind=kind,
+                )
+                if age is not None:
+                    await session.run(
+                        "MATCH (c:Company {name: $name}) "
+                        "CREATE (c)-[:MENTIONED_IN]->(:Signal {url: $url, kind: 'news', "
+                        "capturedAt: datetime() - duration({days: $age})})",
+                        name=name(sfx),
+                        url=f"{REF_PREFIX}sig_{sfx}",
+                        age=age,
+                    )
+
+        due_before = await schedules._signal_refresh_due(driver)
+
+        await jobs.create_job(refresh_job, "signal_refresh", {"status": "pending"})
+        await schedules.run_signal_refresh(refresh_job)
+        run_job = await jobs.get_job(refresh_job)
+
+        # Read back the child capture jobs this run created (by their refreshOrigin).
+        async with driver.session() as session:
+            r = await session.run(
+                "MATCH (j:Job) WHERE j.dataJson CONTAINS $origin "
+                "RETURN j.type AS type, j.dataJson AS data",
+                origin=refresh_job,
+            )
+            children = [{"type": rec["type"], **json.loads(rec["data"])} async for rec in r]
+            await _clean_refresh(session)
+        await close_driver()
+        return due_before, run_job, children
+
+    out = asyncio.run(scenario())
+    if out == "skip":
+        pytest.skip("Neo4j not reachable — run `make db-up`")
+    due_before, run_job, children = out
+
+    assert due_before is True
+    assert run_job["status"] == "done"
+    # 3 refreshable companies (never/stale/fresh); junk, client, and no-website excluded.
+    assert run_job["companiesChecked"] == 3
+    # 2 due (never-captured + stale); fresh is within the 7-day window.
+    assert run_job["companiesRefreshed"] == 2
+    assert run_job["jobsEnqueued"] == 4
+    assert "refreshed 2 companies" in run_job["outcome"]
+
+    # One signal_capture + one news_capture per due company, for exactly never/stale.
+    by_type = {c["type"] for c in children}
+    assert by_type == {"signal_capture", "news_capture"}
+    refreshed_names = {c["name"] for c in children}
+    assert refreshed_names == {name("never"), name("stale")}
+    assert len(children) == 4
+    # Every child carries the website the runner selected (from the graph), not a lookup.
+    assert all(c["website"] for c in children)
+
+    # Fan-out was staggered: 4 enqueues at slots 0,8,16,24s (global slot counter).
+    delays = sorted(d for _id, d in enq)
+    assert delays == [0.0, 8.0, 16.0, 24.0]
+
+
+def test_signal_refresh_batch_caps_fan_out(monkeypatch):
+    """The batch budget hard-caps companies-per-run: the stalest go first. With two
+    due companies and batch=1, the never-captured one (maximally stale) is chosen
+    and only its two capture jobs are enqueued. Skip-guarded on Neo4j."""
+    monkeypatch.setattr(settings, "signal_refresh_staleness_days", 7.0)
+    monkeypatch.setattr(settings, "signal_refresh_batch", 1)
+    monkeypatch.setattr(jobs, "enqueue", _noop_enqueue)
+
+    def name(sfx: str) -> str:
+        return REF_PREFIX + sfx
+
+    refresh_job = f"{REF_PREFIX}refresh_cap"
+
+    async def scenario():
+        try:
+            await check_connectivity()
+        except Exception:
+            return "skip"
+        driver = get_driver()
+        async with driver.session() as session:
+            await _clean_refresh(session)
+            await session.run(
+                "CREATE (:Company {name: $n, website: 'https://never.example', junk: false})",
+                n=name("never"),
+            )
+            await session.run(
+                "CREATE (c:Company {name: $n, website: 'https://stale.example', junk: false}) "
+                "CREATE (c)-[:MENTIONED_IN]->(:Signal {url: $u, kind:'news', "
+                "capturedAt: datetime() - duration({days: 30})})",
+                n=name("stale"),
+                u=f"{REF_PREFIX}sig_stale",
+            )
+        await jobs.create_job(refresh_job, "signal_refresh", {"status": "pending"})
+        await schedules.run_signal_refresh(refresh_job)
+        run_job = await jobs.get_job(refresh_job)
+        async with driver.session() as session:
+            r = await session.run(
+                "MATCH (j:Job) WHERE j.dataJson CONTAINS $origin RETURN j.dataJson AS data",
+                origin=refresh_job,
+            )
+            children = [json.loads(rec["data"]) async for rec in r]
+            await _clean_refresh(session)
+        await close_driver()
+        return run_job, children
+
+    out = asyncio.run(scenario())
+    if out == "skip":
+        pytest.skip("Neo4j not reachable — run `make db-up`")
+    run_job, children = out
+
+    assert run_job["companiesChecked"] == 2
+    assert run_job["companiesRefreshed"] == 1  # batch cap
+    assert run_job["jobsEnqueued"] == 2
+    # The never-captured company is the stalest → chosen over the 30-day-old one.
+    assert {c["name"] for c in children} == {REF_PREFIX + "never"}
+
+
+async def _noop_enqueue(job_id: str, delay: float = 0.0) -> None:
+    return None
+
+
+async def _clean_refresh(session):
+    await session.run("MATCH (s:Signal) WHERE s.url STARTS WITH $p DETACH DELETE s", p=REF_PREFIX)
+    await session.run("MATCH (c:Company) WHERE c.name STARTS WITH $p DETACH DELETE c", p=REF_PREFIX)
+    await session.run(
+        "MATCH (j:Job) WHERE j.id STARTS WITH $p OR j.dataJson CONTAINS $p DETACH DELETE j",
+        p=REF_PREFIX,
+    )
