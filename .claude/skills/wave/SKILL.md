@@ -46,11 +46,14 @@ type (`.claude/agents/story-worker.md`), which carries the worker contract.
    re-triggers checks); rebut with a PR comment where the reviewer is wrong.
    If the review "passed" in a handful of turns without posting anything on a
    substantive PR, re-run the review job once (`gh run rerun <id>`).
-6. Merge (squash). With the merge queue enabled, `gh pr merge --squash`
-   enqueues and the queue handles the update-and-recheck; without it, merge
-   `origin/main` into the next branch yourself, resolve the (usually
-   append-append) conflicts, and **re-run `npm install`** if the merge brought
-   frontend dependency changes — stale `node_modules` throw phantom TS errors.
+6. Merge (squash): `gh pr merge --squash` once checks pass. The ruleset does
+   NOT require branches to be up to date (GitHub's merge queue is unavailable
+   on user-owned repos; deploy only fires after CI passes on main, which is
+   the safety net for semantic conflicts between merges — a bad merge shows
+   red on main and never deploys). When a branch has REAL textual conflicts
+   with main, merge `origin/main` into it, resolve the (usually append-append)
+   conflicts, and **re-run `npm install`** if the merge brought frontend
+   dependency changes — stale `node_modules` throw phantom TS errors.
 
 ## 4. Close out the wave
 
