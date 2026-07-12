@@ -1163,3 +1163,45 @@ td.muted {
 .whatsnew-filters {
   padding: 0.75rem 1.25rem 0;
 }
+
+/* Weekly digest (issue #51) */
+.digest-body {
+  padding: 0.5rem 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.digest-summary {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.digest-section h4 {
+  margin: 0 0 0.5rem;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.digest-company {
+  margin-bottom: 0.85rem;
+}
+.digest-company-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.digest-topics {
+  margin-left: 0.5rem;
+}
+.digest-plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 13px;
+  line-height: 1.4;
+}

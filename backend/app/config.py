@@ -147,6 +147,15 @@ class Settings(BaseSettings):
             "max_searches": 4,
             "max_llm_calls": 3,
         },
+        # Weekly digest (#51): pure graph delta queries + ONE optional LLM call to
+        # phrase the summary from the structured deltas. No crawling or searching,
+        # so pages/searches are 0; the LLM cap leaves headroom over the single call.
+        "digest": {
+            "max_pages": 0,
+            "max_searches": 0,
+            "max_llm_calls": 2,
+            "max_companies": 0,
+        },
     }
 
 
