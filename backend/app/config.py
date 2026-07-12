@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # and handles this tool loop fine. Override with AGENT_MODEL.
     agent_model: str = "gemini-3.1-flash-lite"
 
+    # Third-party news search (#35): after the pure entity-match filter, optionally
+    # run a single batched Gemini call to prune name-collision false positives. It
+    # fails safe (keeps the pure shortlist on any error/quota), so the job never
+    # depends on it; set false to keep the whole path off the shared Gemini quota.
+    news_llm_confirm: bool = True
+
     # Crawl cache: reuse a page/client snapshot if it's younger than this. Company
     # site copy changes slowly, so weeks is fine.
     cache_ttl_days: int = 21
@@ -97,6 +103,13 @@ class Settings(BaseSettings):
             "max_pages": 30,
             "max_searches": 0,
             "max_llm_calls": 8,
+        },
+        # Third-party news search (#35) is one company per run: a single DDGS news
+        # query, no page crawls, and at most one batched LLM subject-confirm call.
+        "news_capture": {
+            "max_pages": 0,
+            "max_searches": 3,
+            "max_llm_calls": 2,
         },
         # Web discovery (#75): a handful of targeted searches + one cohort-summary
         # LLM call. No page crawls (discovery only reads search snippets), so pages
