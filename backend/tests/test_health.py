@@ -25,3 +25,6 @@ def test_graph_size_metrics(monkeypatch):
         assert isinstance(body["nodes"], int)
         assert isinstance(body["relationships"], int)
         assert "byKind" in body["signals"]
+        # Both cache labels bounded by cache_prune are visible.
+        assert isinstance(body["cachePages"], int)
+        assert isinstance(body["cacheSiteClients"], int)

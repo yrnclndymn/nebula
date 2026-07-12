@@ -143,10 +143,15 @@ async def graph_size(driver: AsyncDriver) -> dict:
         result = await session.run("MATCH (s:Signal) RETURN s.kind AS kind, count(*) AS n")
         by_kind = {r["kind"]: r["n"] async for r in result}
         pages = (await (await session.run("MATCH (p:Page) RETURN count(p) AS n")).single())["n"]
+        clients = (
+            await (await session.run("MATCH (sc:SiteClients) RETURN count(sc) AS n")).single()
+        )["n"]
     return {
         "nodes": nodes,
         "relationships": rels,
         "nodeCap": AURA_FREE_NODE_CAP,
         "signals": {"total": sum(by_kind.values()), "byKind": by_kind},
+        # Both cache labels are bounded by the cache_prune schedule.
         "cachePages": pages,
+        "cacheSiteClients": clients,
     }
