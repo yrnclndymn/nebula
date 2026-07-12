@@ -18,6 +18,7 @@ dependencies = [
     "mcp>=1.28.1",
     "google-cloud-tasks>=2.23.0",
     "firebase-admin>=7.5.0",
+    "defusedxml>=0.7.1",
 ]
 
 [dependency-groups]
