@@ -34,12 +34,13 @@ class FeedItem:
     summary: str | None = None
 
 
-def discover_feeds(html: str, base_url: str) -> list[str]:
+def discover_feeds(html: str | bytes, base_url: str) -> list[str]:
     """Absolute feed URLs autodiscovered from a page's ``<link rel=alternate>`` tags.
 
     Only ``alternate`` links whose ``type`` looks like a feed (rss/atom) are kept;
     a plain ``text/html`` alternate (e.g. a mobile page) is ignored. Order is
-    preserved and duplicates are collapsed.
+    preserved and duplicates are collapsed. Accepts raw bytes (the capture job hands
+    us undecoded HTML so BeautifulSoup can sniff the meta charset — see #89).
     """
     soup = BeautifulSoup(html or "", "lxml")
     feeds: list[str] = []
@@ -124,11 +125,14 @@ def _parse_entry(entry, base_url: str) -> FeedItem:
     )
 
 
-def parse_feed(xml_text: str, base_url: str = "") -> list[FeedItem]:
+def parse_feed(xml_text: str | bytes, base_url: str = "") -> list[FeedItem]:
     """Parse RSS 2.0 or Atom feed XML into ``FeedItem``s (best-effort, never raises).
 
-    Relative item links are absolutised against ``base_url``. Items with neither a
-    title nor a URL are dropped. Unparseable XML returns ``[]``.
+    Accepts either decoded text or raw bytes; passing the bytes straight from the
+    fetch lets the parser honour the XML prolog / BOM, so UTF-8 feeds served without
+    a charset header aren't mangled into mojibake (#89). Relative item links are
+    absolutised against ``base_url``. Items with neither a title nor a URL are
+    dropped. Unparseable XML returns ``[]``.
     """
     if not xml_text or not xml_text.strip():
         return []

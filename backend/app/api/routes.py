@@ -523,6 +523,58 @@ async def recent_signals(
     return await signals.recent_signals_filtered(get_driver(), limit=limit, kind=kind, topic=topic)
 
 
+# --- Person enrichment (#40, People Intelligence) --------------------------------
+# A person is enriched via propose→review→commit, exactly like a company: a durable
+# job researches profile/history/links (each fact cited), the status endpoint is the
+# review surface (proposed facts + citations + diff), and commit applies it. The
+# review UI is a follow-up story; here the API IS the review surface.
+
+
+class PersonEnrichRequest(BaseModel):
+    name: str
+    company: str  # the company this person leads (scopes which person; #87)
+
+
+@router.post("/people/enrich")
+async def enrich_person(req: PersonEnrichRequest) -> dict:
+    """Start a background person-enrichment proposal (#40). Gathers current
+    title/company, prior roles, a bio line, and public links — every fact cited —
+    for the person named `name` who leads `company`. Returns a job id to poll;
+    nothing is written until commit. 404 if that person isn't a known leader of the
+    company."""
+    from app.agents.people.proposals import propose_person
+
+    result = await propose_person(req.name, req.company)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.get("/people/enrich/{job_id}")
+async def enrich_person_status(job_id: str) -> dict:
+    """Poll a person-enrichment proposal until status is 'ready' (or 'error'). When
+    ready, `record` holds the provenance-filtered proposed facts + citations and
+    `diff` the changes against what's already stored — the review surface."""
+    from app.agents.people.proposals import get_person_proposal
+
+    proposal = await get_person_proposal(job_id)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="unknown person proposal")
+    return proposal
+
+
+@router.post("/people/enrich/{job_id}/commit")
+async def enrich_person_commit(job_id: str) -> dict:
+    """Write a reviewed person proposal to the graph (the user's approval). Applies
+    only the cited facts prepared by the proposal; idempotent."""
+    from app.agents.people.proposals import commit_person_proposal
+
+    result = await commit_person_proposal(job_id)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
 @router.get("/digests")
 async def digests_list(limit: int = Query(default=52, ge=1, le=200)) -> list[dict]:
     """Weekly digests (#51), newest-first — a browsable history of what changed.
