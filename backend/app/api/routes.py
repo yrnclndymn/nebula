@@ -23,6 +23,7 @@ from app.agents.discovery.discovery import (
     start_discovery,
 )
 from app.capture.job import get_signal_capture, start_signal_capture
+from app.capture.news import get_news_capture, start_news_capture
 from app.config import settings
 from app.graph import cache, jobs, queries, retention, schedules
 from app.graph.driver import check_connectivity, get_driver
@@ -476,4 +477,26 @@ async def capture_signals_status(job_id: str) -> dict:
     job = await get_signal_capture(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="unknown signal-capture job")
+    return job
+
+
+@router.post("/companies/{name}/news/capture")
+async def capture_news(name: str) -> dict:
+    """Search third-party outlets for recent coverage of a company (#35) and store
+    matches as Signals with the outlet as Source. A pure entity-match filter guards
+    against name collisions before anything is written. Returns a job id to poll;
+    re-runs only add items not already captured (canonical-URL dedup, incl. against
+    site-sourced signals). 404 if the company is unknown."""
+    result = await start_news_capture(name)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.get("/news/capture/{job_id}")
+async def capture_news_status(job_id: str) -> dict:
+    """Poll a news-capture job; `captured`/`new`/`outcome` fill in when done."""
+    job = await get_news_capture(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="unknown news-capture job")
     return job
