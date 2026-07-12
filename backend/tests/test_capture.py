@@ -117,7 +117,7 @@ def test_parse_feed_rejects_entity_expansion_bomb():
     refused by the safe parser, not expanded — it yields no items."""
     bomb = (
         '<?xml version="1.0"?>'
-        "<!DOCTYPE lolz [<!ENTITY lol \"lol\"><!ENTITY lol2 \"&lol;&lol;&lol;&lol;\">]>"
+        '<!DOCTYPE lolz [<!ENTITY lol "lol"><!ENTITY lol2 "&lol;&lol;&lol;&lol;">]>'
         "<rss><channel><item><title>&lol2;</title>"
         "<link>https://acme.example/x</link></item></channel></rss>"
     )
