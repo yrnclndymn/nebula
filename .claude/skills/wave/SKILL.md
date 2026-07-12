@@ -73,3 +73,16 @@ type (`.claude/agents/story-worker.md`), which carries the worker contract.
   are still valid.
 - Phantom "merge blocked" with all rules green: retry once; the repo-admin
   `--admin` bypass is the sanctioned fallback.
+- **A conflicted PR runs NO checks at all.** `pull_request` workflows execute
+  against a test merge commit; when the branch conflicts with main, GitHub
+  builds no merge commit and every check sits at "Expected — waiting for
+  status" forever. This looks exactly like an Actions outage (pushes trigger
+  nothing, empty commits and close/reopen don't help, probe branches work
+  fine). Check the PR page for "This branch has conflicts" FIRST — the fix is
+  simply merging `origin/main` into the branch and resolving. Expect this
+  whenever merging one wave PR conflicts the remaining ones (shared hot-file
+  appends).
+- **Review verdicts live in the LAST PARAGRAPH of the review comment.** Read
+  the full comment before merging — a review that "passed" as a check can
+  still request changes in its text ("Overall: needs changes"). Never chain
+  reading-the-review and `gh pr merge` in one step.

@@ -53,6 +53,27 @@ def test_profile_facts_handles_empty_fields():
     assert p.topics == [] and p.cohort == []
 
 
+def test_build_profile_survives_summary_failure(monkeypatch):
+    """A summariser exception (persistent quota, safety block) must not fail the
+    profile — query generation runs on the structured facts alone (#83 review)."""
+    from app.agents.discovery import profile as profile_mod
+
+    async def fake_rows(driver, names):
+        return [
+            {"name": "Acme", "kind": "isv", "hqCountry": "Sweden", "topics": ["SAP"]},
+            {"name": "Globex", "kind": "isv", "hqCountry": "Sweden", "topics": ["SAP"]},
+        ]
+
+    async def boom(seed, rows):
+        raise RuntimeError("simulated persistent 429")
+
+    monkeypatch.setattr(profile_mod.queries, "cohort_profile_rows", fake_rows)
+    monkeypatch.setattr(profile_mod, "summarise_cohort", boom)
+    p = asyncio.run(profile_mod.build_profile(None, "Acme", ["Globex"]))
+    assert p.summary == ""  # degraded, not dead
+    assert p.kind == "isv" and p.cohort == ["Globex"]
+
+
 # --- Query generation (pure) --------------------------------------------------
 
 
