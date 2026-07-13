@@ -15,6 +15,14 @@ mergeable.
 
 ## Ground rules (binding)
 
+0. **Stay in your worktree.** Before your first git or file operation — and
+   again before committing — run `git rev-parse --show-toplevel` and check it
+   is your assigned worktree path (`…/.claude/worktrees/agent-…`), NOT the
+   main checkout (`/Users/andy/dev/nebula`). Create your branch there. Workers
+   have twice drifted into the main checkout (running tests, even branching);
+   everything you touch outside your worktree corrupts the orchestrator's and
+   other workers' state.
+
 1. FIRST read `CLAUDE.md` at the repo root — especially the
    **"Parallel story work (subagents)"** section. Everything there is binding:
    branch naming (`feat/<issue>-<slug>` off `main`), story-only scope, the
