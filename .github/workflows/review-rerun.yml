@@ -1,0 +1,44 @@
+name: Claude Review Rerun
+
+# One-shot auto re-run for the review liveness sensor (#105).
+#
+# The "Claude Review" workflow fails its run when the review agent goes silent
+# (posts nothing for the current head sha). This companion listens for that
+# failure and re-runs the review exactly once.
+#
+# Why a SEPARATE workflow (not a job inside review.yml): a workflow that listens
+# to `workflow_run` of its OWN name re-fires on every one of its own completions
+# — including all-skipped no-op runs — which loops forever. Keeping this under a
+# different name means its runs never match the `workflows: ["Claude Review"]`
+# filter, so it cannot re-trigger itself. The re-run also has to happen from
+# here: the original run is still in progress when its own gate fails, and an
+# in-progress run cannot be re-run; by the time this fires the run is complete.
+#
+# Loop safety: the re-run produces attempt 2, whose completion fires this event
+# again with run_attempt == 2 — the guard below ignores it. So at most one
+# automatic re-run ever happens.
+on:
+  workflow_run:
+    workflows: ["Claude Review"]
+    types: [completed]
+
+permissions:
+  actions: write # re-run the workflow run
+
+jobs:
+  rerun-on-silence:
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.run_attempt == 1 &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-run the silent review once
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          echo "REVIEW_LIVENESS action=auto-rerun run_id=${RUN_ID} (first attempt failed/silent)"
+          gh api --method POST "repos/${REPO}/actions/runs/${RUN_ID}/rerun"
