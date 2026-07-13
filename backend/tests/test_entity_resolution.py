@@ -71,6 +71,42 @@ def test_distinct_companies_are_not_clustered():
     assert er.detect_variant_clusters(["Acme", "Globex", "Initech", "Umbrella"]) == []
 
 
+def test_generic_leading_token_does_not_chain_distinct_orgs():
+    # Regression (issue #67), fictionalised from an observed prod false positive:
+    # several clearly-distinct orgs share a single GENERIC geographic token
+    # ("Central …") and a bare stub of that token sat alongside them. Single-token
+    # containment then chained the bare stub to every "Central X", collapsing
+    # unrelated health/logistics/food bodies into one proposed cluster. A lone
+    # generic token must never bridge them.
+    names = ["Central", "Central Health", "Central Logistics", "Central Foods"]
+    clusters = er.detect_variant_clusters(names)
+    # No pair of the distinct "Central X" orgs may share a cluster...
+    for c in clusters:
+        members = set(c["members"])
+        assert not ({"Central Health", "Central Logistics"} <= members)
+        assert not ({"Central Health", "Central Foods"} <= members)
+        assert not ({"Central Logistics", "Central Foods"} <= members)
+    # ...and with nothing else linking them, no multi-org cluster is proposed.
+    assert clusters == []
+
+
+def test_distinctive_token_still_clusters_despite_generic_partner():
+    # The tightening must not over-correct: a DISTINCTIVE single token still
+    # anchors a containment merge even when the extra token is generic ("Health").
+    clusters = er.detect_variant_clusters(["Globex", "Globex Health"])
+    assert len(clusters) == 1
+    assert set(clusters[0]["members"]) == {"Globex", "Globex Health"}
+    assert clusters[0]["reason"] == "containment"
+
+
+def test_two_shared_tokens_cluster_even_if_both_generic():
+    # >= 2 shared tokens is strong enough on its own (acceptance), so an exact
+    # prefix of a longer name still clusters even when every token is generic.
+    clusters = er.detect_variant_clusters(["Central Health", "Central Health Group"])
+    assert len(clusters) == 1
+    assert set(clusters[0]["members"]) == {"Central Health", "Central Health Group"}
+
+
 def test_canonical_prefers_most_descriptive():
     clusters = er.detect_variant_clusters(["Acme", "Acme Digital Partners"])
     # Most normalised tokens wins as the default survivor.

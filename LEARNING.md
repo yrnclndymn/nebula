@@ -48,8 +48,14 @@ what Day 4's observability is about.
 `app/mcp_server.py` (FastMCP, stdio) exposes the graph to any MCP client — Claude
 Code, Claude Desktop, or an agent. Tools: `search_companies`, `get_company`,
 `list_topics`, `list_company_types`, `graph_overview`, `run_cypher` (READ-ONLY,
-write clauses rejected — a guardrail is the security cross-cutting theme), and
-`enrich_company` (runs the agent; slow, writes). Registered in `.mcp.json`.
+write clauses rejected — a guardrail is the security cross-cutting theme), and the
+enrichment trio `enrich_company` → `proposal_status` → `commit_proposal`. Enrichment
+runs the agent in the background and creates a **proposal** to review rather than
+writing directly (#52): `enrich_company` returns a proposal id, `proposal_status`
+polls it, and `commit_proposal(id)` is the explicit human-in-the-loop approval that
+writes — the same propose→review→commit path as chat, so no MCP client gets a silent
+direct-write. (A legacy direct-write mode exists only behind the off-by-default
+`MCP_ENRICH_DIRECT_WRITE` opt-in.) Registered in `.mcp.json`.
 
 Use it from Claude Code: `claude mcp list` to confirm `nebula` is connected, then
 ask e.g. *"using nebula, which employee-owned companies partner with Anthropic?"*

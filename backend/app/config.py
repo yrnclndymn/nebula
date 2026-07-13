@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     # site copy changes slowly, so weeks is fine.
     cache_ttl_days: int = 21
 
+    # MCP enrichment (#52): the MCP `enrich_company` tool goes through the same
+    # propose→review→commit human-in-the-loop as every other write path — it creates
+    # a durable proposal and returns its id instead of writing to the graph. Set this
+    # true ONLY to restore the legacy direct-write behaviour (an explicit opt-in that
+    # bypasses review); it defaults OFF so no MCP client can silently write to Aura.
+    mcp_enrich_direct_write: bool = False
+
     # Job-history retention (#49): the scheduled `job_prune` deletes :Job nodes
     # older than this. Keeps the activity page's history bounded without losing
     # recent runs. EXCEPTION: a ready-but-uncommitted proposal job is never pruned
