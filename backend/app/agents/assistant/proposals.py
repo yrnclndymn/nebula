@@ -11,7 +11,6 @@ it; the client polls `get_proposal` until ready; the user commits.
 import asyncio
 import uuid
 from contextvars import ContextVar
-from urllib.parse import urlparse
 
 from app.agents.assistant.proposal_diff import (
     citation_matches_focus,
@@ -20,6 +19,7 @@ from app.agents.assistant.proposal_diff import (
     resolve_focus,
 )
 from app.agents.assistant.reconcile import reconcile_people
+from app.agents.discovery.hostpick import page_mentions_name, rank_hosts
 from app.agents.enrichment.enrich import enrich
 from app.genai_retry import QuotaExhausted, run_with_quota_retry
 from app.graph import jobs, queries
@@ -27,7 +27,7 @@ from app.graph.driver import get_driver
 from app.graph.models import Citation, CompanyRecord
 from app.graph.repository import upsert_company
 from app.tools.graph_tools import proposal_sink
-from app.tools.web import web_search
+from app.tools.web import fetch_page, web_search
 
 # Proposals started during the current chat turn (read by the /chat endpoint).
 turn_proposals: ContextVar[list | None] = ContextVar("nebula_turn_proposals", default=None)
@@ -76,71 +76,49 @@ async def propose_enrichment(
     return {"proposal_id": proposal_id, "name": name, "status": "researching in the background"}
 
 
-# Hosts that are never a company's own official site — social networks,
-# directories, encyclopaedias, app stores, review/press sites. When discovering a
-# website from search results we skip these and take the first result that isn't
-# one of them.
-_NON_OFFICIAL_HOSTS = (
-    "linkedin.com",
-    "twitter.com",
-    "x.com",
-    "facebook.com",
-    "instagram.com",
-    "youtube.com",
-    "wikipedia.org",
-    "crunchbase.com",
-    "bloomberg.com",
-    "pitchbook.com",
-    "github.com",
-    "medium.com",
-    "glassdoor.com",
-    "indeed.com",
-    "g2.com",
-    "trustpilot.com",
-    "reddit.com",
-    "apps.apple.com",
-    "play.google.com",
-    "owler.com",
-    "zoominfo.com",
-    "craft.co",
-    "producthunt.com",
-    "similarweb.com",
-    "clutch.co",
-)
-
-
-def _official_host(url: str) -> str | None:
-    """The bare host of a search-result URL if it plausibly is a company's own
-    site, else None (a social/directory/press host we should skip)."""
-    if not url:
-        return None
-    host = urlparse(url if "://" in url else "https://" + url).netloc.lower()
-    # Defensive: netloc may carry userinfo (user@host) or a port (host:1234) —
-    # neither belongs in a discovered website / blocklist comparison.
-    host = host.split("@")[-1].split(":")[0]
-    host = host.removeprefix("www.")
-    if not host:
-        return None
-    if any(host == bad or host.endswith("." + bad) for bad in _NON_OFFICIAL_HOSTS):
-        return None
-    return host
+# Landing-page verification only kicks in for a weak host pick — a host that
+# clears this bar already resembles the name closely enough to trust without a
+# fetch. Below it, we confirm the page actually names the company (bounded to the
+# top few candidates so a miss doesn't crawl the whole result set).
+_STRONG_HOST_MATCH = 0.9
+_VERIFY_TOP_K = 3
 
 
 async def discover_website(name: str) -> str | None:
     """Find a company's official website via web search — for backlog stubs that
     arrive with no website. Returns a bare domain (e.g. "acme.com") or None.
 
-    Deliberately simple: search for the company's official site and take the first
-    organic result whose host isn't a social network / directory / press site. The
-    pick is untrusted input — it only seeds the enrichment crawl, and the user sees
-    and reviews the discovered site (and everything derived from it) before any
-    commit. No auto-write, so a wrong guess costs a discard, not bad data."""
+    Prefers the result host that most *resembles the company name* (normalised
+    name <-> domain similarity) over raw search order: the first organic hit isn't
+    always the company (issue #67 — discovery once picked a lab's *foundation* on
+    a different domain). When the best pick is only weakly name-like, optionally
+    confirm the landing page actually mentions the company before trusting it,
+    falling through to the ranked best on any miss or fetch error. When nothing
+    resembles the name the ranking degrades to "first non-blocklisted result" (the
+    legacy behaviour).
+
+    The pick is untrusted input — it only seeds the enrichment crawl, and the user
+    sees and reviews the discovered site (and everything derived from it) before
+    any commit. No auto-write, so a wrong guess costs a discard, not bad data."""
     results = (await asyncio.to_thread(web_search, f"{name} official website")).get("results", [])
-    for hit in results:
-        host = _official_host(hit.get("url", ""))
-        if host:
-            return host
-    return None
+    ranked = rank_hosts(name, results)
+    if not ranked:
+        return None
+    best = ranked[0]
+    if best.score >= _STRONG_HOST_MATCH:
+        return best.host
+    # Weak/ambiguous pick: prefer a top candidate whose landing page names the
+    # company. Best-effort — a fetch failure or a page miss just falls through.
+    for cand in ranked[:_VERIFY_TOP_K]:
+        try:
+            page = await fetch_page("https://" + cand.host)
+        except Exception:  # noqa: BLE001 — verification is best-effort, never fatal
+            continue
+        if page.get("error"):
+            continue
+        if page_mentions_name(name, page.get("text", "")):
+            return cand.host
+    return best.host
 
 
 async def run_proposal_job(proposal_id: str) -> None:

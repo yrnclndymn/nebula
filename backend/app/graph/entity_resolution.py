@@ -68,6 +68,92 @@ _LEGAL_SUFFIXES = frozenset(
 # Common joiners dropped so "Acme & Sons" ~ "Acme and Sons".
 _STOPWORDS = frozenset({"the", "and"})
 
+# Generic tokens that many *unrelated* organisations share — geographic/directional
+# descriptors and common sector words. A lone such token is not enough to anchor a
+# containment merge: on its own, "Central" would chain a health body, a logistics
+# firm and a food company into one cluster (issue #67 — an observed prod false
+# positive). A distinctive token ("Globex", "Initech") still anchors a merge; a
+# generic one needs a second shared token to corroborate. Curated (not a full
+# dictionary) — kept to tokens that recur across genuinely different orgs.
+_GENERIC_TOKENS = frozenset(
+    {
+        # Direction / geography
+        "north",
+        "south",
+        "east",
+        "west",
+        "northern",
+        "southern",
+        "eastern",
+        "western",
+        "central",
+        "national",
+        "international",
+        "global",
+        "united",
+        "american",
+        "european",
+        "british",
+        "pacific",
+        "atlantic",
+        "metro",
+        "metropolitan",
+        "city",
+        "greater",
+        "royal",
+        "new",
+        # Sector / descriptor
+        "health",
+        "healthcare",
+        "care",
+        "medical",
+        "food",
+        "foods",
+        "group",
+        "holding",
+        "holdings",
+        "partners",
+        "associates",
+        "services",
+        "service",
+        "solutions",
+        "systems",
+        "technologies",
+        "technology",
+        "tech",
+        "digital",
+        "data",
+        "media",
+        "capital",
+        "ventures",
+        "financial",
+        "finance",
+        "bank",
+        "insurance",
+        "energy",
+        "power",
+        "retail",
+        "consulting",
+        "logistics",
+        "industries",
+        "industrial",
+        "enterprises",
+        "enterprise",
+        "trust",
+        "council",
+        "authority",
+        "board",
+        "association",
+        "foundation",
+        "institute",
+        "network",
+        "labs",
+        "studio",
+        "studios",
+        "works",
+    }
+)
+
 _PUNCT = re.compile(r"[^a-z0-9]+")
 
 
@@ -119,6 +205,28 @@ def looks_like_junk(name: str) -> bool:
     return False
 
 
+def _is_distinctive(token: str) -> bool:
+    """A single token strong enough to anchor a containment merge on its own:
+    at least 4 chars and not a generic geographic/sector word."""
+    return len(token) >= 4 and token not in _GENERIC_TOKENS
+
+
+def _containment_ok(shared: frozenset[str]) -> bool:
+    """Is a containment (subset) match strong enough to propose a merge?
+
+    Requires MORE than a single shared *generic* token (issue #67): either
+      - >= 2 shared tokens (an exact multi-word prefix — strong corroboration), or
+      - exactly one shared token that is distinctive (long and non-generic).
+    A lone generic token ("Central", "Northern", "Health") never chains otherwise
+    distinct organisations together.
+    """
+    if len(shared) >= 2:
+        return True
+    if len(shared) == 1:
+        return _is_distinctive(next(iter(shared)))
+    return False
+
+
 def _pick_canonical(names: list[str]) -> str:
     """Choose the survivor for a cluster: the most descriptive spelling.
 
@@ -135,9 +243,11 @@ def detect_variant_clusters(names: list[str]) -> list[dict]:
     Two signals, both conservative:
       - **normalized** equality: identical after suffix/punct stripping
         ("Acme Inc" == "Acme, LLC");
-      - **containment**: one name's token set is a strict subset of another's,
-        with the shorter key >= 4 chars ("Acme" within "Acme Digital"), so a
-        single stray letter can't chain unrelated names together.
+      - **containment**: one name's token set is a strict subset of another's
+        AND that shared subset is strong enough to merge on (`_containment_ok`):
+        >= 2 shared tokens, or a single *distinctive* (long, non-generic) token
+        ("Acme" within "Acme Digital"). A lone generic token ("Central") never
+        chains unrelated orgs.
 
     Clusters are connected components over those edges. Returns one dict per
     cluster of >= 2 names: {canonical, members, reason}. `reason` is "normalized"
@@ -179,11 +289,15 @@ def detect_variant_clusters(names: list[str]) -> list[dict]:
                 union(a, b)
                 continue
             ta, tb = token_sets[a], token_sets[b]
-            shorter_key = ka if len(ka) <= len(kb) else kb
-            if len(shorter_key) >= 4 and (ta < tb or tb < ta):
-                union(a, b)
-                containment_edge.add(a)
-                containment_edge.add(b)
+            if ta < tb or tb < ta:
+                # The strict subset IS the set of shared tokens. A shared set of a
+                # single generic token ("Central") is too weak to merge on — it
+                # would chain unrelated orgs — so gate on `_containment_ok`.
+                shared = ta if ta < tb else tb
+                if _containment_ok(shared):
+                    union(a, b)
+                    containment_edge.add(a)
+                    containment_edge.add(b)
 
     groups: dict[str, list[str]] = {}
     for n in unique:

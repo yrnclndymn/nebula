@@ -12,6 +12,13 @@ import pytest
 
 from app.agents.discovery.dedup import filter_new, is_known
 from app.agents.discovery.extract import candidate_name, extract_candidates, official_domain
+from app.agents.discovery.hostpick import (
+    best_host,
+    domain_label,
+    name_domain_similarity,
+    page_mentions_name,
+    rank_hosts,
+)
 from app.agents.discovery.profile import CohortProfile, derive_profile_facts
 from app.agents.discovery.search import build_queries
 
@@ -166,6 +173,79 @@ def test_extract_candidates_drops_non_http_urls():
     cands = extract_candidates(results, terms=[])
     assert [c["name"] for c in cands] == ["Fine Co"]
     assert all(s.startswith("https://") for c in cands for s in c["sources"])
+
+
+# --- Host choice: name <-> domain similarity (pure, issue #67) -----------------
+
+
+def test_domain_label_strips_www_tld_and_ccsld():
+    assert domain_label("https://www.acme.com") == "acme"
+    assert domain_label("acme.co.uk") == "acme"
+    # A subdomain resolves to the registrable label, not the leaf.
+    assert domain_label("https://foundation.acme.org/about") == "acme"
+    assert domain_label("") == ""
+
+
+def test_name_domain_similarity_rewards_resemblance():
+    # An exact name<->domain match beats a longer host that merely shares a prefix,
+    # which in turn beats an unrelated host.
+    exact = name_domain_similarity("Nimbus Lab", "nimbuslab.ai")
+    prefix = name_domain_similarity("Nimbus Lab", "nimbusfoundation.org")
+    unrelated = name_domain_similarity("Nimbus Lab", "getwidgets.io")
+    assert exact == 1.0
+    assert exact > prefix > unrelated
+    assert unrelated < 0.5
+
+
+def test_best_host_prefers_name_matching_domain_over_search_order():
+    # Regression (issue #67), fictionalised from an observed prod false positive:
+    # searching a lab's official site, a *foundation* on a DIFFERENT domain ranks
+    # first in the results; the lab's own domain (an exact name match) comes later.
+    # Similarity ranking must pick the lab's own host, not the first search hit.
+    name = "Nimbus Lab"
+    results = [
+        {"title": "Nimbus Foundation - charity", "url": "https://nimbusfoundation.org/"},
+        {"title": "Nimbus Lab", "url": "https://nimbuslab.ai/"},
+    ]
+    assert best_host(name, results) == "nimbuslab.ai"
+
+
+def test_best_host_falls_back_to_search_order_when_nothing_resembles():
+    # A rebranded company whose site shares no tokens with its name: no host
+    # resembles it, so the pick degrades to the first non-blocklisted result
+    # (the legacy behaviour), NOT some spuriously-ranked host.
+    name = "Acme"
+    results = [
+        {"title": "Acme - Home", "url": "https://getwidgets.io/"},
+        {"title": "Acme on Crunchbase", "url": "https://crunchbase.com/acme"},
+        {"title": "Acme", "url": "https://madeby.dev/"},
+    ]
+    assert best_host(name, results) == "getwidgets.io"
+
+
+def test_rank_hosts_skips_blocklisted_and_bad_schemes():
+    name = "Globex"
+    results = [
+        {"title": "Globex on LinkedIn", "url": "https://linkedin.com/company/globex"},
+        {"title": "Evil", "url": "javascript:alert(1)"},
+        {"title": "Globex", "url": "https://globex.example/"},
+    ]
+    ranked = rank_hosts(name, results)
+    assert [r.host for r in ranked] == ["globex.example"]
+
+
+def test_best_host_none_when_no_official_candidate():
+    results = [{"title": "X", "url": "https://linkedin.com/company/x"}]
+    assert best_host("X", results) is None
+
+
+def test_page_mentions_name_is_token_and_case_insensitive():
+    assert page_mentions_name("Nimbus Lab", "Welcome to Nimbus Lab, an AI research group.")
+    assert page_mentions_name("Nimbus Lab", "NIMBUS  LAB — home")  # case + spacing
+    # A landing page for a different org must NOT count as a mention.
+    assert not page_mentions_name("Nimbus Lab", "This is the Aardvark Foundation site.")
+    # A token appearing only inside a larger word is not a mention.
+    assert not page_mentions_name("Lab Co", "We run an elaborate collaboration.")
 
 
 # --- Dedup against the graph (pure matcher) -----------------------------------
