@@ -200,9 +200,7 @@ def looks_like_junk(name: str) -> bool:
     key = normalize_name(stripped)
     if not key:  # nothing left after normalisation -> not a real name
         return True
-    if key.isdigit():  # a bare number is not an organisation
-        return True
-    return False
+    return key.isdigit()  # a bare number is not an organisation
 
 
 def _is_distinctive(token: str) -> bool:
@@ -237,7 +235,7 @@ def _pick_canonical(names: list[str]) -> str:
     return sorted(names, key=lambda n: (-len(normalized_tokens(n)), -len(n), n))[0]
 
 
-def detect_variant_clusters(names: list[str]) -> list[dict]:
+def detect_variant_clusters(names: list[str]) -> list[dict]:  # noqa: C901 — union-find over pairwise variant edges is one cohesive connected-components algorithm; splitting the edge test from the merge/label pass would scatter its logic and invite subtle bugs
     """Group names that are plausibly the same organisation, for human review.
 
     Two signals, both conservative:

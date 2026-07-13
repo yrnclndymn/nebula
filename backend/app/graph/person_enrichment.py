@@ -20,8 +20,8 @@ company MERGE'd as a stub when unknown.
 
 from neo4j import AsyncDriver, AsyncManagedTransaction
 
-from app.agents.people.models import PersonRecord
 from app.graph.person_identity import attach_linkedin, canonical_linkedin
+from app.graph.person_models import PersonRecord
 
 
 async def get_person_scoped(driver: AsyncDriver, name: str, company: str) -> dict | None:

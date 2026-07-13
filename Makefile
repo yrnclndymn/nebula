@@ -63,7 +63,7 @@ test:             ## Run backend tests
 	cd backend && uv run pytest
 
 lint:             ## Lint + format-check the backend (+ tooling selftests)
-	cd backend && uv run ruff check . && uv run ruff format --check .
+	cd backend && uv run ruff check . && uv run ruff format --check . && uv run lint-imports
 	python3 scripts/wave_status.py --selftest
 
 # --- Frontend (React + Vite) --------------------------------------------------

@@ -16,6 +16,7 @@ from google.genai import errors, types
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.graph.company_types import canonical_company_types
 from app.graph.models import Leader
 
 # Transient statuses worth retrying: rate limit + server-side unavailability.
@@ -47,43 +48,6 @@ Leadership: {leadership}
 Partnerships: {partnerships}
 Clients: {clients}
 """
-
-
-# Canonical company types. Anything not mapping here is dropped, so the graph
-# only ever sees these labels (no casing dupes, no generic legal forms).
-_COMPANY_TYPE_CANON = {
-    "b-corp": "B-Corp",
-    "bcorp": "B-Corp",
-    "b corp": "B-Corp",
-    "certified b-corp": "B-Corp",
-    "esop": "ESOP",
-    "employee-owned": "employee-owned",
-    "employee owned": "employee-owned",
-    "co-op": "co-operative",
-    "coop": "co-operative",
-    "cooperative": "co-operative",
-    "co-operative": "co-operative",
-    "non-profit": "non-profit",
-    "nonprofit": "non-profit",
-    "not-for-profit": "non-profit",
-    "pbc": "PBC",
-    "public benefit corporation": "PBC",
-    "public-benefit corporation": "PBC",
-    "public benefit corp": "PBC",
-    "benefit corporation": "PBC",
-    "foundation-owned": "foundation-owned",
-    "foundation owned": "foundation-owned",
-}
-
-
-def canonical_company_types(raw: list[str]) -> list[str]:
-    """Map extracted types to the controlled vocabulary; drop everything else."""
-    out: list[str] = []
-    for value in raw:
-        canon = _COMPANY_TYPE_CANON.get(value.strip().lower())
-        if canon and canon not in out:
-            out.append(canon)
-    return out
 
 
 class ExtractedFields(BaseModel):

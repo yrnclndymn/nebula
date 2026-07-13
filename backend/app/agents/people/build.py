@@ -12,8 +12,9 @@ written, nothing more.
 Pure (no DB, no network, no model): easy to reason about and test-first.
 """
 
-from app.agents.people.models import PersonCitation, PersonRecord, PersonResearch, PriorRole
+from app.agents.people.models import PersonResearch
 from app.graph.person_identity import canonical_linkedin
+from app.graph.person_models import PersonCitation, PersonRecord, PriorRole
 
 
 def valid_source(url: str | None) -> bool:

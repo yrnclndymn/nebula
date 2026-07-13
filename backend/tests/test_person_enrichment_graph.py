@@ -14,7 +14,7 @@ import asyncio
 
 import pytest
 
-from app.agents.people.models import PersonCitation, PersonRecord, PriorRole
+from app.graph.person_models import PersonCitation, PersonRecord, PriorRole
 from app.graph.driver import check_connectivity, close_driver, get_driver
 from app.graph.models import CompanyRecord, Leader
 from app.graph.person_enrichment import get_person_scoped, upsert_person

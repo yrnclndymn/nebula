@@ -124,9 +124,8 @@ def test_web_search_charges_before_network():
     from app.tools.web import web_search
 
     # A zero search cap must refuse before DDGS is ever constructed (no network).
-    with use_budget(Budget(max_searches=0)):
-        with pytest.raises(BudgetExhausted) as exc:
-            web_search("anything")
+    with use_budget(Budget(max_searches=0)), pytest.raises(BudgetExhausted) as exc:
+        web_search("anything")
     assert exc.value.limit == "searches"
 
 

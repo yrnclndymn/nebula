@@ -16,12 +16,8 @@ from app.agents.deals.build import (
     diff_acquisitions,
     valid_source,
 )
-from app.agents.deals.models import (
-    AcquisitionRecord,
-    AcquisitionResearch,
-    Deal,
-    DealResearch,
-)
+from app.agents.deals.models import AcquisitionResearch, DealResearch
+from app.graph.deal_models import AcquisitionRecord, Deal
 
 SRC = "https://news.example/acme-buys-globex"
 AMT_SRC = "https://filings.example/acme-globex-terms"

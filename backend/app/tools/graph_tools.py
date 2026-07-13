@@ -9,10 +9,10 @@ enrichment and a sheet import land identically in the graph.
 
 from contextvars import ContextVar
 
+from app.graph.company_types import canonical_company_types
 from app.graph.driver import get_driver
 from app.graph.models import Citation, CompanyRecord, Leader
 from app.graph.repository import upsert_company
-from app.importer.extract import canonical_company_types
 from app.tools.social import normalize_linkedin
 
 # When set to a list (by the propose flow), save_company appends the record it
@@ -72,7 +72,7 @@ def _parse_citations(citations: list[str]) -> list[Citation]:
     return parsed
 
 
-async def save_company(
+async def save_company(  # noqa: PLR0913 — ADK builds the tool schema from these params; one flat field per company attribute is the interface, not an over-long signature to split
     name: str,
     topic: str,
     about: str,

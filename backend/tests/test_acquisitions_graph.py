@@ -14,7 +14,7 @@ import asyncio
 
 import pytest
 
-from app.agents.deals.models import AcquisitionRecord, Deal
+from app.graph.deal_models import AcquisitionRecord, Deal
 from app.graph.acquisitions import get_acquisitions, upsert_acquisitions
 from app.graph.driver import check_connectivity, close_driver, get_driver
 from app.graph.models import CompanyRecord

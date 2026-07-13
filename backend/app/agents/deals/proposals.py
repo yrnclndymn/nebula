@@ -17,7 +17,7 @@ import logging
 import uuid
 
 from app.agents.deals.build import build_acquisition_record, canonicalize_record, diff_acquisitions
-from app.agents.deals.models import AcquisitionRecord
+from app.graph.deal_models import AcquisitionRecord
 from app.agents.deals.research import research_acquisitions
 from app.budget import budget_for, use_budget
 from app.genai_retry import QuotaExhausted, run_with_quota_retry
