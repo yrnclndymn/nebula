@@ -68,9 +68,11 @@ type (`.claude/agents/story-worker.md`), which carries the worker contract.
 - **CI is the arbiter for graph code** — workers without Docker ship Cypher
   that first executes in CI. Prefer `make db-ephemeral` in the worktree when
   Docker is up.
-- The review agent is bimodal (shallow pass vs deep pass): rerun shallow
-  passes on substantive PRs; findings posted before an `error_max_turns` death
-  are still valid.
+- The review agent is multi-modal: (a) deep pass with a verdict; (b) silent
+  sub-minute shrug — rerun once; (c) posts a literal "placeholder" comment
+  then dies at max-turns — treat as (b) and rerun; (d) green but silent even
+  after the rerun — the orchestrator's own diff review + CI carry the merge.
+  Findings posted before an `error_max_turns` death are still valid.
 - Phantom "merge blocked" with all rules green: retry once; the repo-admin
   `--admin` bypass is the sanctioned fallback.
 - **A conflicted PR runs NO checks at all.** `pull_request` workflows execute
@@ -86,3 +88,15 @@ type (`.claude/agents/story-worker.md`), which carries the worker contract.
   the full comment before merging — a review that "passed" as a check can
   still request changes in its text ("Overall: needs changes"). Never chain
   reading-the-review and `gh pr merge` in one step.
+- **Watcher/shell traps:** `gh pr checks --json state -q 'all(...)'` returns
+  TRUE on an EMPTY check array (checks not yet registered on a fresh sha) —
+  guard with `length > 0`. Never pipe test/lint output (`| tail`) inside an
+  `&&`-chain: the pipe masks the exit code and a failure sails through.
+- **After scripted conflict resolution, eyeball the seam.** Regex/keep-both
+  swaps drop closing braces or `return` statements at hunk boundaries;
+  syntax-check the file AND read the boundary lines before committing.
+- **Worker reports overstate safety defaults.** "Dry-run by default" must be
+  verified at the CLI wrapper (argparse), not the function signature — a
+  destructive-by-default maintenance CLI shipped this way. Maintenance CLIs
+  standard: dry-run default, `--commit` to apply, invoked via
+  `make <target> ARGS=--commit`.
