@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from app import budget
 from app.capture.dates import normalise_date
 from app.capture.feeds import FeedItem, discover_feeds, parse_feed
+from app.capture.people import link_signal_people
 from app.capture.sections import classify_section, find_section_pages
 from app.config import settings
 from app.genai_retry import generate_with_retry
@@ -280,13 +281,29 @@ async def run_signal_capture_job(job_id: str) -> None:
     canonical_urls = [record.canonical_url() for record in records]
     existing = await _existing_signal_urls(driver, canonical_urls)
     new_count = sum(1 for url in canonical_urls if url not in existing)
+    people_linked = people_flagged = 0
     for record in records:
         await upsert_signal(driver, record, companies=[job["name"]])
+        # Link any authors/quoted people to the signal (#41). Best-effort: a
+        # linking failure must never fail the capture job or lose the signals.
+        try:
+            counts = await link_signal_people(driver, record, company=job["name"])
+            people_linked += counts["linked"]
+            people_flagged += counts["flagged"]
+        except Exception:  # noqa: BLE001 — people linking is auxiliary to capture
+            logger.exception("people linking failed for %s", record.canonical_url())
 
     outcome = f"captured {len(records)} items ({new_count} new) from {job['name']}'s site"
     await jobs.update_job(
         job_id,
-        {**job, "captured": len(records), "new": new_count, "outcome": outcome},
+        {
+            **job,
+            "captured": len(records),
+            "new": new_count,
+            "people_linked": people_linked,
+            "people_flagged": people_flagged,
+            "outcome": outcome,
+        },
         status="done",
     )
 
