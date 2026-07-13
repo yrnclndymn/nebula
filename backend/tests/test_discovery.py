@@ -398,3 +398,88 @@ def test_run_discovery_job_end_to_end(monkeypatch):
     assert "Newco" in names  # a genuinely new company survives
     assert "Known" not in names  # the already-captured one deduped by domain
     assert "found" in out["outcome"]
+
+
+# --- discover_website wiring (async; search + fetch mocked) --------------------
+# The pure ranking/verification helpers are tested above; these cover the
+# orchestration in `proposals.discover_website` itself — the strong-pick
+# short-circuit, the weak-pick landing-page verify loop, its error fallback,
+# and the empty-results case (review finding on #67 / PR #99).
+
+
+def test_discover_website_strong_pick_skips_verification(monkeypatch):
+    from app.agents.assistant import proposals
+
+    def fake_search(query):
+        return {
+            "results": [
+                {"url": "https://random.example"},  # scores 0 — unrelated
+                {"url": "https://nimbus.example"},  # exact label match — 1.0
+            ]
+        }
+
+    async def fake_fetch(url):
+        raise AssertionError("a strong pick must not fetch the landing page")
+
+    monkeypatch.setattr(proposals, "web_search", fake_search)
+    monkeypatch.setattr(proposals, "fetch_page", fake_fetch)
+
+    assert asyncio.run(proposals.discover_website("Nimbus")) == "nimbus.example"
+
+
+def test_discover_website_weak_pick_verified_by_landing_page(monkeypatch):
+    # The observed FP shape: two weakly name-like hosts tie, and search order
+    # alone would pick the wrong one ("foundation"); the landing-page check
+    # steers to the host that actually names the company.
+    from app.agents.assistant import proposals
+
+    def fake_search(query):
+        return {
+            "results": [
+                {"url": "https://quartzfoundation.example"},
+                {"url": "https://quartzhq.example"},
+            ]
+        }
+
+    async def fake_fetch(url):
+        if "quartzhq" in url:
+            return {"text": "Quartz Analytics builds developer tooling."}
+        return {"text": "The Quartz Foundation is an independent charity."}
+
+    monkeypatch.setattr(proposals, "web_search", fake_search)
+    monkeypatch.setattr(proposals, "fetch_page", fake_fetch)
+
+    assert asyncio.run(proposals.discover_website("Quartz Analytics")) == "quartzhq.example"
+
+
+def test_discover_website_weak_pick_falls_back_on_fetch_errors(monkeypatch):
+    # Verification is best-effort: when every fetch errors, the ranked best
+    # (here the first-by-search-order tie) is still returned, never None.
+    from app.agents.assistant import proposals
+
+    def fake_search(query):
+        return {
+            "results": [
+                {"url": "https://quartzfoundation.example"},
+                {"url": "https://quartzhq.example"},
+            ]
+        }
+
+    async def fake_fetch(url):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(proposals, "web_search", fake_search)
+    monkeypatch.setattr(proposals, "fetch_page", fake_fetch)
+
+    assert asyncio.run(proposals.discover_website("Quartz Analytics")) == "quartzfoundation.example"
+
+
+def test_discover_website_no_usable_results_returns_none(monkeypatch):
+    from app.agents.assistant import proposals
+
+    def fake_search(query):
+        return {"results": []}
+
+    monkeypatch.setattr(proposals, "web_search", fake_search)
+
+    assert asyncio.run(proposals.discover_website("Quartz Analytics")) is None
