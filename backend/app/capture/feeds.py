@@ -104,9 +104,7 @@ def _parse_entry(entry, base_url: str) -> FeedItem:
                     atom_link = href
             else:
                 rss_link = _text(child)  # RSS carries it as element text
-        elif name == "pubDate":
-            published = _text(child)
-        elif name == "published":
+        elif name == "pubDate" or name == "published":
             published = _text(child)
         elif name == "updated":
             updated = _text(child)

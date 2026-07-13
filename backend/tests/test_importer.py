@@ -1,7 +1,8 @@
 """Unit tests for the deterministic CSV mapping (no LLM / no DB)."""
 
 from app.importer.csv_import import _int_or_none, _map_row, build_record, heuristic_extract
-from app.importer.extract import ExtractedFields, canonical_company_types
+from app.graph.company_types import canonical_company_types
+from app.importer.extract import ExtractedFields
 
 
 def test_canonical_company_types_filters_and_normalizes():

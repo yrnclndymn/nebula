@@ -76,6 +76,12 @@ Health wiring: `GET /health` (process up, no DB) and `GET /health/graph`
   `company_linkedin_profile_agent/` (LinkedIn enrichment) and
   `google_sheets_agent/` (import the seed Sheet). Its deps show the research
   toolkit: `ddgs`, `beautifulsoup4`, `lxml`, `playwright`.
+- **Layering is enforced**, not just intended: the `[tool.importlinter]` contract in
+  `backend/pyproject.toml` pins the entity-first lattice (foundation → graph → tools →
+  `capture`/`agents.*` → surfaces) and `make lint` runs `lint-imports` — a stray
+  upward import fails the build. Committable record models live in the graph layer
+  (`graph/models.py`, `graph/deal_models.py`, `graph/person_models.py`); known lazy
+  dispatch exceptions are pinned by name with reasons.
 
 ## Build sequence
 

@@ -17,7 +17,7 @@ import logging
 import uuid
 
 from app.agents.people.build import build_person_record, diff_person
-from app.agents.people.models import PersonRecord
+from app.graph.person_models import PersonRecord
 from app.agents.people.research import research_person
 from app.budget import budget_for, use_budget
 from app.genai_retry import QuotaExhausted, run_with_quota_retry
