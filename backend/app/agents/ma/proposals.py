@@ -16,13 +16,13 @@ already stored; the commit endpoint applies them.
 import logging
 import uuid
 
-from app.agents.ma.build import build_acquisition_record, diff_acquisitions
+from app.agents.ma.build import build_acquisition_record, canonicalize_record, diff_acquisitions
 from app.agents.ma.models import AcquisitionRecord
 from app.agents.ma.research import research_acquisitions
 from app.budget import budget_for, use_budget
 from app.genai_retry import QuotaExhausted, run_with_quota_retry
 from app.graph import jobs
-from app.graph.acquisitions import get_acquisitions, upsert_acquisitions
+from app.graph.acquisitions import canonical_names, get_acquisitions, upsert_acquisitions
 from app.graph.driver import get_driver
 from app.graph.queries import get_company
 
@@ -64,6 +64,13 @@ async def run_acquisition_proposal_job(job_id: str) -> None:
         with use_budget(run_budget):
             research = await run_with_quota_retry(lambda: research_acquisitions(job["company"]))
         record = build_acquisition_record(research, job["company"])
+        # Canonicalise counterparty names through the alias map BEFORE diffing —
+        # stored edges are alias-resolved at write time, so diffing raw researched
+        # names against them would show a repeat deal under a variant name as
+        # "new" (PR #98 review finding). The stored record then carries canonical
+        # names too, keeping the review surface and the eventual write consistent.
+        names = [n for d in record.deals for n in (d.acquirer, d.target)]
+        record = canonicalize_record(record, await canonical_names(driver, names))
         existing = await get_acquisitions(driver, job["company"])
         diff = diff_acquisitions(existing, record)
         await jobs.update_job(

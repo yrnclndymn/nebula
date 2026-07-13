@@ -93,6 +93,29 @@ def build_acquisition_record(research: AcquisitionResearch, company: str) -> Acq
     return AcquisitionRecord(company=company, deals=_dedup_deals(built))
 
 
+def canonicalize_record(record: AcquisitionRecord, mapping: dict[str, str]) -> AcquisitionRecord:
+    """Rewrite deal counterparty names to their canonical Company names (pure).
+
+    ``mapping`` maps a researched name to the canonical node name whose alias list
+    contains it (see :func:`app.graph.acquisitions.canonical_names`); names absent
+    from the mapping pass through unchanged. Applied BEFORE diffing/storing so the
+    review surface compares like with like — otherwise a repeat deal reported
+    under a variant name would show as "new" against the alias-resolved stored
+    edges (PR #98 review finding). Canonicalisation can collapse two variants of
+    the same deal onto one (acquirer, target) pair, so duplicates are re-dropped.
+    """
+    resolved = [
+        d.model_copy(
+            update={
+                "acquirer": mapping.get(d.acquirer, d.acquirer),
+                "target": mapping.get(d.target, d.target),
+            }
+        )
+        for d in record.deals
+    ]
+    return AcquisitionRecord(company=record.company, deals=_dedup_deals(resolved))
+
+
 def diff_acquisitions(existing: list[dict] | None, record: AcquisitionRecord) -> list[dict]:
     """A compact per-deal diff for the review surface (pure).
 

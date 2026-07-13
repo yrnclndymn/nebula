@@ -186,10 +186,14 @@ def test_run_acquisition_proposal_job_stores_cited_deals(monkeypatch):
     async def fake_existing(driver, company):
         return []
 
+    async def fake_canonical(driver, names):
+        return {}  # no aliases in play — names map to themselves
+
     monkeypatch.setattr(proposals.jobs, "get_job", fake_get_job)
     monkeypatch.setattr(proposals.jobs, "update_job", fake_update_job)
     monkeypatch.setattr(proposals, "research_acquisitions", fake_research)
     monkeypatch.setattr(proposals, "get_acquisitions", fake_existing)
+    monkeypatch.setattr(proposals, "canonical_names", fake_canonical)
     monkeypatch.setattr(proposals, "get_driver", lambda: None)
 
     asyncio.run(proposals.run_acquisition_proposal_job("aq1"))
@@ -263,3 +267,65 @@ def test_commit_writes_and_flips_status(monkeypatch):
     assert res["committed"] == "Acme" and res["deals"] == 1
     assert updates["committed"] is True
     assert updates["status"] == "committed"  # prunable past retention after commit
+
+
+# --- Canonicalisation before diff (PR #98 review finding) ----------------------
+# Stored ACQUIRED edges are alias-resolved at write time, so the proposed record
+# must be canonicalised through the same alias map BEFORE diffing — otherwise a
+# repeat deal reported under a variant name shows as "new" and, if approved,
+# would stub a duplicate node instead of updating the existing edge.
+
+
+def test_canonicalize_record_maps_names_and_collapses_variants():
+    from app.agents.ma.build import canonicalize_record
+
+    record = AcquisitionRecord(
+        company="Acme",
+        deals=[
+            Deal(acquirer="Acme Corp", target="Globex", source=SRC),
+            Deal(acquirer="Acme", target="Globex", source=SRC),  # same deal, canonical name
+            Deal(acquirer="Acme", target="Initech", source=SRC),  # unmapped: passes through
+        ],
+    )
+    out = canonicalize_record(record, {"Acme Corp": "Acme"})
+    pairs = [(d.acquirer, d.target) for d in out.deals]
+    # The variant collapsed onto the canonical pair; the unmapped deal is untouched.
+    assert pairs == [("Acme", "Globex"), ("Acme", "Initech")]
+
+
+def test_canonicalized_variant_no_longer_diffs_as_new():
+    from app.agents.ma.build import canonicalize_record
+
+    stored = [{"acquirer": "Acme", "target": "Globex", "amount": None}]
+    record = AcquisitionRecord(
+        company="Acme", deals=[Deal(acquirer="Acme Corp", target="Globex", source=SRC)]
+    )
+    # Raw (unresolved) name: wrongly shows as a new deal.
+    assert diff_acquisitions(stored, record) != []
+    # Canonicalised through the alias map: correctly recognised as already stored.
+    resolved = canonicalize_record(record, {"Acme Corp": "Acme"})
+    assert diff_acquisitions(stored, resolved) == []
+
+
+# --- Route auth (precedent: test_backlog_research_requires_auth) ---------------
+
+
+def test_acquisition_endpoints_require_auth():
+    from fastapi.testclient import TestClient
+
+    from app.config import settings
+    from app.main import app
+
+    settings.require_auth = True
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            assert (
+                client.post(
+                    "/companies/acquisitions/research", json={"company": "Acme __pytest43__"}
+                ).status_code
+                == 401
+            )
+            assert client.get("/companies/acquisitions/deadbeef").status_code == 401
+            assert client.post("/companies/acquisitions/deadbeef/commit").status_code == 401
+    finally:
+        settings.require_auth = False

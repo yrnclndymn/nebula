@@ -43,6 +43,28 @@ async def get_acquisitions(driver: AsyncDriver, company: str) -> list[dict]:
         return [dict(rec) async for rec in result]
 
 
+async def canonical_names(driver: AsyncDriver, names: list[str]) -> dict[str, str]:
+    """Map each name to the canonical Company name whose alias list contains it.
+
+    Names with no aliased node map to themselves. Used to canonicalise a proposed
+    record BEFORE diffing it against stored edges (which are already
+    alias-resolved at write time) — so the review diff compares like with like.
+    Same alias coalesce the write path applies, hoisted to a batch read.
+    """
+    if not names:
+        return {}
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            UNWIND $names AS n
+            OPTIONAL MATCH (c:Company) WHERE n IN c.aliases
+            RETURN n AS name, collect(c.name)[0] AS canonical
+            """,
+            names=sorted(set(names)),
+        )
+        return {rec["name"]: rec["canonical"] or rec["name"] async for rec in result}
+
+
 async def _write_deal_tx(tx: AsyncManagedTransaction, deal: Deal) -> None:
     """MERGE both companies (alias-resolved; unknown ones stubbed) and the ACQUIRED
     edge, then set the reviewed deal facts. Provenance rides on the edge as ``source``
