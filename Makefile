@@ -62,8 +62,9 @@ schedule-tick:    ## Fire the scheduler tick locally (Cloud Scheduler's job in p
 test:             ## Run backend tests
 	cd backend && uv run pytest
 
-lint:             ## Lint + format-check the backend
+lint:             ## Lint + format-check the backend (+ tooling selftests)
 	cd backend && uv run ruff check . && uv run ruff format --check .
+	python3 scripts/wave_status.py --selftest
 
 # --- Frontend (React + Vite) --------------------------------------------------
 frontend-install: ## Install frontend dependencies
