@@ -63,8 +63,9 @@ test:             ## Run backend tests
 	cd backend && uv run pytest
 
 lint:             ## Lint + format-check the backend (+ tooling selftests)
-	cd backend && uv run ruff check . && uv run ruff format --check .
+	cd backend && uv run ruff check . && uv run ruff format --check . && uv run lint-imports
 	python3 scripts/wave_status.py --selftest
+	python3 scripts/drift.py --selftest
 
 # --- Frontend (React + Vite) --------------------------------------------------
 frontend-install: ## Install frontend dependencies
@@ -134,3 +135,16 @@ mutate:           ## Per-wave mutation pass. Usage: make mutate FILES="app/foo.p
 	  || echo "  none — every executed mutant was killed"
 
 .PHONY: mutate
+
+# --- Drift suite (#108) -------------------------------------------------------
+# Slow-cadence, read-only drift sensors run every 3rd wave (the wave-skill
+# closeout triggers on `wave_count % 3 == 0`; count with scripts/wave_tag.sh
+# --count). Advisory, not a gate: dead code (vulture), dependency freshness
+# (uv + npm outdated), secrets (gitleaks), and an inferential modularity pass
+# (module-level import graph + a paste-ready LLM prompt — make drift never calls
+# an LLM). Each section is best-effort with a clear SKIPPED line when a tool is
+# unavailable. One combined report to stdout + scripts/drift-report.txt (ignored).
+drift:            ## Run the read-only drift suite (report only). See scripts/drift.py
+	python3 scripts/drift.py
+
+.PHONY: drift

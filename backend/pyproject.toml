@@ -29,6 +29,7 @@ dev = [
     "pytest-cov>=7.1.0",
     "diff-cover>=10.3.0",
     "mutmut>=3.6.0",
+    "import-linter>=2.13",
 ]
 
 [tool.pytest.ini_options]
@@ -36,6 +37,98 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
+
+# Ruff lint rules (story #103): the base E/F set PLUS sensors aimed at the failure
+# modes agent-written code drifts into — runaway complexity (C901), over-long
+# signatures/bodies (PLR09xx), latent bugs (bugbear B), and non-idiomatic branches
+# (SIM). Thresholds below are deliberately generous: they flag genuine outliers, not
+# ordinary functions.
+#
+# SUPPRESSION POLICY: a `# noqa: <rule>` is allowed ONLY with a trailing reason
+# comment saying WHY (e.g. `# noqa: C901 — dispatch table, irreducible`). Prefer a
+# small mechanical refactor to a suppression; reach for `# noqa` only when a refactor
+# would be riskier than the smell it hides. A bare `# noqa` (no rule, no reason) is
+# not acceptable.
+[tool.ruff.lint]
+extend-select = ["C901", "B", "SIM", "PLR0911", "PLR0912", "PLR0913", "PLR0915"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12
+
+[tool.ruff.lint.pylint]
+max-args = 8
+max-branches = 15
+max-returns = 8
+max-statements = 60
+
+# --- Layering sensor: import-linter (story #103) ------------------------------
+# Encodes the INTENDED (entity-first) architecture as a layered contract, so a
+# stray upward import fails `make lint` (`lint-imports`) instead of quietly rotting
+# the layering. The lattice, top (may import anything below) to bottom:
+#
+#   main                              app entrypoint / router wiring
+#   api | mcp_server | importer       surfaces (independent — no cross-imports)
+#   agents.assistant                  orchestration (above the entity domains)
+#   agents.{discovery,enrichment,     entity domains + the signals capture pipeline.
+#     deals,people} | capture           Target taxonomy (amendment): companies
+#                                        (= discovery+enrichment, operation-named
+#                                        aliases grandfathered), people, deals,
+#                                        signals (= capture). Migrates incrementally.
+#   tools                             research toolkit (uses the graph-backed cache)
+#   graph                             Neo4j read/write + committable record models
+#   genai_retry                       quota/backoff wrapper (over budget + ratelimit)
+#   auth | budget | ratelimit         foundation helpers (each depends only on config)
+#   config                            settings — the base
+#
+# KNOWN exceptions are pinned BY NAME in `ignore_imports` below with a reason; they
+# are lazy imports (dispatch tables / a cross-domain reach) that don't form real
+# module-load cycles. Fixing them means finishing the entity-domain migration, not
+# loosening the contract.
+[tool.importlinter]
+root_package = "app"
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture (foundation < graph < tools < domains < surfaces)"
+type = "layers"
+layers = [
+    "app.main",
+    "app.api | app.mcp_server | app.importer",
+    "app.agents.assistant",
+    "app.agents.discovery | app.agents.enrichment | app.agents.deals | app.agents.people | app.capture",
+    "app.tools",
+    "app.graph",
+    "app.genai_retry",
+    "app.auth | app.budget | app.ratelimit",
+    "app.config",
+]
+ignore_imports = [
+    # graph/jobs.py is the durable-job DISPATCH TABLE: on a Cloud Tasks callback it
+    # lazily imports the one runner for the job kind. The runners legitimately live
+    # ABOVE graph (they orchestrate agents/capture); the import is inside the
+    # dispatch function, so there is no import-time cycle.
+    "app.graph.jobs -> app.agents.assistant.proposals",
+    "app.graph.jobs -> app.agents.assistant.backfill",
+    "app.graph.jobs -> app.agents.assistant.resolution",
+    "app.graph.jobs -> app.agents.assistant.classification",
+    "app.graph.jobs -> app.agents.discovery.discovery",
+    "app.graph.jobs -> app.agents.people.proposals",
+    "app.graph.jobs -> app.agents.deals.proposals",
+    "app.graph.jobs -> app.capture.job",
+    "app.graph.jobs -> app.capture.news",
+    # discovery's runner lazily calls the assistant proposal builder to turn a
+    # discovered company into a review proposal — a cross-package reach within the
+    # agents area, imported inside the function (no load-time cycle). Resolves when
+    # discovery folds into the `companies` domain and the shared propose step moves.
+    "app.agents.discovery.discovery -> app.agents.assistant.proposals",
+    # The leader-LinkedIn backfill and person-identity canonicalisation are graph
+    # modules that still reach UP into the crawl/search/social tools. `web_search`
+    # is a genuine tool (search backends) that cannot move down; the small social
+    # helper is cohesive with the other social-link helpers. These migrate into the
+    # `people` entity-domain package rather than being papered over now.
+    "app.graph.person_discovery -> app.tools.web",
+    "app.graph.person_discovery -> app.tools.encoding",
+    "app.graph.person_identity -> app.tools.social",
+]
 
 [tool.uv]
 package = false

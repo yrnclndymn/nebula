@@ -1,54 +1,29 @@
-"""Domain models for person enrichment (story #40, epic #25 People Intelligence).
+"""Raw person-research model (story #40, epic #25 People Intelligence).
 
-Two shapes, deliberately separated:
+Two shapes, deliberately separated. This module holds the *raw, untrusted* research
+shape; the *committable* shape (``PersonRecord``) and the sub-shapes it shares with
+research (``PriorRole`` / ``PersonCitation``) live DOWN in
+:mod:`app.graph.person_models` (what the graph write path consumes), mirroring the
+``CompanyRecord`` precedent. ``PersonResearch`` imports the two sub-shapes from there
+— a legitimate downward dep (agents → graph).
 
-- :class:`PersonResearch` is the *raw, untrusted* structured output of the research
+- :class:`PersonResearch` is the raw, untrusted structured output of the research
   step (a single Gemini call over crawled/searched evidence). Nothing here is
   trusted — the LLM is asked to cite every fact, but the citation is only a *claim*.
-- :class:`PersonRecord` is the *committable* shape: it is derived from a
-  ``PersonResearch`` by :func:`app.agents.people.build.build_person_record`, which
-  DETERMINISTICALLY drops any fact that is not backed by a citation with a valid
-  ``http(s)`` source URL. So the guardrail "no fact saved without a citation" is
-  enforced by code, not by trusting the model — mirroring the company CITES path.
-
-Prior roles are modelled as ``(Person)-[:HELD_ROLE {title, from, to}]->(Company)``
-edges rather than a JSON blob on the node: a role names a company (a first-class
-node that may itself be tracked/enriched later), so an edge keeps the graph
-traversable — e.g. "people who once worked at Acme" — and lets an unknown employer
-MERGE as a :Company stub, exactly like partners/clients do.
+- :class:`app.graph.person_models.PersonRecord` is the committable shape, derived
+  from a ``PersonResearch`` by :func:`app.agents.people.build.build_person_record`,
+  which DETERMINISTICALLY drops any fact that is not backed by a citation with a
+  valid ``http(s)`` source URL. So the guardrail "no fact saved without a citation"
+  is enforced by code, not by trusting the model — mirroring the company CITES path.
 """
 
 from pydantic import BaseModel, Field
 
+from app.graph.person_models import PersonCitation, PriorRole
+
 # Scalar fact fields a citation can justify (each needs a matching CITES edge).
 # Prior roles carry their own per-role source, so they are handled separately.
 PERSON_SCALAR_FIELDS = ("title", "bio", "linkedin", "personal_site", "talks")
-
-
-class PersonCitation(BaseModel):
-    """Provenance for one person fact: which source justifies a value.
-
-    Stored as ``(Person)-[:CITES {field, value, sourceDate}]->(Source {url})`` —
-    the same shape company facts use, so a person fact can be checked back to where
-    the agent found it.
-    """
-
-    field: str  # which fact this justifies, e.g. "bio", "title", "linkedin"
-    value: str  # the value as stated by the source
-    source: str  # source URL
-    source_date: str | None = None  # when the info is from (timeliness), free text
-
-
-class PriorRole(BaseModel):
-    """A past role: a title at a company, over an optional year span. ``source`` is
-    the citation URL for the role — a role with no valid source is dropped on build
-    (provenance guardrail), so this is effectively required to be committed."""
-
-    company: str
-    title: str | None = None
-    from_year: int | None = None
-    to_year: int | None = None
-    source: str | None = None
 
 
 class PersonResearch(BaseModel):

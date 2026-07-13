@@ -10,7 +10,8 @@ All fixtures use fictional people (Jane Placeholder) and companies (Acme/Globex)
 import asyncio
 
 from app.agents.people.build import build_person_record, diff_person, valid_source
-from app.agents.people.models import PersonCitation, PersonRecord, PersonResearch, PriorRole
+from app.agents.people.models import PersonResearch
+from app.graph.person_models import PersonCitation, PersonRecord, PriorRole
 
 SLUG = "jane-placeholder-pytest40"
 CANON = f"https://www.linkedin.com/in/{SLUG}"

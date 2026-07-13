@@ -183,6 +183,20 @@ def match_person(a: str, b: str) -> str:
     return "no"
 
 
+def _match_against_known(name: str, known: list[str]) -> tuple[str | None, str | None]:
+    """The first ``"same"`` match (short-circuits) and the first ``"maybe"`` match
+    among ``known``, if any — the name-resolution step of :func:`reconcile_people`,
+    pulled out so the reconciler stays a flat pass over the proposed leaders."""
+    maybe_match: str | None = None
+    for candidate in known:
+        verdict = match_person(name, candidate)
+        if verdict == "same":
+            return candidate, maybe_match
+        if verdict == "maybe" and maybe_match is None:
+            maybe_match = candidate
+    return None, maybe_match
+
+
 def reconcile_people(existing: list[dict], proposed: list[dict]) -> dict:
     """Match proposed leaders against existing people (and against already-accepted
     proposed ones), so variants don't become duplicate nodes.
@@ -208,15 +222,7 @@ def reconcile_people(existing: list[dict], proposed: list[dict]) -> dict:
             continue
         title = person.get("title")
 
-        same_match = None
-        maybe_match = None
-        for candidate in known:
-            verdict = match_person(name, candidate)
-            if verdict == "same":
-                same_match = candidate
-                break
-            if verdict == "maybe" and maybe_match is None:
-                maybe_match = candidate
+        same_match, maybe_match = _match_against_known(name, known)
 
         if same_match is not None:
             if _norm(same_match) not in written:

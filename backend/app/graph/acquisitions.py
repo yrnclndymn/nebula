@@ -17,7 +17,7 @@ canonical node instead of spawning a duplicate.
 
 from neo4j import AsyncDriver, AsyncManagedTransaction
 
-from app.agents.deals.models import AcquisitionRecord, Deal
+from app.graph.deal_models import AcquisitionRecord, Deal
 
 
 async def get_acquisitions(driver: AsyncDriver, company: str) -> list[dict]:
