@@ -25,7 +25,10 @@ funded that partner with Anthropic and have headcount < 100*).
 - **Frontend — React + Vite SPA** (`frontend/`), deployed to **Firebase Hosting**.
 - **MCP server** — `app/mcp_server.py` (FastMCP, stdio) exposes the graph to MCP
   clients (Claude Code/Desktop); read tools + guarded read-only `run_cypher` +
-  `enrich_company`. Registered in `.mcp.json`. Reuses `app/graph/queries.py`.
+  enrichment via propose→review→commit (`enrich_company` creates a proposal,
+  `proposal_status` polls it, `commit_proposal` writes — no silent direct-write;
+  #52). Registered in `.mcp.json`. Reuses `app/graph/queries.py` + the assistant
+  proposal flow.
 - **Chat assistant** — `app/agents/assistant/` (`make chat` CLI + a `POST /chat`
   endpoint via `service.py`, surfaced as the SPA's 💬 chat panel): conversational
   ADK agent over the graph with session memory (per client) + long-term memory as
