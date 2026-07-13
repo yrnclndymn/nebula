@@ -10,7 +10,7 @@ searches for the company's acquisition history (deals it made and deals where it
 was acquired), plus best-effort page fetches of the top organic results. All of it
 is UNTRUSTED — it only feeds a *proposal* a human reviews, and provenance is
 re-checked deterministically downstream (see
-:func:`app.agents.ma.build.build_acquisition_record`), so a fabricated citation —
+:func:`app.agents.deals.build.build_acquisition_record`), so a fabricated citation —
 especially an uncited amount — never survives to a write.
 
 Every tool call charges the active per-run budget (``acquisition_research``), so
@@ -24,7 +24,7 @@ from google import genai
 from google.genai import types
 
 from app import budget
-from app.agents.ma.models import AcquisitionResearch
+from app.agents.deals.models import AcquisitionResearch
 from app.config import settings
 from app.genai_retry import generate_with_retry
 from app.tools.web import fetch_page, web_search

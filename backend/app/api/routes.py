@@ -593,7 +593,7 @@ async def research_company_acquisitions(req: AcquisitionResearchRequest) -> dict
     company made and deals where it was acquired — every deal cited, amounts dropped
     unless separately cited. Returns a job id to poll; nothing is written until
     commit. 404 if the company isn't tracked in the graph."""
-    from app.agents.ma.proposals import propose_acquisitions
+    from app.agents.deals.proposals import propose_acquisitions
 
     result = await propose_acquisitions(req.company)
     if "error" in result:
@@ -606,7 +606,7 @@ async def research_company_acquisitions_status(job_id: str) -> dict:
     """Poll an acquisition-research proposal until status is 'ready' (or 'error').
     When ready, `record` holds the provenance-filtered proposed deals + citations
     and `diff` the new/changed deals against what's already stored."""
-    from app.agents.ma.proposals import get_acquisition_proposal
+    from app.agents.deals.proposals import get_acquisition_proposal
 
     proposal = await get_acquisition_proposal(job_id)
     if proposal is None:
@@ -618,7 +618,7 @@ async def research_company_acquisitions_status(job_id: str) -> dict:
 async def research_company_acquisitions_commit(job_id: str) -> dict:
     """Write a reviewed acquisition proposal to the graph (the user's approval).
     Applies only the cited deals prepared by the proposal; idempotent."""
-    from app.agents.ma.proposals import commit_acquisition_proposal
+    from app.agents.deals.proposals import commit_acquisition_proposal
 
     result = await commit_acquisition_proposal(job_id)
     if "error" in result:

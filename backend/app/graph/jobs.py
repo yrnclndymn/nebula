@@ -192,7 +192,7 @@ async def run_job(job_id: str) -> None:
 
         await run_person_proposal_job(job_id)
     elif job["type"] == "acquisition_proposal":
-        from app.agents.ma.proposals import run_acquisition_proposal_job
+        from app.agents.deals.proposals import run_acquisition_proposal_job
 
         await run_acquisition_proposal_job(job_id)
     else:
