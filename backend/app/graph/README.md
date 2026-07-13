@@ -43,7 +43,9 @@ RETURN c.name, c.headcount
 ```
 
 Schema (constraints/indexes) lives in `schema.py`; writes in `repository.py`;
-the record shape in `models.py`.
+the committable record shapes in `models.py` (company), `deal_models.py`,
+`person_models.py`, and the shared vocabulary in `company_types.py` (#103 —
+the layering contract keeps these in the graph layer).
 
 ## Retention & pruning (issue #37)
 

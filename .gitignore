@@ -5,6 +5,14 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
+# Test-quality sensors (#106): coverage + mutation-testing artifacts
+.coverage
+coverage.xml
+htmlcov/
+# mutmut writes a copy of the source tree + its result cache under backend/
+mutants/
+.mutmut-cache
+
 # Env / secrets
 .env
 *.local
