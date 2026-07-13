@@ -34,15 +34,30 @@ jobs:
       NEO4J_PASSWORD: nebula-local-dev
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history so diff-coverage can diff changed lines against main.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v5
       - name: Install dependencies
         run: uv sync --frozen
-      - name: Lint (ruff)
-        run: uv run ruff check . && uv run ruff format --check .
+      - name: Fetch main for diff base
+        # fetch-depth:0 already brings all branches on PRs, but be explicit so the
+        # diff base exists on push/merge_group runs too.
+        working-directory: ${{ github.workspace }}
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main || true
+      - name: Lint (ruff + tooling selftests)
+        # Run the repo's `make lint` so ruff, the wave_status selftest, and (once
+        # #103 lands) the import-linter gate all run in CI, not just locally.
+        working-directory: ${{ github.workspace }}
+        run: make lint
       - name: Apply graph schema
         run: uv run python -m app.graph.schema
-      - name: Test (pytest)
-        run: uv run pytest -q
+      - name: Test (pytest + coverage)
+        run: uv run pytest -q --cov=app --cov-report=xml --cov-report=term-missing:skip-covered
+      - name: Diff coverage gate (changed lines vs main)
+        # Fail when NEW/CHANGED lines are under-covered — "no worse than main"
+        # without a stored baseline. Reports the uncovered changed lines.
+        run: uv run diff-cover coverage.xml --compare-branch origin/main --fail-under 80
 
   frontend:
     name: frontend — lint + build

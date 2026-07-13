@@ -112,3 +112,25 @@ wave-watch:       ## Snapshot the wave every 15s (Ctrl-C to stop). Serve with: (
 	@while true; do python3 scripts/wave_status.py || true; sleep 15; done
 
 .PHONY: wave-status wave-watch
+
+# --- Mutation testing (per-wave test-quality sensor, #106) --------------------
+# Per WAVE, not per PR (too slow) and NOT wired into CI. At wave closeout run
+# this over the files the wave touched and record surviving mutants (see the
+# wave skill's "Per-wave mutation pass"). Config lives in backend/pyproject.toml
+# ([tool.mutmut]). FILES are backend-relative paths, e.g. app/tools/encoding.py.
+# mutmut mutates everything under source_paths but we pass per-file name globs
+# so only the touched files' mutants are executed; results for every other file
+# stay "not checked", which is how the survivor filter isolates the wave's.
+mutate:           ## Per-wave mutation pass. Usage: make mutate FILES="app/foo.py app/bar.py"
+	@test -n "$(FILES)" || { echo 'usage: make mutate FILES="app/foo.py app/bar.py"  (backend-relative paths)'; exit 1; }
+	@names=""; for f in $(FILES); do \
+	  names="$$names $$(printf '%s' "$$f" | sed -e 's/\.py$$//' -e 's#/#.#g').*"; \
+	done; \
+	echo "→ mutating:$$names"; \
+	cd backend && uv run mutmut run $$names || true
+	@echo ""
+	@echo "=== surviving mutants (survived/timeout/suspicious/no-tests over the given files) ==="
+	@cd backend && uv run mutmut results | grep -vE ': (killed|not checked)$$' | grep -E ': \w' \
+	  || echo "  none — every executed mutant was killed"
+
+.PHONY: mutate

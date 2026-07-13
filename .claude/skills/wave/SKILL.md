@@ -149,3 +149,30 @@ per-story wiring. Anomalies render distinctly (dashed badges, not just red/green
 The JSON schema is stable and documented at the top of `wave_status.py`; later,
 workers' `make sensors` summaries and the orchestrator's integration gate can
 read the same artifact. A one-shot snapshot is `make wave-status`.
+
+## Per-wave mutation pass
+
+Coverage (the CI diff-coverage gate) proves changed lines *executed*; it can't
+prove the tests would *notice* a bug on those lines. Mutation testing does. It's
+too slow for per-PR, so run it once per wave at closeout — the moment new
+agent-written tests have actually landed (#106).
+
+At closeout, gather the files the wave touched (backend `app/` only — mutmut
+mutates Python source) and run the sensor over them:
+
+```bash
+git diff --name-only origin/main...HEAD -- 'backend/app/**/*.py' \
+  | sed 's#^backend/##' | tr '\n' ' '            # -> the FILES list
+make mutate FILES="app/tools/encoding.py app/graph/signals.py ..."
+```
+
+`make mutate` runs mutmut restricted to those files (config in
+`backend/pyproject.toml` `[tool.mutmut]`) and prints a compact list of surviving
+mutants — mutations no test killed, i.e. real test-quality gaps. It is a
+sensor, NOT a gate: it never runs in CI and doesn't block the merge.
+
+Record the survivors in the wave closeout note (or open follow-up issues for the
+worst offenders — a survivor on a security/write-path branch matters more than
+one on a log string). A clean run ("none — every executed mutant was killed")
+is itself worth recording as the wave's test-quality baseline. Keep the run
+scoped to touched files: a whole-tree pass is far too slow to be useful.
