@@ -100,3 +100,11 @@ type (`.claude/agents/story-worker.md`), which carries the worker contract.
   destructive-by-default maintenance CLI shipped this way. Maintenance CLIs
   standard: dry-run default, `--commit` to apply, invoked via
   `make <target> ARGS=--commit`.
+- **CI-only graph flakes: bound the local repro effort.** The schedule/prune
+  tests assert GLOBAL counts (`run_tick` enqueues, signals pruned), so any
+  stray :Signal/:Company in the shared CI DB fails them with off-by-ones. If
+  a CI failure won't reproduce locally after ~2 clean fresh-ephemeral-DB full
+  runs (try one keyless: `GEMINI_API_KEY= GOOGLE_API_KEY=` — CI has no LLM
+  key), stop digging: push the pending main-merge (or an empty commit) and
+  let CI re-run before instrumenting. One such failure cleared on the next
+  sha after four clean local repros found nothing.
