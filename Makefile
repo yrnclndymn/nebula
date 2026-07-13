@@ -112,3 +112,16 @@ wave-watch:       ## Snapshot the wave every 15s (Ctrl-C to stop). Serve with: (
 	@while true; do python3 scripts/wave_status.py || true; sleep 15; done
 
 .PHONY: wave-status wave-watch
+
+# --- Drift suite (#108) -------------------------------------------------------
+# Slow-cadence, read-only drift sensors run every 3rd wave (the wave-skill
+# closeout triggers on `wave_count % 3 == 0`; count with scripts/wave_tag.sh
+# --count). Advisory, not a gate: dead code (vulture), dependency freshness
+# (uv + npm outdated), secrets (gitleaks), and an inferential modularity pass
+# (module-level import graph + a paste-ready LLM prompt — make drift never calls
+# an LLM). Each section is best-effort with a clear SKIPPED line when a tool is
+# unavailable. One combined report to stdout + scripts/drift-report.txt (ignored).
+drift:            ## Run the read-only drift suite (report only). See scripts/drift.py
+	python3 scripts/drift.py
+
+.PHONY: drift

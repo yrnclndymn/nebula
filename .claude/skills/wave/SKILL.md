@@ -60,6 +60,22 @@ type (`.claude/agents/story-worker.md`), which carries the worker contract.
 - Remove worker worktrees (`git worktree remove --force`, then prune), delete
   local + remote branches.
 - Board cards → *Done* (issues auto-close via `Closes #`).
+- **Tag the wave (durable counter, #108).** From an up-to-date `main`, run
+  `bash scripts/wave_tag.sh <story-numbers…>` (e.g. `scripts/wave_tag.sh 82 83
+  84`). It creates an annotated `wave-NNN` tag (zero-padded, next after the
+  highest existing) whose message lists the stories, then prints the push
+  command — it never pushes. Push it explicitly:
+  `git push origin wave-NNN`. This is the only durable record of how many waves
+  have run; `git tag -l 'wave-*'` (or `scripts/wave_tag.sh --count`) counts them
+  from any session, offline.
+- **Every 3rd wave, run the drift suite.** After tagging, check the count: when
+  `wave_count % 3 == 0` (i.e. `$(scripts/wave_tag.sh --count)` is a multiple of
+  3 — the tag script also prints a reminder when it creates such a wave), run
+  `make drift`. It is read-only and advisory (dead code, dependency freshness,
+  secrets, and a module-boundary import graph + a paste-ready LLM prompt). Read
+  `scripts/drift-report.txt`, run the modularity prompt through an assistant, and
+  **file the findings** as backlog issues / notes (the suite reports; it never
+  gates). On the other two-in-three waves, skip it.
 - Note anything reusable the wave taught (a new gotcha, a convention worth
   adding) — update CLAUDE.md or this skill, not just session memory.
 
