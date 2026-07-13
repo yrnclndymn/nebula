@@ -97,3 +97,17 @@ worktree:         ## Isolated worktree + branch for a parallel session. NAME=<sl
 	echo "  remove when merged:        git worktree remove $$dir && git branch -d $(NAME)"
 
 .PHONY: db-up db-ephemeral db-down install db-init import normalize-linkedin migrate-person-identity discover-leader-linkedin repair-mojibake enrich eval chat dev schedule-tick test lint frontend-install frontend-dev worktree
+
+# --- Wave sidecar -------------------------------------------------------------
+# Live progress view of a running wave (#107). wave_status.py snapshots every
+# feat/* branch (worktrees + PRs) into scripts/wave-status.json; wave_status.html
+# polls it. See scripts/wave_status.py for the JSON schema + a two-command run.
+wave-status:      ## One wave snapshot -> scripts/wave-status.json
+	python3 scripts/wave_status.py
+
+wave-watch:       ## Snapshot the wave every 15s (Ctrl-C to stop). Serve with: (cd scripts && python3 -m http.server)
+	@echo "snapshotting wave every 15s → scripts/wave-status.json  (Ctrl-C to stop)"
+	@echo "view: run 'cd scripts && python3 -m http.server' then open wave_status.html"
+	@while true; do python3 scripts/wave_status.py || true; sleep 15; done
+
+.PHONY: wave-status wave-watch
