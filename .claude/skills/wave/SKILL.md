@@ -63,6 +63,27 @@ type (`.claude/agents/story-worker.md`), which carries the worker contract.
 - Note anything reusable the wave taught (a new gotcha, a convention worth
   adding) — update CLAUDE.md or this skill, not just session memory.
 
+## Names check
+
+The repo is public and must never carry tracked-company / client names (see the
+Guardrails in CLAUDE.md). A deterministic sensor enforces this (#104):
+`python3 scripts/check_names.py` pulls the live company+alias list from the graph
+at check time (git-ignored cache `.nebula-names-cache`, reused < 24h; never
+committed), fuzzy-matches added diff lines + commit messages, and escalates
+ambiguous hits to a small Claude model when `ANTHROPIC_API_KEY` is set. A hit
+prints file + line + a *redacted* snippet (the matched name is never echoed).
+
+- **Workers:** run `python3 scripts/check_names.py` (staged diff) before handing
+  the branch back — a leaked name in a diff or commit message is a blocker, not
+  a nit. Install the pre-push hook once per worktree with
+  `bash scripts/install-hooks.sh` so it runs automatically.
+- **Orchestrator:** the hook fires on every `git push origin <branch>`. Treat a
+  block as real — inspect the redacted hunk, fix the source, and re-push. Only
+  bypass with `NAMES_CHECK_SKIP="reason"` for a genuine fictional-name collision
+  (Acme/Globex) or generic-word false positive; the reason prints loudly.
+- Offline with no fresh cache, the check warns and allows (it can't enforce what
+  it can't read) — so don't rely on it as the sole gate when disconnected.
+
 ## Known failure modes
 
 - **CI is the arbiter for graph code** — workers without Docker ship Cypher
