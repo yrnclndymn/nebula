@@ -108,3 +108,23 @@ type (`.claude/agents/story-worker.md`), which carries the worker contract.
   key), stop digging: push the pending main-merge (or an empty commit) and
   let CI re-run before instrumenting. One such failure cleared on the next
   sha after four clean local repros found nothing.
+
+## Sidecar
+
+A live progress view of the running wave (#107). Start it at launch (step 2),
+right after the workers spin up, so the invisible states — silent review,
+conflicted-PR-blocks-checks, checks-pending — surface without the orchestrator
+narrating. Two commands, from the repo root:
+
+```bash
+make wave-watch                              # snapshot every 15s → scripts/wave-status.json
+(cd scripts && python3 -m http.server 8777)  # then open localhost:8777/wave_status.html
+```
+
+`scripts/wave_status.py` snapshots every `feat/*` branch (local worktrees + open
+PRs + PRs merged within `--since-hours`) into one JSON; `wave_status.html` polls
+it every 10s. Membership is branch-pattern driven — no registry to maintain, no
+per-story wiring. Anomalies render distinctly (dashed badges, not just red/green).
+The JSON schema is stable and documented at the top of `wave_status.py`; later,
+workers' `make sensors` summaries and the orchestrator's integration gate can
+read the same artifact. A one-shot snapshot is `make wave-status`.
