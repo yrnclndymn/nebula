@@ -13,7 +13,7 @@ import asyncio
 import pytest
 
 from app.graph.company_names import list_company_names
-from app.graph.driver import check_connectivity, get_driver
+from app.graph.driver import check_connectivity, close_driver, get_driver
 from app.graph.entity_resolution import add_aliases
 from app.graph.models import CompanyRecord
 from app.graph.repository import upsert_company
@@ -66,6 +66,10 @@ def test_list_includes_names_and_aliases_excludes_junk(event_loop):
 
         async with driver.session() as session:
             await _cleanup(session)
+        # Release the cached driver: it is bound to THIS test's event loop, and
+        # the next graph test (its own asyncio.run loop) would otherwise inherit
+        # a driver whose loop is closed ("Event loop is closed" in CI).
+        await close_driver()
         return names
 
     names = event_loop.run_until_complete(scenario())
