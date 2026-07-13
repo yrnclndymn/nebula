@@ -10,13 +10,13 @@ All fixtures use fictional companies (Acme/Globex/Initech).
 
 import asyncio
 
-from app.agents.ma.build import (
+from app.agents.deals.build import (
     build_acquisition_record,
     build_deal,
     diff_acquisitions,
     valid_source,
 )
-from app.agents.ma.models import (
+from app.agents.deals.models import (
     AcquisitionRecord,
     AcquisitionResearch,
     Deal,
@@ -162,7 +162,7 @@ def test_diff_hides_unchanged_deals():
 
 
 def test_run_acquisition_proposal_job_stores_cited_deals(monkeypatch):
-    from app.agents.ma import proposals
+    from app.agents.deals import proposals
 
     job = {"job_id": "aq1", "status": "pending", "company": "Acme"}
     saved: dict = {}
@@ -206,7 +206,7 @@ def test_run_acquisition_proposal_job_stores_cited_deals(monkeypatch):
 
 
 def test_commit_refuses_when_not_ready(monkeypatch):
-    from app.agents.ma import proposals
+    from app.agents.deals import proposals
 
     async def fake_get_job(job_id):
         return {"job_id": job_id, "status": "pending"}
@@ -217,7 +217,7 @@ def test_commit_refuses_when_not_ready(monkeypatch):
 
 
 def test_commit_refuses_when_no_cited_deals(monkeypatch):
-    from app.agents.ma import proposals
+    from app.agents.deals import proposals
 
     empty = AcquisitionRecord(company="Acme").model_dump()
 
@@ -240,7 +240,7 @@ def test_commit_refuses_when_no_cited_deals(monkeypatch):
 
 
 def test_commit_writes_and_flips_status(monkeypatch):
-    from app.agents.ma import proposals
+    from app.agents.deals import proposals
 
     record = AcquisitionRecord(
         company="Acme",
@@ -277,7 +277,7 @@ def test_commit_writes_and_flips_status(monkeypatch):
 
 
 def test_canonicalize_record_maps_names_and_collapses_variants():
-    from app.agents.ma.build import canonicalize_record
+    from app.agents.deals.build import canonicalize_record
 
     record = AcquisitionRecord(
         company="Acme",
@@ -294,7 +294,7 @@ def test_canonicalize_record_maps_names_and_collapses_variants():
 
 
 def test_canonicalized_variant_no_longer_diffs_as_new():
-    from app.agents.ma.build import canonicalize_record
+    from app.agents.deals.build import canonicalize_record
 
     stored = [{"acquirer": "Acme", "target": "Globex", "amount": None}]
     record = AcquisitionRecord(

@@ -6,7 +6,7 @@ Two shapes, deliberately separated (the People-Intelligence discipline):
   research step (a single Gemini call over crawled/searched evidence). Every deal
   is asked to cite its facts, but a claimed citation is only a *claim*.
 - :class:`AcquisitionRecord` is the *committable* shape, derived from the research
-  by :func:`app.agents.ma.build.build_acquisition_record`, which DETERMINISTICALLY
+  by :func:`app.agents.deals.build.build_acquisition_record`, which DETERMINISTICALLY
   drops any deal without a valid ``http(s)`` source and — the money guardrail —
   drops the ``amount``/``currency`` of any deal whose amount is not separately
   cited. So "no financial figure saved without a citation" holds by construction.
@@ -50,7 +50,7 @@ class AcquisitionResearch(BaseModel):
     """Raw structured research output — UNTRUSTED until reviewed and committed.
 
     The commit is deterministic because this is a fixed schema; provenance is then
-    enforced by :func:`app.agents.ma.build.build_acquisition_record`, never by
+    enforced by :func:`app.agents.deals.build.build_acquisition_record`, never by
     trusting these fields.
     """
 

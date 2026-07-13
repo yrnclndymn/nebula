@@ -15,7 +15,7 @@ claimed citation is not trusted:
 Pure (no DB, no network, no model): easy to reason about and test-first.
 """
 
-from app.agents.ma.models import AcquisitionRecord, AcquisitionResearch, Deal, DealResearch
+from app.agents.deals.models import AcquisitionRecord, AcquisitionResearch, Deal, DealResearch
 
 
 def valid_source(url: str | None) -> bool:
