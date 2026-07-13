@@ -203,6 +203,112 @@ async def recent_signals(
     return [_shape(r["signal"], r["companies"], r["sources"]) for r in rows]
 
 
+# --- People links (AUTHORED / QUOTED_IN / SPOKE_AT) — story #41 --------------
+# Append-only additions: the pure extraction + matching-precedence logic lives in
+# `app.capture.people`; this module holds only the graph read (candidate lookup)
+# and the append-only edge writes, so the graph layer never imports back into
+# `capture` (no cycle). Kept in lock-step with capture.people.SIGNAL_PERSON_RELATIONS.
+_PERSON_SIGNAL_RELATIONS = frozenset({"AUTHORED", "QUOTED_IN", "SPOKE_AT"})
+
+
+async def person_signal_candidates(
+    driver: AsyncDriver, *, name: str, company: str, linkedin_canon: str | None = None
+) -> dict:
+    """Existing :Person candidates for a mention, for the precedence decision.
+
+    Returns ``{"linkedin_eids": [...], "name_company_eids": [...]}``: nodes keyed
+    on the mention's canonical LinkedIn URL (≤1 under the uniqueness constraint),
+    and nodes with the exact ``name`` that lead ``company``. The pure
+    ``resolve_mention`` turns these counts into a confident link or a flag.
+    """
+    async with driver.session() as session:
+        linkedin_eids: list[str] = []
+        if linkedin_canon:
+            result = await session.run(
+                "MATCH (p:Person {linkedin: $canon}) RETURN elementId(p) AS eid",
+                canon=linkedin_canon,
+            )
+            linkedin_eids = [record["eid"] async for record in result]
+        result = await session.run(
+            "MATCH (p:Person {name: $name})-[:LEADS]->(:Company {name: $company}) "
+            "RETURN DISTINCT elementId(p) AS eid",
+            name=name,
+            company=company,
+        )
+        name_company_eids = [record["eid"] async for record in result]
+    return {"linkedin_eids": linkedin_eids, "name_company_eids": name_company_eids}
+
+
+async def _link_existing_person_tx(tx, url: str, link, rel: str, source: str | None) -> None:
+    """Link a confidently-matched existing :Person to the signal (unflagged)."""
+    await tx.run(
+        f"""
+        MATCH (s:Signal {{url: $url}})
+        MATCH (p:Person) WHERE elementId(p) = $eid
+        MERGE (p)-[r:{rel}]->(s)
+        ON CREATE SET r.capturedAt = datetime()
+        SET r.flagged = false, r.source = $source
+        """,
+        url=url,
+        eid=link.target_eid,
+        source=source,
+    )
+
+
+async def _link_stub_person_tx(tx, url: str, link, rel: str, source: str | None) -> None:
+    """Attach a mention we could NOT confidently match to a flagged review stub.
+
+    The stub is keyed on ``(name, unresolvedForSignal)`` so it is idempotent per
+    signal and can never collide with — or be mistaken for — a real person node:
+    it carries ``origin='signal-capture'`` and ``flagged=true`` for a reviewer to
+    reconcile (merge into the right person, or drop). Untrusted crawled text is
+    thus never silently written onto a trusted identity.
+    """
+    await tx.run(
+        f"""
+        MATCH (s:Signal {{url: $url}})
+        MERGE (p:Person {{name: $name, unresolvedForSignal: $url}})
+          ON CREATE SET p.origin = 'signal-capture', p.flagged = true, p.createdAt = datetime()
+        MERGE (p)-[r:{rel}]->(s)
+        ON CREATE SET r.capturedAt = datetime()
+        SET r.flagged = true, r.flagReason = $reason, r.source = $source
+        """,
+        url=url,
+        name=link.name,
+        reason=link.reason,
+        source=source,
+    )
+
+
+async def write_person_signal_links(
+    driver: AsyncDriver, canonical_url: str, links, source: str | None = None
+) -> dict:
+    """Write resolved people→signal links. Append-only, idempotent.
+
+    ``links`` are ``ResolvedLink``-shaped (``.name``, ``.relation``, ``.target_eid``,
+    ``.flagged``, ``.reason``). Confident links attach to the existing person;
+    flagged links attach to a review stub. The relation type is validated against
+    the fixed allowlist before it is interpolated into Cypher (relationship types
+    can't be parameterised), so an unexpected value is skipped, never executed.
+    Returns ``{"linked": n, "flagged": n}``.
+    """
+    linked = flagged = 0
+    async with driver.session() as session:
+        for link in links:
+            rel = link.relation
+            if rel not in _PERSON_SIGNAL_RELATIONS:
+                continue  # never interpolate an unexpected relation type into Cypher
+            if link.target_eid and not link.flagged:
+                await session.execute_write(
+                    _link_existing_person_tx, canonical_url, link, rel, source
+                )
+                linked += 1
+            else:
+                await session.execute_write(_link_stub_person_tx, canonical_url, link, rel, source)
+                flagged += 1
+    return {"linked": linked, "flagged": flagged}
+
+
 async def recent_signals_filtered(
     driver: AsyncDriver,
     limit: int = 20,
