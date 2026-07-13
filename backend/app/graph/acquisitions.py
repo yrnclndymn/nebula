@@ -1,0 +1,98 @@
+"""Graph read/write for acquisitions (story #43, epic #26 M&A Intelligence).
+
+Kept OUT of ``repository.py`` (the shared, hot company write path) on purpose —
+this module adds M&A-specific functions without touching it, so parallel story
+branches merge cleanly. The write mirrors the person-enrichment discipline:
+nothing here runs except from the explicit commit step of a reviewed
+``acquisition_proposal`` job (human-in-the-loop), and it is idempotent (all MERGE),
+so committing the same reviewed record twice is safe.
+
+Shape: ``(acquirer)-[:ACQUIRED {announcedAt, closedAt, amount, currency, thesis,
+source, amountSource}]->(target)``. Both endpoints MERGE as :Company nodes —
+unknown ones become stubs (``origin: 'agent'`` on create) that feed the research
+backlog. Acquirer/target names resolve through the entity-resolution alias map
+first (same coalesce the partner/client stubs use) so a variant name hits the
+canonical node instead of spawning a duplicate.
+"""
+
+from neo4j import AsyncDriver, AsyncManagedTransaction
+
+from app.agents.ma.models import AcquisitionRecord, Deal
+
+
+async def get_acquisitions(driver: AsyncDriver, company: str) -> list[dict]:
+    """Every ACQUIRED edge that touches ``company`` (as acquirer OR target).
+
+    Feeds the review/diff surface: the proposal diffs its proposed deals against
+    this so the reviewer sees only genuinely new/changed deals. Direction is
+    carried explicitly (``acquirer``/``target`` names), never inferred.
+    """
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (acq:Company)-[r:ACQUIRED]->(tgt:Company)
+            WHERE acq.name = $company OR tgt.name = $company
+            RETURN acq.name AS acquirer, tgt.name AS target,
+                   r.announcedAt AS announced_at, r.closedAt AS closed_at,
+                   r.amount AS amount, r.currency AS currency,
+                   r.thesis AS thesis, r.source AS source
+            ORDER BY r.announcedAt DESC
+            """,
+            company=company,
+        )
+        return [dict(rec) async for rec in result]
+
+
+async def _write_deal_tx(tx: AsyncManagedTransaction, deal: Deal) -> None:
+    """MERGE both companies (alias-resolved; unknown ones stubbed) and the ACQUIRED
+    edge, then set the reviewed deal facts. Provenance rides on the edge as ``source``
+    (deal) and ``amountSource`` (amount) — the figure is always checkable."""
+    await tx.run(
+        """
+        OPTIONAL MATCH (ca:Company) WHERE $acquirer IN ca.aliases
+        WITH collect(ca.name)[0] AS acqName
+        OPTIONAL MATCH (ct:Company) WHERE $target IN ct.aliases
+        WITH acqName, collect(ct.name)[0] AS tgtName
+        MERGE (acq:Company {name: coalesce(acqName, $acquirer)})
+          ON CREATE SET acq.origin = 'agent', acq.createdAt = datetime()
+        MERGE (tgt:Company {name: coalesce(tgtName, $target)})
+          ON CREATE SET tgt.origin = 'agent', tgt.createdAt = datetime()
+        MERGE (acq)-[r:ACQUIRED]->(tgt)
+        SET r.announcedAt = $announced_at,
+            r.closedAt = $closed_at,
+            r.amount = $amount,
+            r.currency = $currency,
+            r.thesis = $thesis,
+            r.source = $source,
+            r.amountSource = $amount_source,
+            r.updatedAt = datetime()
+        """,
+        acquirer=deal.acquirer,
+        target=deal.target,
+        announced_at=deal.announced_at,
+        closed_at=deal.closed_at,
+        amount=deal.amount,
+        currency=deal.currency,
+        thesis=deal.thesis,
+        source=deal.source,
+        amount_source=deal.amount_source,
+    )
+
+
+async def upsert_acquisitions(driver: AsyncDriver, record: AcquisitionRecord) -> dict:
+    """Write a reviewed :class:`AcquisitionRecord` to the graph. Called ONLY by the
+    commit step of an ``acquisition_proposal`` job — never from a research/write
+    path directly (human-in-the-loop preserved).
+
+    Each deal already carries only cited facts (provenance filtered at build time),
+    so the write is safe. Idempotent — the ACQUIRED edge MERGEs on (acquirer,
+    target). Returns the count written.
+    """
+    async with driver.session() as session:
+
+        async def _tx(tx: AsyncManagedTransaction) -> dict:
+            for deal in record.deals:
+                await _write_deal_tx(tx, deal)
+            return {"company": record.company, "action": "written", "deals": len(record.deals)}
+
+        return await session.execute_write(_tx)

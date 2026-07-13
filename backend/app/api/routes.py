@@ -575,6 +575,57 @@ async def enrich_person_commit(job_id: str) -> dict:
     return result
 
 
+# --- Acquisition research (#43, M&A Intelligence) --------------------------------
+# A company's M&A history is researched via propose→review→commit, exactly like a
+# person: a durable job gathers deals (made + received) with EVERY deal fact cited
+# and uncited amounts dropped, the status endpoint is the review surface (proposed
+# deals + citations + diff), and commit writes the ACQUIRED edges. The SPA M&A view
+# is a follow-up story (#45); here the API IS the review surface.
+
+
+class AcquisitionResearchRequest(BaseModel):
+    company: str  # the tracked company whose acquisition history to research
+
+
+@router.post("/companies/acquisitions/research")
+async def research_company_acquisitions(req: AcquisitionResearchRequest) -> dict:
+    """Start a background acquisition-research proposal (#43). Gathers deals the
+    company made and deals where it was acquired — every deal cited, amounts dropped
+    unless separately cited. Returns a job id to poll; nothing is written until
+    commit. 404 if the company isn't tracked in the graph."""
+    from app.agents.ma.proposals import propose_acquisitions
+
+    result = await propose_acquisitions(req.company)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.get("/companies/acquisitions/{job_id}")
+async def research_company_acquisitions_status(job_id: str) -> dict:
+    """Poll an acquisition-research proposal until status is 'ready' (or 'error').
+    When ready, `record` holds the provenance-filtered proposed deals + citations
+    and `diff` the new/changed deals against what's already stored."""
+    from app.agents.ma.proposals import get_acquisition_proposal
+
+    proposal = await get_acquisition_proposal(job_id)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="unknown acquisition proposal")
+    return proposal
+
+
+@router.post("/companies/acquisitions/{job_id}/commit")
+async def research_company_acquisitions_commit(job_id: str) -> dict:
+    """Write a reviewed acquisition proposal to the graph (the user's approval).
+    Applies only the cited deals prepared by the proposal; idempotent."""
+    from app.agents.ma.proposals import commit_acquisition_proposal
+
+    result = await commit_acquisition_proposal(job_id)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
 @router.get("/digests")
 async def digests_list(limit: int = Query(default=52, ge=1, le=200)) -> list[dict]:
     """Weekly digests (#51), newest-first — a browsable history of what changed.

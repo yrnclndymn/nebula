@@ -191,6 +191,10 @@ async def run_job(job_id: str) -> None:
         from app.agents.people.proposals import run_person_proposal_job
 
         await run_person_proposal_job(job_id)
+    elif job["type"] == "acquisition_proposal":
+        from app.agents.ma.proposals import run_acquisition_proposal_job
+
+        await run_acquisition_proposal_job(job_id)
     else:
         # Periodic job types (Cloud Scheduler → schedule-tick) dispatch via the
         # schedule registry; late import avoids a cycle (schedules imports jobs).
