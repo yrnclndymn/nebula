@@ -89,11 +89,15 @@ prints file + line + a *redacted* snippet (the matched name is never echoed).
 - **CI is the arbiter for graph code** — workers without Docker ship Cypher
   that first executes in CI. Prefer `make db-ephemeral` in the worktree when
   Docker is up.
-- The review agent is multi-modal: (a) deep pass with a verdict; (b) silent
-  sub-minute shrug — rerun once; (c) posts a literal "placeholder" comment
-  then dies at max-turns — treat as (b) and rerun; (d) green but silent even
-  after the rerun — the orchestrator's own diff review + CI carry the merge.
-  Findings posted before an `error_max_turns` death are still valid.
+- The review agent is multi-modal: (a) deep pass with a verdict; (b)/(c)
+  silent pass or placeholder-then-death — since #105 these are SENSED: the
+  liveness gate fails the run red and `review-rerun.yml` re-runs it once
+  automatically, so don't rerun by hand unless the listener hasn't fired
+  (e.g. the sensor isn't on main yet for that PR). (d) attempt 2 also silent —
+  the review check stays red BY DESIGN; the orchestrator's own diff review +
+  CI carry the merge, via the sanctioned `--admin` (the red required check is
+  the conscious-merge signal, not a fault). Findings posted before an
+  `error_max_turns` death are still valid.
 - Phantom "merge blocked" with all rules green: retry once; the repo-admin
   `--admin` bypass is the sanctioned fallback.
 - **A conflicted PR runs NO checks at all.** `pull_request` workflows execute
