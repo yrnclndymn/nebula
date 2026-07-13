@@ -45,7 +45,10 @@ count_waves() {
 
 case "${1:-}" in
 	--count)
-		count_waves
+		# Reports the highest wave NUMBER (not the raw tag count): the every-3rd
+		# drift trigger keys off the wave number, so a backfill gap can never
+		# make the trigger and the creation-time nudge disagree.
+		highest_wave
 		exit 0
 		;;
 	--next)

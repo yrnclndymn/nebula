@@ -68,9 +68,10 @@ type (`.claude/agents/story-worker.md`), which carries the worker contract.
   `git push origin wave-NNN`. This is the only durable record of how many waves
   have run; `git tag -l 'wave-*'` (or `scripts/wave_tag.sh --count`) counts them
   from any session, offline.
-- **Every 3rd wave, run the drift suite.** After tagging, check the count: when
-  `wave_count % 3 == 0` (i.e. `$(scripts/wave_tag.sh --count)` is a multiple of
-  3 — the tag script also prints a reminder when it creates such a wave), run
+- **Every 3rd wave, run the drift suite.** After tagging: when the new wave's
+  NUMBER is a multiple of 3 (`wave-006`, `wave-009`, … — the tag script prints a
+  reminder when it creates such a wave; `scripts/wave_tag.sh --count` reports
+  the highest wave number for checking from any session), run
   `make drift`. It is read-only and advisory (dead code, dependency freshness,
   secrets, and a module-boundary import graph + a paste-ready LLM prompt). Read
   `scripts/drift-report.txt`, run the modularity prompt through an assistant, and
