@@ -29,6 +29,11 @@ backend/evals/artifacts/
 # Neo4j dump for migration (data)
 *.dump
 
+# Tracked-name leak sensor cache (#104): the live company+alias list pulled for
+# the pre-push check. NEVER commit — it is the exact data the sensor exists to
+# keep out of the public repo.
+.nebula-names-cache
+
 # Local Claude Code state stays out of the public repo, but the codified
 # process (custom agents + skills) is versioned like any other code.
 .claude/*
