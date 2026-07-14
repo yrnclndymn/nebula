@@ -54,6 +54,8 @@ export function formatCustom(v: unknown): string {
 export interface Leader {
   name: string;
   title: string | null;
+  id?: string | null; // Person node elementId — present when the leader resolves to a
+  // graph :Person, so the drawer can open their person page (#42). Absent for older reads.
 }
 
 export interface Citation {
@@ -419,6 +421,60 @@ export interface SignalCapture {
   name: string;
   captured?: number;
   new?: number;
+  outcome?: string;
+  error?: string;
+}
+
+// --- Person page + expertise summary (#42) ---------------------------------------
+// The person drawer's payload: identity + roles + their linked-signals timeline +
+// a derived, advisory expertise summary (regenerable, stored with a generation date
+// + the signal URLs it drew from). A person is addressed by its node elementId.
+
+export interface PersonRole {
+  company: string;
+  title: string | null;
+  from?: number | null;
+  to?: number | null;
+}
+
+// A signal linked to a person via AUTHORED / QUOTED_IN / SPOKE_AT (#41). Titles/URLs
+// are crawled — untrusted — so the UI only links out when `url` is http(s).
+export interface PersonSignal {
+  relation: string; // AUTHORED | QUOTED_IN | SPOKE_AT
+  flagged: boolean;
+  url: string | null;
+  title: string | null;
+  kind: string; // news | blog | event
+  publishedAt: string | null;
+  publishedAtRaw: string | null;
+  capturedAt: string | null;
+}
+
+export interface PersonExpertise {
+  summary: string;
+  generatedAt: string | null;
+  sources: string[]; // the signal URLs the summary was grounded in
+}
+
+export interface PersonProfile {
+  id: string; // Person node elementId
+  name: string;
+  linkedin: string | null;
+  bio: string | null;
+  personalSite: string | null;
+  talks: string[];
+  flagged: boolean; // an unreviewed signal-capture stub (#41)
+  origin: string | null;
+  currentRoles: PersonRole[];
+  priorRoles: PersonRole[];
+  signals: PersonSignal[];
+  expertise: PersonExpertise | null;
+}
+
+// The background expertise-generation job (#42), polled by the regenerate button.
+export interface PersonExpertiseJob {
+  job_id: string;
+  status: string;
   outcome?: string;
   error?: string;
 }

@@ -641,3 +641,48 @@ async def digest_detail(digest_id: str) -> dict:
     if result is None:
         raise HTTPException(status_code=404, detail=f"no digest {digest_id!r}")
     return result
+
+
+# --- Person page + expertise summary (#42, People Intelligence) -------------------
+# The person page reads identity + roles + their linked-signals timeline (#41) + a
+# derived expertise summary. The summary is DERIVED, ADVISORY content (the weekly
+# digest precedent #51): regenerable, stored with its generation date + the signal
+# URLs it drew from — NOT a person fact, so it does NOT go through propose→review.
+# A person is addressed by its node elementId (the one id that works for both
+# name-only and LinkedIn-keyed people; it's what person_signal_candidates uses).
+
+
+@router.get("/people/expertise/{job_id}")
+async def person_expertise_status(job_id: str) -> dict:
+    """Poll a person-expertise generation job (#42) until status is 'done' (or
+    'error'). Two path segments, so it never collides with `/people/{person_id}`."""
+    job = await jobs.get_job(job_id)
+    if job is None or job.get("type") != "person_expertise":
+        raise HTTPException(status_code=404, detail="unknown expertise job")
+    return job
+
+
+@router.get("/people/{person_id}")
+async def get_person_page(person_id: str) -> dict:
+    """The person page payload (#42): identity + current/prior roles + linked-signals
+    timeline + the stored expertise summary (with its generation date + sources).
+    404 if no such person. `person_id` is the node elementId."""
+    from app.graph import person_expertise
+
+    person = await person_expertise.get_person(get_driver(), person_id)
+    if person is None:
+        raise HTTPException(status_code=404, detail="unknown person")
+    return person
+
+
+@router.post("/people/{person_id}/expertise")
+async def regenerate_person_expertise(person_id: str) -> dict:
+    """(Re)enqueue expertise-summary generation for a person (#42). Returns a job id
+    to poll; the summary is regenerable, so this is safe to call repeatedly. 404 if
+    the person is unknown."""
+    from app.graph import person_expertise
+
+    result = await person_expertise.enqueue_person_expertise(person_id)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
