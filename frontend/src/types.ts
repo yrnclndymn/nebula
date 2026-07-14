@@ -484,9 +484,7 @@ export interface ActiveAcquirerDeal {
   closed_at: string | null;
   amount: string | null;
   currency: string | null;
-  thesis: string | null;
   source: string | null;
-  amount_source: string | null;
 }
 
 export interface ActiveAcquirer {

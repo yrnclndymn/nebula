@@ -1253,6 +1253,7 @@ td.muted {
   padding: 0.4rem 0.6rem;
   border-bottom: 1px solid var(--border, rgba(128, 128, 128, 0.25));
   vertical-align: top;
+}
 
 /* Potential acquirers (#44): ranked candidate acquirers in the company drawer. */
 .acquirers {
