@@ -178,6 +178,21 @@ The JSON schema is stable and documented at the top of `wave_status.py`; later,
 workers' `make sensors` summaries and the orchestrator's integration gate can
 read the same artifact. A one-shot snapshot is `make wave-status`.
 
+**Code-health layer (#124).** `scripts/code_health.py` adds a stdlib-AST sensor
+over the *code itself*: per-commit source/test LOC, test ratio, upward imports
+vs the #103 lattice, cross-layer edges, and complex/long-function counts.
+`python3 scripts/code_health.py --history` walks main's first-parent commits
+(via a detached scratch worktree — never your HEAD), caching per-sha into the
+git-ignored `scripts/code-health-history.json` so re-runs only scan new commits;
+`--rev`/`--path` measure a single tree, `--selftest` is wired into `make lint`.
+Each `wave_status.py` story now carries an additive `impact` block — the diff's
+layer footprint, guarded-path touches (auth / job dispatch / repository /
+proposal-commit), metric deltas vs main, and a `low`/`medium`/`high` risk badge
+(high = 3+ code layers or any guarded path). `scripts/code_health.html` polls
+both JSONs: stat tiles + one-measure-per-panel trend lines with commit tooltips,
+and the in-flight story table with layer chips + risk badges. Serve it alongside
+the wave view: `(cd scripts && python3 -m http.server)`.
+
 ## Per-wave mutation pass
 
 Coverage (the CI diff-coverage gate) proves changed lines *executed*; it can't

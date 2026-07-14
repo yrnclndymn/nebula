@@ -48,10 +48,26 @@ JSON SCHEMA (v1) — STABLE. Agents consume this; add fields, don't repurpose.
         "review_silent":  false,  # review check passed but no review comment
         "conflicted":     false,  # PR mergeable=CONFLICTING => checks never run
         "checks_pending": false   # checks in-flight / not yet registered
+      },
+      "impact": {                               # ADDITIVE (#124) — code-health footprint
+        "files":         ["backend/app/graph/x.py", ...],  # changed vs origin/main
+        "layers":        ["graph", "tools"],    # distinct CODE layers, low->high
+        "n_code_layers": 2,
+        "guarded":       ["backend/app/auth.py"],  # guarded-path touches (may be [])
+        "risk":          "low"|"medium"|"high",    # code_health.story_risk()
+        "deltas": null | {                      # metrics vs main; null if not computable
+          "source_loc": 12, "test_loc": 40, "test_count": 3,
+          "upward_imports": 0, "cross_layer_edges": 0,
+          "complex_functions": 0, "long_functions": 1,
+          "noqa_count": 0, "test_ratio": 0.004
+        }
       }
     }
   ]
 }
+Note: `impact` is an additive v1 extension — schema_version stays 1. Consumers
+that predate it must tolerate its absence; here it is always present, but
+`files`/`deltas` degrade to []/null when git or the branch worktree is missing.
 --------------------------------------------------------------------------------
 
 Wave membership (branch-pattern driven, no manual registry):
@@ -73,11 +89,31 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# code_health.py sits next to this script; make it importable regardless of cwd
+# so the per-branch impact block (#124) can reuse its layer map + risk heuristic.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import code_health  # noqa: E402
+
 SCHEMA_VERSION = 1
 DEFAULT_SINCE_HOURS = 24
 GH_FALLBACK = "/opt/homebrew/bin/gh"
 
 BRANCH_RE = re.compile(r"^feat/(\d+)-(.+)$")
+
+# Guarded paths (#124): security- and write-path files where ANY change lifts a
+# story's risk to HIGH regardless of how few layers it spans — auth verification,
+# the durable-job dispatch table, the graph write repository, and the
+# propose->commit paths that are the only sanctioned route from an agent
+# proposal to a graph write (human-in-the-loop). Matched exactly (repo-relative).
+GUARDED_PATHS = frozenset({
+    "backend/app/auth.py",
+    "backend/app/mcp_server.py",
+    "backend/app/graph/jobs.py",
+    "backend/app/graph/repository.py",
+    "backend/app/agents/assistant/proposals.py",
+    "backend/app/agents/people/proposals.py",
+    "backend/app/agents/deals/proposals.py",
+})
 
 
 # ----------------------------------------------------------------------------
@@ -326,12 +362,106 @@ def review_check_passed(checks: list[dict]) -> bool:
 
 
 # ----------------------------------------------------------------------------
+# Per-branch code-health impact (#124) — layer footprint + guarded + risk
+# ----------------------------------------------------------------------------
+
+def impact_footprint(files: list[str]) -> dict:
+    """Pure: changed-file list -> {files, layers, n_code_layers, guarded, risk}.
+
+    `layers` are distinct backend CODE layers (foundation < graph < tools <
+    capture/agents < surfaces), ordered low->high; tooling/frontend files map to
+    no layer. `guarded` are exact guarded-path touches. Risk comes from the one
+    shared heuristic in code_health.story_risk (unit-tested there).
+    """
+    layers: list[str] = []
+    for f in files:
+        lyr = code_health.layer_for_path(f)
+        if lyr and lyr not in layers:
+            layers.append(lyr)
+    layers.sort(key=lambda name: code_health.LAYER_RANK.get(name, 99))
+    guarded = sorted(f for f in files if f in GUARDED_PATHS)
+    return {
+        "files": files,
+        "layers": layers,
+        "n_code_layers": len(layers),
+        "guarded": guarded,
+        "risk": code_health.story_risk(len(layers), bool(guarded)),
+    }
+
+
+def diff_files(branch: str, worktree: str | None) -> list[str]:
+    """Repo-relative files changed on a branch vs origin/main (three-dot diff).
+
+    Prefers the local branch ref when a worktree exists, else the remote-tracking
+    ref. Returns [] when git can't answer (origin/main not fetched, etc.)."""
+    ref = branch if worktree else f"origin/{branch}"
+    raw = _run(["git", "diff", "--name-only", f"origin/main...{ref}"])
+    if raw is None:
+        return []
+    return [line.strip() for line in raw.splitlines() if line.strip()]
+
+
+def baseline_metrics() -> dict | None:
+    """main's metrics from the code-health history cache (for delta baselines).
+
+    Prefers the entry for origin/main's HEAD sha; falls back to the newest
+    cached commit. None when --history has never been run."""
+    cache = code_health.load_history_cache()
+    if not cache:
+        return None
+    # Same ref resolution as code_health.build_history (origin/main preferred,
+    # local main fallback) so the cache lookup and the history are keyed alike.
+    sha = ""
+    for candidate in ("origin/main", "main"):
+        got = (_run(["git", "rev-parse", "--verify", "--quiet", candidate]) or "").strip()
+        if got:
+            sha = got
+            break
+    entry = cache.get(sha)
+    if entry:
+        return entry.get("metrics")
+    newest = max(cache.values(), key=lambda e: e.get("ts", 0), default=None)
+    return newest.get("metrics") if newest else None
+
+
+def metric_deltas(worktree: str | None, baseline: dict | None) -> dict | None:
+    """branch worktree metrics minus main baseline, per metric. None if either
+    is unavailable (remote-only branch, or no history cache) — skipped, not zero."""
+    if not worktree or baseline is None:
+        return None
+    try:
+        cur = code_health.analyze_tree(worktree)
+    except Exception:
+        return None
+    deltas: dict = {}
+    for key in code_health.METRIC_KEYS:
+        cur_v = cur.get(key, 0)
+        base_v = baseline.get(key, 0)
+        diff = cur_v - base_v
+        deltas[key] = round(diff, 4) if isinstance(diff, float) else diff
+    return deltas
+
+
+def story_impact(branch: str, worktree: str | None, baseline: dict | None) -> dict:
+    """Assemble one story's impact block; never raises (best-effort sidecar)."""
+    try:
+        files = diff_files(branch, worktree)
+        impact = impact_footprint(files)
+        impact["deltas"] = metric_deltas(worktree, baseline)
+        return impact
+    except Exception:
+        return {"files": [], "layers": [], "n_code_layers": 0,
+                "guarded": [], "risk": "low", "deltas": None}
+
+
+# ----------------------------------------------------------------------------
 # Snapshot assembly
 # ----------------------------------------------------------------------------
 
 def build_snapshot(since_hours: int) -> dict:
     gh = find_gh()
     worktrees = worktree_branches()
+    baseline = baseline_metrics()
 
     pr_index: dict[str, dict] = {}
     repo = None
@@ -365,6 +495,7 @@ def build_snapshot(since_hours: int) -> dict:
             "checks_state": summarize_checks(checks),
             "review": review,
             "anomalies": anomalies,
+            "impact": story_impact(branch, worktrees.get(branch), baseline),
         })
 
     # order: lowest story number first, unnumbered last
@@ -477,6 +608,25 @@ def _selftest() -> int:
     check("merged no silent", a["review_silent"], False)
     check("merged no pending", a["checks_pending"], False)
     check("merged no conflict", a["conflicted"], False)
+
+    # per-branch impact footprint (#124) — pure layer/guarded/risk projection
+    tooling = impact_footprint(["scripts/x.py", "frontend/src/App.tsx"])
+    check("impact tooling layers", tooling["layers"], [])
+    check("impact tooling risk", tooling["risk"], "low")
+    one = impact_footprint(["backend/app/graph/x.py", "backend/tests/test_x.py"])
+    check("impact one layer", one["layers"], ["graph"])
+    check("impact one risk", one["risk"], "low")
+    two = impact_footprint(["backend/app/graph/x.py", "backend/app/tools/web.py"])
+    check("impact two layers", two["layers"], ["graph", "tools"])   # low->high
+    check("impact two risk", two["risk"], "medium")
+    three = impact_footprint([
+        "backend/app/graph/x.py", "backend/app/tools/web.py",
+        "backend/app/api/routes.py",
+    ])
+    check("impact three risk", three["risk"], "high")
+    guarded = impact_footprint(["backend/app/auth.py"])   # 1 layer but guarded
+    check("impact guarded list", guarded["guarded"], ["backend/app/auth.py"])
+    check("impact guarded risk", guarded["risk"], "high")
 
     if failures:
         print("SELFTEST FAILED:")
