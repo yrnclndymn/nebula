@@ -1206,6 +1206,55 @@ td.muted {
   line-height: 1.4;
 }
 
+/* --- #45 M&A view: drawer Acquisitions section + M&A page table ----------- */
+.acquisitions-section .deal-group {
+  margin-top: 0.5rem;
+}
+.field-sublabel {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+.deal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.deal-item {
+  font-size: 13px;
+  line-height: 1.4;
+}
+.deal-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.deal-amount {
+  margin-top: 0.15rem;
+}
+.deal-thesis {
+  margin-top: 0.15rem;
+}
+.deal-source {
+  display: inline-block;
+  margin-top: 0.15rem;
+}
+.ma-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.ma-table th,
+.ma-table td {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border, rgba(128, 128, 128, 0.25));
+  vertical-align: top;
+}
+
 /* Potential acquirers (#44): ranked candidate acquirers in the company drawer. */
 .acquirers {
   margin: 0.4rem 0 0;

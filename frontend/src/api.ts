@@ -170,6 +170,25 @@ export const fetchDigests = (limit = 52) =>
 export const fetchDigest = (id: string) =>
   getJson<import("./types").Digest>(`/digests/${encodeURIComponent(id)}`);
 
+// M&A view (issue #45): a company's ACQUIRED edges (both directions) for the
+// drawer's Acquisitions section, and the space-level recent-deals feed for the
+// M&A page (filter by topic of either endpoint, or by acquirer). Read-only.
+export const fetchCompanyAcquisitions = (name: string) =>
+  getJson<import("./types").Acquisition[]>(
+    `/companies/${encodeURIComponent(name)}/acquisitions`,
+  );
+
+export const fetchRecentAcquisitions = (
+  params: { topic?: string; acquirer?: string; limit?: number } = {},
+) => {
+  const qs = new URLSearchParams();
+  if (params.topic) qs.set("topic", params.topic);
+  if (params.acquirer) qs.set("acquirer", params.acquirer);
+  if (params.limit) qs.set("limit", String(params.limit));
+  const q = qs.toString();
+  return getJson<import("./types").Acquisition[]>(`/ma/recent${q ? `?${q}` : ""}`);
+};
+
 // Potential-acquirer analysis (#44): ranked candidate acquirers for one company
 // (drawer section), and the space-level most-active-acquirers view (optional topic
 // filter) for the M&A page. Read-only.

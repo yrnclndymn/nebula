@@ -20,6 +20,7 @@ import { BacklogModal } from "./BacklogPanel";
 import { ActivityModal } from "./ActivityPanel";
 import { WhatsNewModal } from "./WhatsNew";
 import { DigestModal } from "./DigestPanel";
+import { MAPage } from "./MAPage"; // #45 M&A view
 import { AUTH_ENABLED, signOutUser } from "./firebase";
 
 type SortKey = "name" | "headcount" | "yearFounded" | "partnerCount" | "clientCount";
@@ -83,6 +84,7 @@ export default function App() {
   const [activityOpen, setActivityOpen] = useState(false);
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
   const [digestOpen, setDigestOpen] = useState(false);
+  const [maOpen, setMaOpen] = useState(false); // #45 M&A view
   const [graphSeed, setGraphSeed] = useState<string | null>(null);
   const [graphOpen, setGraphOpen] = useState(false);
 
@@ -237,6 +239,9 @@ export default function App() {
           </button>
           <button className="chat-toggle" onClick={() => setDigestOpen(true)} title="Weekly digest — what changed: new signals, newly-researched companies, notable changes">
             📰 Digest
+          </button>
+          <button className="chat-toggle" onClick={() => setMaOpen(true)} title="Mergers & acquisitions — recent deals across the space, filter by topic/acquirer">
+            🤝 M&amp;A
           </button>
           <button className="chat-toggle" onClick={() => setResolveOpen(true)} title="Dedup stub companies">
             🧩 Resolve stubs
@@ -396,6 +401,7 @@ export default function App() {
       {activityOpen && <ActivityModal onClose={() => setActivityOpen(false)} />}
       {whatsNewOpen && <WhatsNewModal topics={topics} onClose={() => setWhatsNewOpen(false)} />}
       {digestOpen && <DigestModal onClose={() => setDigestOpen(false)} />}
+      {maOpen && <MAPage topics={topics} onClose={() => setMaOpen(false)} />}
     </div>
   );
 }

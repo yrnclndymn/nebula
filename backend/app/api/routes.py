@@ -643,6 +643,39 @@ async def digest_detail(digest_id: str) -> dict:
     return result
 
 
+# --- #45 M&A view (epic #26 M&A Intelligence) ------------------------------
+# Read-only surfaces over the ACQUIRED edges written by the #43 propose→commit
+# flow: one company's deal history (drawer) and a space-level recent-deals feed
+# (the M&A page). Both return each deal's `source`/`amountSource` so the SPA can
+# render every amount next to its citation. Imports are function-local to keep
+# this an append-only block on the shared routes file.
+
+
+@router.get("/companies/{name}/acquisitions")
+async def company_acquisitions(name: str) -> list[dict]:
+    """Every ACQUIRED edge touching this company, both directions (#45). Deals it
+    made and deals where it was the target, newest announced first — the drawer
+    groups them by direction. Amounts carry `amount_source` so an uncited figure
+    is never shown without provenance."""
+    from app.graph.acquisitions import get_acquisitions
+
+    return await get_acquisitions(get_driver(), name)
+
+
+@router.get("/ma/recent")
+async def recent_ma(
+    topic: str | None = Query(default=None),
+    acquirer: str | None = Query(default=None),
+    limit: int = Query(default=25, ge=1, le=200),
+) -> list[dict]:
+    """Recent deals across the space (#45), newest announced first. `topic` keeps
+    deals where either endpoint is in that topic; `acquirer` narrows to one buyer.
+    Each row carries the deal facts plus `source`/`amount_source` provenance."""
+    from app.graph.acquisitions import recent_acquisitions
+
+    return await recent_acquisitions(get_driver(), limit=limit, topic=topic, acquirer=acquirer)
+
+
 # --- Potential-acquirer analysis (#44, M&A Intelligence) -------------------------
 # READ-ONLY over the ACQUIRED edges (#43): who might buy a tracked company, and who
 # is most active in the space. Ranking lives in app.graph.acquirers (pure scoring +
