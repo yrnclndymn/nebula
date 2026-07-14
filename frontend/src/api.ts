@@ -182,3 +182,17 @@ export const fetchActiveAcquirers = (topic?: string) => {
   const qs = topic ? `?topic=${encodeURIComponent(topic)}` : "";
   return getJson<import("./types").ActiveAcquirer[]>(`/ma/active-acquirers${qs}`);
 };
+
+// Person page + expertise summary (#42): read a person by node elementId, then
+// (re)enqueue expertise generation and poll the durable job to completion.
+export const fetchPerson = (id: string) =>
+  getJson<import("./types").PersonProfile>(`/people/${encodeURIComponent(id)}`);
+
+export const regeneratePersonExpertise = (id: string) =>
+  postJson<import("./types").PersonExpertiseJob>(
+    `/people/${encodeURIComponent(id)}/expertise`,
+    {},
+  );
+
+export const getPersonExpertiseJob = (jobId: string) =>
+  getJson<import("./types").PersonExpertiseJob>(`/people/expertise/${encodeURIComponent(jobId)}`);

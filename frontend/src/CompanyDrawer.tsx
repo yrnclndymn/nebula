@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { fetchCompany, fetchSimilar, setKind } from "./api";
 import { DiscoveryPanel } from "./DiscoveryPanel";
+import { PersonDrawer } from "./PersonDrawer";
 import { SignalsSection } from "./SignalsSection";
 import type { CompanyDetail, FieldDef, SimilarCompany } from "./types";
 import { fieldApplies, formatCustom, KINDS, kindLabel } from "./types";
@@ -63,6 +64,9 @@ export function CompanyDrawer({
   // drawer can self-navigate. Reset whenever the parent selects a new company.
   const [detail, setDetail] = useState<CompanyDetail>(company);
   const [similar, setSimilar] = useState<SimilarCompany[]>([]);
+  // Leader name → open that person's page (#42). Set when a leader with a resolved
+  // Person id is clicked; renders <PersonDrawer> over this drawer.
+  const [personId, setPersonId] = useState<string | null>(null);
 
   useEffect(() => {
     setDetail(company);
@@ -168,7 +172,13 @@ export function CompanyDrawer({
             <ul className="people">
               {detail.leadership.map((p) => (
                 <li key={p.name}>
-                  {p.name}
+                  {p.id ? (
+                    <button className="similar-name" onClick={() => setPersonId(p.id!)}>
+                      {p.name}
+                    </button>
+                  ) : (
+                    p.name
+                  )}
                   {p.title && <span className="muted"> — {p.title}</span>}
                 </li>
               ))}
@@ -224,6 +234,7 @@ export function CompanyDrawer({
           </div>
         )}
       </aside>
+      {personId && <PersonDrawer personId={personId} onClose={() => setPersonId(null)} />}
     </div>
   );
 }
