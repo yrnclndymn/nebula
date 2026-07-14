@@ -57,7 +57,17 @@ def response_text(resp: requests.Response) -> str:
     correct). If it declared none, we prefer the body-sniffed encoding and default
     to UTF-8 — anything but requests' ISO-8859-1 fallback, which is what produced
     the captured mojibake.
+
+    Two hardenings (#131): a *sniffed* UTF-7 is distrusted — effectively extinct on
+    the real web, it's a known sniffer false positive on '+xxx-' runs, and decoding
+    a UTF-8 body with it yields mojibake plus lone surrogates. And the returned text
+    is always UTF-8-encodable: UTF-7 (and only a handful of codecs like it) can
+    decode to lone surrogates, which crash the very first downstream UTF-8 encode —
+    lxml encodes parser input before any later sanitization can run.
     """
     if declared_charset(resp) is None:
-        resp.encoding = resp.apparent_encoding or "utf-8"
-    return resp.text
+        sniffed = resp.apparent_encoding or "utf-8"
+        if sniffed.replace("-", "_").lower() == "utf_7":
+            sniffed = "utf-8"
+        resp.encoding = sniffed
+    return sanitize_surrogates(resp.text)
