@@ -429,6 +429,51 @@ export interface SignalCapture {
   error?: string;
 }
 
+// --- Potential-acquirer analysis (#44) -----------------------------------------
+// Ranked candidate acquirers for a company (drawer section) + the space-level
+// most-active-acquirers view. Each candidate carries machine-shaped `why` reasons
+// (never a bare score); deal facts link back to their source.
+export interface AcquirerDeal {
+  target: string;
+  source: string | null;
+}
+
+export interface AcquirerWhy {
+  // acquired-in-topic | acquired-same-kind | direct-partner | shared-partners
+  //  | shared-clients | active-acquirer
+  signal: string;
+  detail: {
+    count?: number;
+    deals?: AcquirerDeal[];
+    kind?: string | null;
+    partners?: string[];
+    clients?: string[];
+    total_acquisitions?: number;
+  };
+}
+
+export interface AcquirerCandidate {
+  acquirer: string;
+  score: number;
+  total_acquisitions: number;
+  why: AcquirerWhy[];
+}
+
+export interface ActiveAcquirerDeal {
+  target: string;
+  announced_at: string | null;
+  closed_at: string | null;
+  amount: string | null;
+  currency: string | null;
+  source: string | null;
+}
+
+export interface ActiveAcquirer {
+  acquirer: string;
+  deal_count: number;
+  recent_deals: ActiveAcquirerDeal[];
+}
+
 // --- Person page + expertise summary (#42) ---------------------------------------
 // The person drawer's payload: identity + roles + their linked-signals timeline +
 // a derived, advisory expertise summary (regenerable, stored with a generation date
