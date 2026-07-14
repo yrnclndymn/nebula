@@ -422,3 +422,22 @@ export interface SignalCapture {
   outcome?: string;
   error?: string;
 }
+
+// --- #45 M&A view (epic #26) ------------------------------------------------
+// A read-only ACQUIRED edge. Field names are snake_case to match the graph read
+// dicts in app/graph/acquisitions.py, which the /companies/{name}/acquisitions
+// and /ma/recent endpoints pass straight through. `amount`/`currency` are only
+// rendered next to `amount_source` — an uncited figure is never surfaced (the
+// repo's provenance guarantee). All strings originate from graph data and are
+// rendered as escaped text; URLs link out only when http(s).
+export interface Acquisition {
+  acquirer: string;
+  target: string;
+  announced_at: string | null;
+  closed_at: string | null;
+  amount: string | null;
+  currency: string | null;
+  thesis: string | null;
+  source: string | null;
+  amount_source: string | null;
+}

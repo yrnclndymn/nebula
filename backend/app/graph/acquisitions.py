@@ -35,7 +35,8 @@ async def get_acquisitions(driver: AsyncDriver, company: str) -> list[dict]:
             RETURN acq.name AS acquirer, tgt.name AS target,
                    r.announcedAt AS announced_at, r.closedAt AS closed_at,
                    r.amount AS amount, r.currency AS currency,
-                   r.thesis AS thesis, r.source AS source
+                   r.thesis AS thesis, r.source AS source,
+                   r.amountSource AS amount_source
             ORDER BY r.announcedAt DESC
             """,
             company=company,
@@ -118,3 +119,52 @@ async def upsert_acquisitions(driver: AsyncDriver, record: AcquisitionRecord) ->
             return {"company": record.company, "action": "written", "deals": len(record.deals)}
 
         return await session.execute_write(_tx)
+
+
+async def recent_acquisitions(
+    driver: AsyncDriver,
+    limit: int = 25,
+    topic: str | None = None,
+    acquirer: str | None = None,
+) -> list[dict]:
+    """Recent ACQUIRED edges across the whole graph, newest announced first (#45).
+
+    Powers the space-level M&A view (not scoped to one company like
+    :func:`get_acquisitions`). Optional filters: ``topic`` keeps only deals where
+    *either* endpoint is TAGGED_AS that topic (an acquisition is "in the space" if
+    the acquirer or the target is), and ``acquirer`` narrows to deals made by one
+    company. Returns the deal facts plus both provenance URLs (``source`` for the
+    deal, ``amount_source`` for the figure) so the UI can render every amount next
+    to its citation — an uncited amount is never surfaced.
+
+    Read-only. Ordered by announced date descending; edges with no ``announcedAt``
+    sort last (NULLs are lowest in Neo4j DESC ordering).
+    """
+    conditions: list[str] = []
+    params: dict = {"limit": limit}
+    if topic:
+        conditions.append(
+            "(EXISTS { (acq)-[:TAGGED_AS]->(:Topic {name: $topic}) } "
+            "OR EXISTS { (tgt)-[:TAGGED_AS]->(:Topic {name: $topic}) })"
+        )
+        params["topic"] = topic
+    if acquirer:
+        conditions.append("acq.name = $acquirer")
+        params["acquirer"] = acquirer
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    async with driver.session() as session:
+        result = await session.run(
+            f"""
+            MATCH (acq:Company)-[r:ACQUIRED]->(tgt:Company)
+            {where}
+            RETURN acq.name AS acquirer, tgt.name AS target,
+                   r.announcedAt AS announced_at, r.closedAt AS closed_at,
+                   r.amount AS amount, r.currency AS currency,
+                   r.thesis AS thesis, r.source AS source,
+                   r.amountSource AS amount_source
+            ORDER BY r.announcedAt DESC
+            LIMIT $limit
+            """,
+            **params,
+        )
+        return [dict(rec) async for rec in result]

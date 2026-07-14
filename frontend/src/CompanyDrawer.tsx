@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { fetchCompany, fetchSimilar, setKind } from "./api";
+import { fetchCompanyAcquisitions } from "./api"; // #45 M&A drawer section
 import { DiscoveryPanel } from "./DiscoveryPanel";
 import { SignalsSection } from "./SignalsSection";
 import type { CompanyDetail, FieldDef, SimilarCompany } from "./types";
@@ -201,6 +202,8 @@ export function CompanyDrawer({
 
         <SignalsSection key={detail.name} name={detail.name} hasWebsite={!!detail.website} />
 
+        <AcquisitionsSection key={`acq-${detail.name}`} name={detail.name} />
+
         {detail.notes && <Field label="Notes" value={detail.notes} />}
 
         {detail.citations.length > 0 && (
@@ -222,6 +225,106 @@ export function CompanyDrawer({
           </div>
         )}
       </aside>
+    </div>
+  );
+}
+
+// --- #45 Acquisitions (M&A) drawer section ---------------------------------
+// Self-contained: fetches this company's ACQUIRED edges (both directions) and
+// splits them into deals it *made* (it is the acquirer) vs deals where it was
+// *acquired* (it is the target). Each deal's `source` and the amount's
+// `amount_source` render as citation links, http(s) only (crawled provenance is
+// untrusted). An amount is shown ONLY next to its `amount_source` link — an
+// uncited figure is never surfaced (the repo's provenance guarantee). Hides
+// itself when there are no deals, like SignalsSection.
+function isHttpUrl(url: string | null | undefined): url is string {
+  if (!url) return false;
+  try {
+    const u = new URL(url);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function DealRow({
+  deal,
+  counterparty,
+}: {
+  deal: import("./types").Acquisition;
+  counterparty: string;
+}) {
+  const when = deal.announced_at || deal.closed_at;
+  return (
+    <li className="deal-item">
+      <div className="deal-head">
+        <strong>{counterparty}</strong>
+        {when && <span className="muted small"> · {when}</span>}
+      </div>
+      {deal.amount && isHttpUrl(deal.amount_source) && (
+        <div className="deal-amount">
+          {deal.currency ? `${deal.currency} ` : ""}
+          {deal.amount}{" "}
+          <a href={deal.amount_source} target="_blank" rel="noreferrer">
+            source ↗
+          </a>
+        </div>
+      )}
+      {deal.thesis && <div className="deal-thesis muted small">{deal.thesis}</div>}
+      {isHttpUrl(deal.source) && (
+        <a className="deal-source small" href={deal.source} target="_blank" rel="noreferrer">
+          deal source ↗
+        </a>
+      )}
+    </li>
+  );
+}
+
+export function AcquisitionsSection({ name }: { name: string }) {
+  const [deals, setDeals] = useState<import("./types").Acquisition[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    fetchCompanyAcquisitions(name)
+      .then((d) => alive && setDeals(d))
+      .catch(() => alive && setDeals([]))
+      .finally(() => alive && setLoaded(true));
+    return () => {
+      alive = false;
+    };
+  }, [name]);
+
+  if (!loaded || deals.length === 0) return null;
+
+  const made = deals.filter((d) => d.acquirer === name);
+  const received = deals.filter((d) => d.target === name);
+
+  return (
+    <div className="chips-block acquisitions-section">
+      <span className="field-label">
+        Acquisitions <span className="muted">({deals.length})</span>
+      </span>
+      {made.length > 0 && (
+        <div className="deal-group">
+          <span className="field-sublabel muted small">Acquired ({made.length})</span>
+          <ul className="deal-list">
+            {made.map((d) => (
+              <DealRow key={`m-${d.target}`} deal={d} counterparty={d.target} />
+            ))}
+          </ul>
+        </div>
+      )}
+      {received.length > 0 && (
+        <div className="deal-group">
+          <span className="field-sublabel muted small">Acquired by ({received.length})</span>
+          <ul className="deal-list">
+            {received.map((d) => (
+              <DealRow key={`r-${d.acquirer}`} deal={d} counterparty={d.acquirer} />
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
