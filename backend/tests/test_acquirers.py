@@ -130,3 +130,23 @@ def test_dedup_deals_and_names():
     assert reasons["acquired-in-topic"]["deals"] == [{"target": "Foo", "source": "s1"}]
     assert reasons["shared-partners"]["partners"] == ["P1"]
     assert ranked[0]["score"] == W_TOPIC_DEAL + W_SHARED_PARTNER
+
+
+# --- Route auth (PR #121 review; precedent: test_acquisition_endpoints_require_auth)
+
+
+def test_acquirer_endpoints_require_auth():
+    from fastapi.testclient import TestClient
+
+    from app.config import settings
+    from app.main import app
+
+    settings.require_auth = True
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            assert (
+                client.get("/companies/Acme%20__pytest44__/potential-acquirers").status_code == 401
+            )
+            assert client.get("/ma/active-acquirers").status_code == 401
+    finally:
+        settings.require_auth = False

@@ -654,7 +654,7 @@ async def digest_detail(digest_id: str) -> dict:
 @router.get("/companies/{name}/potential-acquirers")
 async def company_potential_acquirers(
     name: str,
-    limit: int = Query(default=None, ge=1),
+    limit: int | None = Query(default=None, ge=1),
 ) -> list[dict]:
     """Ranked candidate acquirers for a tracked company (#44), each with an
     explainable `why` — acquisitions of similar (same-topic/same-kind) companies,
@@ -672,7 +672,7 @@ async def company_potential_acquirers(
 @router.get("/ma/active-acquirers")
 async def active_acquirers(
     topic: str | None = None,
-    limit: int = Query(default=None, ge=1),
+    limit: int | None = Query(default=None, ge=1),
 ) -> list[dict]:
     """Space-level M&A view (#44): the most active acquirers (most distinct deals
     first), optionally within a topic, each carrying its recent deals with sources."""

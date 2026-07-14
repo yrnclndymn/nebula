@@ -237,13 +237,26 @@ export function CompanyDrawer({
 import { fetchPotentialAcquirers } from "./api";
 import type { AcquirerCandidate, AcquirerWhy } from "./types";
 
+// Deal sources are crawled/researched URLs (untrusted) — link only when http(s),
+// so a hostile javascript:/data: scheme can never become a clickable href
+// (PR #121 review; same guard #45 uses for its deal citations).
+function isHttpAcqUrl(url: string | null | undefined): url is string {
+  if (!url) return false;
+  try {
+    const u = new URL(url);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function AcquirerDeals({ deals }: { deals: { target: string; source: string | null }[] }) {
   return (
     <>
       {deals.map((deal, i) => (
         <span key={deal.target}>
           {i > 0 && ", "}
-          {deal.source ? (
+          {isHttpAcqUrl(deal.source) ? (
             <a href={deal.source} target="_blank" rel="noreferrer">
               {deal.target} ↗
             </a>
