@@ -42,8 +42,11 @@ type (`.claude/agents/story-worker.md`), which carries the worker contract.
 4. **Poll CI + review in a background Bash task** (`run_in_background: true`)
    and continue other work — never sit in a foreground sleep loop burning the
    main context. Act on the notification.
-5. Triage the review: fix real findings in the worktree (commit + push
-   re-triggers checks); rebut with a PR comment where the reviewer is wrong.
+5. Triage the review: FIRST enumerate every inline finding as a checklist
+   (`gh api .../pulls/N/comments` — not just the summary tail; a three-finding
+   round once lost its third finding to a narrow grep and cost an extra
+   review cycle). Fix real findings in the worktree (commit + push re-triggers
+   checks); rebut with a PR comment where the reviewer is wrong.
    If the review "passed" in a handful of turns without posting anything on a
    substantive PR, re-run the review job once (`gh run rerun <id>`).
 6. Merge (squash): `gh pr merge --squash` once checks pass. The ruleset does
@@ -134,9 +137,13 @@ prints file + line + a *redacted* snippet (the matched name is never echoed).
   TRUE on an EMPTY check array (checks not yet registered on a fresh sha) —
   guard with `length > 0`. Never pipe test/lint output (`| tail`) inside an
   `&&`-chain: the pipe masks the exit code and a failure sails through.
-- **After scripted conflict resolution, eyeball the seam.** Regex/keep-both
-  swaps drop closing braces or `return` statements at hunk boundaries;
-  syntax-check the file AND read the boundary lines before committing.
+- **After scripted conflict resolution, run a delimiter check — eyeballing is
+  not enough.** One wave's cascade ate closing braces THREE times (two TS
+  interfaces split across hunk boundaries, one CSS rule silently re-nesting a
+  shipped section past every linter). After any keep-both swap: assert
+  `{`/`}` counts balance per file, run the language's parser (tsc build,
+  `ast.parse`, css brace count), and read the boundary lines. CSS especially —
+  no gate catches an unclosed rule.
 - **Worker reports overstate safety defaults.** "Dry-run by default" must be
   verified at the CLI wrapper (argparse), not the function signature — a
   destructive-by-default maintenance CLI shipped this way. Maintenance CLIs
@@ -189,7 +196,10 @@ make mutate FILES="app/tools/encoding.py app/graph/signals.py ..."
 
 `make mutate` runs mutmut restricted to those files (config in
 `backend/pyproject.toml` `[tool.mutmut]`) and prints a compact list of surviving
-mutants — mutations no test killed, i.e. real test-quality gaps. It is a
+mutants — mutations no test killed, i.e. real test-quality gaps. Run it with an
+ephemeral Neo4j (`make db-ephemeral`, export the URI): without a DB the
+graph-gated tests skip and their functions' mutants all report "no tests",
+under-reporting exactly the write-path code that matters most. It is a
 sensor, NOT a gate: it never runs in CI and doesn't block the merge.
 
 Record the survivors in the wave closeout note (or open follow-up issues for the
