@@ -3,7 +3,7 @@ plus UTF-8-safe page decoding (#89)."""
 
 import requests
 
-from app.tools.web import _fetch_page_live, _gemini_image_mime
+from app.tools.web import _fetch_page_live, _gemini_image_mime, web_search
 
 
 def test_accepts_supported_raster_types():
@@ -50,3 +50,37 @@ def test_fetch_page_preserves_utf8_without_charset_header(monkeypatch):
     assert "Acme’s café" in page["text"]
     assert "“launch”" in page["text"] and "€5m" in page["text"]
     assert page["social"].get("linkedin") == "https://www.linkedin.com/company/acme"
+
+
+# --- #127: search snippets must never carry a lone surrogate --------------------
+
+
+def test_web_search_sanitizes_lone_surrogates(monkeypatch):
+    # DDGS JSON \uXXXX escapes can decode to a lone UTF-16 surrogate; left in place it
+    # crashes UTF-8 serialization of a downstream Gemini prompt (the prod crash, #127).
+    # web_search must scrub it for every consumer. Fictional (Acme/Globex).
+    surrogate = "\udb11"
+
+    class _FakeDDGS:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def text(self, query, max_results=6):
+            return [
+                {
+                    "title": f"Acme {surrogate} news",
+                    "href": "https://news.example/x",
+                    "body": f"Acme acquired Globex {surrogate} in 2024",
+                }
+            ]
+
+    monkeypatch.setattr("app.tools.web.DDGS", _FakeDDGS)
+    out = web_search("Acme acquisitions")
+    hit = out["results"][0]
+    blob = f"{hit['title']} {hit['snippet']}"
+    assert surrogate not in blob
+    blob.encode("utf-8")  # must not raise
+    assert "Acme" in hit["title"] and "Globex" in hit["snippet"]

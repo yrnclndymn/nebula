@@ -10,7 +10,7 @@ correct). Fixtures are fictional (Acme/Globex).
 import requests
 
 from app.capture.feeds import discover_feeds, parse_feed
-from app.tools.encoding import declared_charset, response_text
+from app.tools.encoding import declared_charset, response_text, sanitize_surrogates
 
 # Curly quote, ellipsis, and an accented letter — the characters seen as mojibake.
 _TRICKY = "Acme’s café raises €5m… “more to come”"
@@ -57,6 +57,35 @@ def test_raw_mojibake_is_what_the_old_path_produced():
     resp = _resp(_TRICKY.encode("utf-8"), "text/html")
     assert resp.text != _TRICKY  # ISO-8859-1 fallback = mojibake
     assert response_text(resp) == _TRICKY
+
+
+# --- #127: lone surrogates in crawled text must be made UTF-8-encodable ----------
+
+# The exact lone high surrogate that crashed an acquisition_proposal job in prod.
+_SURROGATE = "\udb11"
+
+
+def test_sanitize_surrogates_replaces_lone_surrogate():
+    out = sanitize_surrogates(f"Acme acquired Globex {_SURROGATE} in 2024")
+    assert _SURROGATE not in out
+    assert "�" in out
+    out.encode("utf-8")  # the prod crash was this encode raising — must not now
+
+
+def test_sanitize_surrogates_is_noop_on_clean_text():
+    # Clean text (curly quotes / accents included) is returned unchanged, same object.
+    clean = "Acme’s café — €5m…"
+    assert sanitize_surrogates(clean) is clean
+
+
+def test_sanitize_surrogates_preserves_surrounding_text():
+    assert sanitize_surrogates(f"a{_SURROGATE}b") == "a�b"
+
+
+def test_sanitize_surrogates_handles_low_and_high_surrogates_and_empty():
+    assert sanitize_surrogates("") == ""
+    # Whole surrogate range D800–DFFF is scrubbed (low surrogate too).
+    assert sanitize_surrogates("x\uddffy") == "x�y"
 
 
 # --- Feed XML parses from bytes, honouring the in-band encoding -----------------

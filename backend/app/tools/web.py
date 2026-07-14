@@ -22,7 +22,7 @@ from app.config import settings
 from app.genai_retry import generate_with_retry
 from app.graph import cache
 from app.graph.driver import get_driver
-from app.tools.encoding import response_text
+from app.tools.encoding import response_text, sanitize_surrogates
 from app.tools.social import find_social_links
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; NebulaResearchBot/0.1)"}
@@ -41,9 +41,17 @@ def web_search(query: str) -> dict:
     budget.charge_search()  # charge the active per-run budget; no-op if unbudgeted
     with DDGS() as ddgs:
         hits = ddgs.text(query, max_results=6)
+    # Search snippets are untrusted crawl output: JSON \uXXXX escapes can decode to
+    # lone surrogates that crash UTF-8 serialization of a downstream Gemini prompt
+    # (#127). Scrub them here so every web_search consumer is protected.
     return {
         "results": [
-            {"title": h.get("title"), "url": h.get("href"), "snippet": h.get("body")} for h in hits
+            {
+                "title": sanitize_surrogates(h.get("title") or ""),
+                "url": h.get("href"),
+                "snippet": sanitize_surrogates(h.get("body") or ""),
+            }
+            for h in hits
         ]
     }
 
@@ -88,7 +96,9 @@ def _fetch_page_live(url: str) -> dict:
 
     for tag in soup(["script", "style", "noscript", "svg"]):
         tag.decompose()
-    text = " ".join(soup.get_text(" ").split())
+    # Strip lone surrogates before this text is cached / fed to Gemini — crawled
+    # bytes can decode to surrogates that crash UTF-8 serialization downstream (#127).
+    text = sanitize_surrogates(" ".join(soup.get_text(" ").split()))
     return {"url": url, "text": text[:5000], "links": links, "images": images, "social": social}
 
 
