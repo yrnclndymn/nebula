@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { dismissJob, fetchBacklog, getProposal, listJobs, researchBacklog } from "./api";
 import type { BacklogRow, JobSummary, Proposal } from "./types";
 import { ProposalCard } from "./ChatPanel";
+import { dedupeProposalsByScope } from "./proposalDedupe";
 
 // Server-side sanity cap: at most this many companies per "Research selected"
 // request (mirrors MAX_BACKLOG_RESEARCH on the backend). The UI enforces the same
@@ -61,10 +62,15 @@ export function BacklogModal({ onClose }: { onClose: () => void }) {
     async function load() {
       try {
         const jobs = await listJobs({ type: "proposal", limit: ACTIVITY_LIMIT });
+        // Belt-and-braces (issue #102): per-name newest-wins dedupe with the scope
+        // rule FIRST, so a fresh success supersedes a stale error before we drop
+        // committed jobs. Doing the committed filter first hid the success and let
+        // a stale error survive to drive the status badge (the reported bug).
+        const deduped = dedupeProposalsByScope(jobs);
         // Already-committed proposals aren't awaiting anything — showing them as
         // "ready" would offer a review card for work that's done (their node
         // status stays "ready" on purpose: the two-step focus/all commit).
-        const open = jobs.filter((j) => !j.summary.committed);
+        const open = deduped.filter((j) => !j.summary.committed);
         const hydrated = await Promise.all(open.map(hydrate));
         if (!stop) setActivity(hydrated);
       } catch {
