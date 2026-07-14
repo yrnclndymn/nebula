@@ -9,6 +9,8 @@ it; the client polls `get_proposal` until ready; the user commits.
 """
 
 import asyncio
+import json
+import logging
 import uuid
 from contextvars import ContextVar
 
@@ -29,8 +31,50 @@ from app.graph.repository import upsert_company
 from app.tools.graph_tools import proposal_sink
 from app.tools.web import fetch_page, web_search
 
+logger = logging.getLogger("nebula.proposals")
+
 # Proposals started during the current chat turn (read by the /chat endpoint).
 turn_proposals: ContextVar[list | None] = ContextVar("nebula_turn_proposals", default=None)
+
+
+def _supersedes_error(new_focus_key: str | None, old_focus_key: str | None) -> bool:
+    """Does a fresh proposal supersede an OLDER errored proposal for the SAME name?
+
+    Scope-aware, NOT newest-wins (issue #102). `focus_key` is the resolved focused
+    field, or None for a full enrichment:
+
+    - a full attempt (None) supersedes any older errored proposal for the name
+    - a focused attempt supersedes an older error only if it targeted the SAME field
+    - a focused attempt never supersedes a full-enrichment error (the company still
+      hasn't been researched — that error is the only signal saying so)
+    """
+    return new_focus_key is None or new_focus_key == old_focus_key
+
+
+async def _supersede_errored_proposals(name: str, new_focus_key: str | None) -> None:
+    """After a fresh proposal is created for `name`, mark older ERRORED proposal
+    jobs for that name `superseded` (scope-aware, per `_supersedes_error`) so the
+    stale error card stops driving the status badge on every client that rehydrates
+    the listing (issue #102). Keeps the nodes — history, not deletion — and only
+    ever touches errored jobs (ready/committed proposals are left alone: HITL)."""
+    driver = get_driver()
+    async with driver.session() as session:
+        result = await session.run(
+            "MATCH (j:Job) "
+            "WHERE j.type = 'proposal' AND j.status = 'error' "
+            "AND coalesce(j.superseded, false) = false "
+            "RETURN j.id AS id, j.dataJson AS data"
+        )
+        stale: list[str] = []
+        async for rec in result:
+            data = json.loads(rec["data"]) if rec["data"] else {}
+            if data.get("name") != name:
+                continue
+            old_focus_key = resolve_focus(data.get("focus"))
+            if _supersedes_error(new_focus_key, old_focus_key):
+                stale.append(rec["id"])
+        if stale:
+            await session.run("MATCH (j:Job) WHERE j.id IN $ids SET j.superseded = true", ids=stale)
 
 
 async def propose_enrichment(
@@ -56,6 +100,7 @@ async def propose_enrichment(
     proposals staggers instead of firing all at once and exhausting Gemini quota.
     Chat proposals leave it 0 (start now)."""
     proposal_id = uuid.uuid4().hex[:8]
+    focus_key = resolve_focus(focus)
     await jobs.create_job(
         proposal_id,
         "proposal",
@@ -66,9 +111,21 @@ async def propose_enrichment(
             "website": website,
             "topic": topic,
             "focus": focus,
+            # Resolved focus stored up front (not just on the ready job) so error
+            # rows carry it too — the listing surfaces it for the scope-aware
+            # frontend dedupe (issue #102).
+            "focus_key": focus_key,
         },
     )
     await jobs.enqueue(proposal_id, delay=enqueue_delay)
+
+    # Supersede older errored proposals for this name (scope-aware) so a retry /
+    # fresh attempt clears the stale error card server-side (issue #102). The new
+    # job already exists, so a failure here must not fail the propose call.
+    try:
+        await _supersede_errored_proposals(name, focus_key)
+    except Exception:  # noqa: BLE001 — best-effort housekeeping, never fatal
+        logger.warning("could not supersede errored proposals for %r", name, exc_info=True)
 
     collected = turn_proposals.get()
     if collected is not None:

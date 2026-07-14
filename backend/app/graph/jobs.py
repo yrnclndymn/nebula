@@ -93,6 +93,9 @@ def _job_summary(
             # two-step focus/all commit re-commits the same job — so the list
             # must carry the committed flag for the UI to tell them apart.
             "committed": data.get("committed"),
+            # Resolved focused field (None = full enrichment). Carried so the
+            # frontend can do scope-aware per-name dedupe (issue #102).
+            "focus_key": data.get("focus_key"),
         }
     else:
         # Generic fallback for other job types (backfill/resolution/…): surface a
@@ -130,7 +133,9 @@ async def list_jobs(
     limit. Returns the compact per-job summary (see `_job_summary`) — NOT the full
     dataJson, which can be large. Designed for reuse by the agent-activity page
     (#48) and the backlog page's research-activity rehydration (#66)."""
-    conditions: list[str] = []
+    # Superseded jobs (an errored proposal cleared by a scope-aware retry, #102)
+    # are dropped for every caller — the stale card must not resurface anywhere.
+    conditions: list[str] = ["coalesce(j.superseded, false) = false"]
     params: dict = {"limit": limit}
     if type:
         conditions.append("j.type = $type")
