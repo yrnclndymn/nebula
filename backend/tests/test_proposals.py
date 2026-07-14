@@ -194,3 +194,44 @@ def test_focused_retry_supersedes_same_field_error_only():
     assert flags[other_id] is False  # different field → left visible
     ids = {j["id"] for j in listed}
     assert same_id not in ids and other_id in ids
+
+
+def test_supersede_skips_other_names():
+    # An errored proposal for a DIFFERENT company is never touched (covers the
+    # name-mismatch continue — the diff-coverage gate flagged it untested).
+    err_id = f"{SUP_PREFIX}other-name"
+
+    async def seed(session):
+        await _seed_error(session, err_id, "Hooli __pytest__", "")
+
+    listed, flags = _run_supersede_scenario(seed, "Vandelay __pytest__", None)
+    assert flags[err_id] is False  # untouched: different name
+    assert err_id in {j["id"] for j in listed}  # still listed (not superseded)
+
+
+def test_propose_survives_supersede_failure(monkeypatch):
+    # The supersede step is best-effort housekeeping: if it raises, the propose
+    # call must still succeed with the fresh proposal id (covers the except
+    # branch + the focus_key resolution in propose_enrichment; DB-free).
+    created = {}
+
+    async def fake_create_job(job_id, jtype, data):
+        created.update(data)
+
+    async def fake_enqueue(job_id, delay=0.0):
+        created["enqueued"] = True
+
+    async def boom(name, focus_key):
+        raise RuntimeError("graph unavailable")
+
+    monkeypatch.setattr(proposals.jobs, "create_job", fake_create_job)
+    monkeypatch.setattr(proposals.jobs, "enqueue", fake_enqueue)
+    monkeypatch.setattr(proposals, "_supersede_errored_proposals", boom)
+
+    out = asyncio.run(
+        proposals.propose_enrichment("Acme __pytest__", "acme.example", focus="headcount")
+    )
+
+    assert out["proposal_id"] == created["proposal_id"]
+    assert created["focus_key"] == "headcount"
+    assert created["enqueued"] is True
