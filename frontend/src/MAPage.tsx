@@ -36,19 +36,32 @@ export function MAPage({ topics, onClose }: { topics: string[]; onClose: () => v
   const [error, setError] = useState<string | null>(null);
 
   // Topic is a server-side filter (needs the graph); acquirer is filtered client
-  // -side over the loaded rows so typing is instant and doesn't refetch.
+  // -side over the loaded rows so typing is instant; the trimmed text is ALSO
+  // debounced (300ms) into the backend's exact-name `acquirer` param, so a buyer
+  // whose deals fall outside the recent-100 window still surfaces (PR #118
+  // review finding).
+  const [acquirerQuery, setAcquirerQuery] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setAcquirerQuery(acquirer.trim()), 300);
+    return () => clearTimeout(t);
+  }, [acquirer]);
+
   useEffect(() => {
     let stop = false;
     setLoading(true);
     setError(null);
-    fetchRecentAcquisitions({ topic: topic || undefined, limit: 100 })
+    fetchRecentAcquisitions({
+      topic: topic || undefined,
+      acquirer: acquirerQuery || undefined,
+      limit: 100,
+    })
       .then((d) => !stop && setDeals(d))
       .catch((e) => !stop && setError(String(e)))
       .finally(() => !stop && setLoading(false));
     return () => {
       stop = true;
     };
-  }, [topic]);
+  }, [topic, acquirerQuery]);
 
   const needle = acquirer.trim().toLowerCase();
   const rows = needle ? deals.filter((d) => d.acquirer.toLowerCase().includes(needle)) : deals;
