@@ -641,3 +641,42 @@ async def digest_detail(digest_id: str) -> dict:
     if result is None:
         raise HTTPException(status_code=404, detail=f"no digest {digest_id!r}")
     return result
+
+
+# --- Potential-acquirer analysis (#44, M&A Intelligence) -------------------------
+# READ-ONLY over the ACQUIRED edges (#43): who might buy a tracked company, and who
+# is most active in the space. Ranking lives in app.graph.acquirers (pure scoring +
+# Cypher gatherers); each candidate carries machine-shaped `why` reasons, deal facts
+# linking back to their source. Imported inside the handlers to keep this an
+# append-only block (no edit to the module's shared import list).
+
+
+@router.get("/companies/{name}/potential-acquirers")
+async def company_potential_acquirers(
+    name: str,
+    limit: int = Query(default=None, ge=1),
+) -> list[dict]:
+    """Ranked candidate acquirers for a tracked company (#44), each with an
+    explainable `why` — acquisitions of similar (same-topic/same-kind) companies,
+    shared partners/clients, an existing partnership, overall acquisition activity.
+    404 if the company isn't in the graph; empty list if nothing ties to it."""
+    from app.graph import acquirers
+
+    capped = min(limit or acquirers.ACQUIRERS_DEFAULT, acquirers.ACQUIRERS_MAX)
+    result = await acquirers.potential_acquirers(get_driver(), name, limit=capped)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"No company named {name!r}")
+    return result
+
+
+@router.get("/ma/active-acquirers")
+async def active_acquirers(
+    topic: str | None = None,
+    limit: int = Query(default=None, ge=1),
+) -> list[dict]:
+    """Space-level M&A view (#44): the most active acquirers (most distinct deals
+    first), optionally within a topic, each carrying its recent deals with sources."""
+    from app.graph import acquirers
+
+    capped = min(limit or acquirers.ACTIVE_DEFAULT, acquirers.ACTIVE_MAX)
+    return await acquirers.most_active_acquirers(get_driver(), topic=topic, limit=capped)

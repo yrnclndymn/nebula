@@ -169,3 +169,16 @@ export const fetchDigests = (limit = 52) =>
 
 export const fetchDigest = (id: string) =>
   getJson<import("./types").Digest>(`/digests/${encodeURIComponent(id)}`);
+
+// Potential-acquirer analysis (#44): ranked candidate acquirers for one company
+// (drawer section), and the space-level most-active-acquirers view (optional topic
+// filter) for the M&A page. Read-only.
+export const fetchPotentialAcquirers = (name: string) =>
+  getJson<import("./types").AcquirerCandidate[]>(
+    `/companies/${encodeURIComponent(name)}/potential-acquirers`,
+  );
+
+export const fetchActiveAcquirers = (topic?: string) => {
+  const qs = topic ? `?topic=${encodeURIComponent(topic)}` : "";
+  return getJson<import("./types").ActiveAcquirer[]>(`/ma/active-acquirers${qs}`);
+};
