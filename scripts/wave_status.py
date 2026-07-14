@@ -408,7 +408,14 @@ def baseline_metrics() -> dict | None:
     cache = code_health.load_history_cache()
     if not cache:
         return None
-    sha = (_run(["git", "rev-parse", "origin/main"]) or "").strip()
+    # Same ref resolution as code_health.build_history (origin/main preferred,
+    # local main fallback) so the cache lookup and the history are keyed alike.
+    sha = ""
+    for candidate in ("origin/main", "main"):
+        got = (_run(["git", "rev-parse", "--verify", "--quiet", candidate]) or "").strip()
+        if got:
+            sha = got
+            break
     entry = cache.get(sha)
     if entry:
         return entry.get("metrics")

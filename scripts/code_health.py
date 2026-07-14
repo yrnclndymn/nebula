@@ -370,8 +370,23 @@ def _git(args: list[str], cwd: Path, timeout: int = 120) -> str:
     return proc.stdout
 
 
+def resolve_branch_ref(repo_root: Path, branch: str = "main") -> str:
+    """A usable ref for `branch`: prefer `origin/<branch>` (always present in a
+    fetched clone or a worker worktree, where no LOCAL `main` exists and a bare
+    `main` ref crashes — PR #125 review), else the local branch. Using the same
+    resolution here and in wave_status's baseline lookup keeps the history cache
+    and the impact deltas keyed to the same sha."""
+    for candidate in (f"origin/{branch}", branch):
+        ok = subprocess.run(["git", "-C", str(repo_root), "rev-parse", "--verify",
+                             "--quiet", candidate], capture_output=True, text=True)
+        if ok.returncode == 0:
+            return candidate
+    raise SystemExit(f"code-health: no ref found for {branch!r} (tried origin/{branch}, {branch})")
+
+
 def first_parent_commits(repo_root: Path, branch: str = "main") -> list[dict]:
     """First-parent commits of `branch`, oldest-first: {sha, short, ts, subject}."""
+    branch = resolve_branch_ref(repo_root, branch)
     fmt = "%H%x1f%ct%x1f%s"
     out = _git(["log", "--first-parent", f"--format={fmt}", branch], repo_root)
     commits: list[dict] = []
