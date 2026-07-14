@@ -27,6 +27,7 @@ from app import budget
 from app.agents.deals.models import AcquisitionResearch
 from app.config import settings
 from app.genai_retry import generate_with_retry
+from app.tools.encoding import sanitize_surrogates
 from app.tools.web import fetch_page, web_search
 
 logger = logging.getLogger("nebula.ma.research")
@@ -105,7 +106,10 @@ async def research_acquisitions(name: str, *, verbose: bool = False) -> Acquisit
     if not evidence:
         return AcquisitionResearch(company=name)
 
-    prompt = _PROMPT.format(name=name, evidence="\n\n".join(evidence)[:_EVIDENCE_CHARS])
+    # Untrusted crawled evidence can carry lone surrogates (e.g. search snippets that
+    # never pass through fetch_page); strip them or the Gemini prompt encode crashes (#127).
+    evidence_text = sanitize_surrogates("\n\n".join(evidence)[:_EVIDENCE_CHARS])
+    prompt = _PROMPT.format(name=name, evidence=evidence_text)
     resp = await generate_with_retry(
         genai.Client(),
         model=settings.gemini_model,

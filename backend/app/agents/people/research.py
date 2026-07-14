@@ -26,6 +26,7 @@ from app import budget
 from app.agents.people.models import PersonResearch
 from app.config import settings
 from app.genai_retry import generate_with_retry
+from app.tools.encoding import sanitize_surrogates
 from app.tools.web import fetch_page, web_search
 
 logger = logging.getLogger("nebula.people.research")
@@ -105,9 +106,10 @@ async def research_person(
     if not evidence:
         return PersonResearch(name=name, current_company=company)
 
-    prompt = _PROMPT.format(
-        name=name, company=company, evidence="\n\n".join(evidence)[:_EVIDENCE_CHARS]
-    )
+    # Untrusted crawled evidence can carry lone surrogates (e.g. search snippets that
+    # never pass through fetch_page); strip them or the Gemini prompt encode crashes (#127).
+    evidence_text = sanitize_surrogates("\n\n".join(evidence)[:_EVIDENCE_CHARS])
+    prompt = _PROMPT.format(name=name, company=company, evidence=evidence_text)
     resp = await generate_with_retry(
         genai.Client(),
         model=settings.gemini_model,
