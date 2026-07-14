@@ -1,0 +1,395 @@
+<!doctype html>
+<!--
+  Code-health sidecar (#124) — live view over two JSON artifacts in this dir:
+    scripts/code-health-history.json   (python3 scripts/code_health.py --history)
+    scripts/wave-status.json           (make wave-status / make wave-watch)
+
+  Self-contained: no CDN, no build step. Serve this directory and open the page:
+
+      python3 scripts/code_health.py --history      # per-commit trend (cached)
+      make wave-status                               # in-flight story impact
+      (cd scripts && python3 -m http.server 8778)    # open code_health.html
+
+  The page polls both JSONs every 10s. History drives the stat tiles + trend
+  panels; wave-status drives the in-flight story table (layer chips + risk).
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Code health</title>
+  <style>
+    :root {
+      --bg: #0f1115; --panel: #171a21; --panel2: #1d212b; --border: #2a2f3a;
+      --fg: #e6e9ef; --muted: #8b93a3; --accent: #6ea8fe;
+      --pass: #35c26a; --fail: #f2555a; --pending: #e0a83b; --none: #565d6b;
+      --line: #6ea8fe; --grid: #232833; --up: #f2555a; --down: #35c26a;
+      /* layer chip hues (low -> high) */
+      --l-foundation: #8b93a3; --l-graph: #6ea8fe; --l-tools: #4bc7c7;
+      --l-agents: #b18bff; --l-surfaces: #e0a83b;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f5f6f8; --panel: #ffffff; --panel2: #f0f2f5; --border: #d9dde4;
+        --fg: #1b1f27; --muted: #626a78; --accent: #2f6fe0;
+        --pass: #1a9e4b; --fail: #d33a3f; --pending: #b9791a; --none: #9aa1ad;
+        --line: #2f6fe0; --grid: #e4e8ee; --up: #d33a3f; --down: #1a9e4b;
+        --l-foundation: #626a78; --l-graph: #2f6fe0; --l-tools: #14a0a0;
+        --l-agents: #7d52d6; --l-surfaces: #b9791a;
+      }
+    }
+    :root[data-theme="dark"] { color-scheme: dark; }
+    :root[data-theme="light"] {
+      --bg: #f5f6f8; --panel: #ffffff; --panel2: #f0f2f5; --border: #d9dde4;
+      --fg: #1b1f27; --muted: #626a78; --accent: #2f6fe0;
+      --pass: #1a9e4b; --fail: #d33a3f; --pending: #b9791a; --none: #9aa1ad;
+      --line: #2f6fe0; --grid: #e4e8ee; --up: #d33a3f; --down: #1a9e4b;
+      --l-foundation: #626a78; --l-graph: #2f6fe0; --l-tools: #14a0a0;
+      --l-agents: #7d52d6; --l-surfaces: #b9791a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--fg);
+      font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    header {
+      display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap;
+      padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; background: var(--bg); z-index: 2;
+    }
+    h1 { font-size: 1.05rem; margin: 0; font-weight: 650; letter-spacing: .2px; }
+    h2 { font-size: .82rem; text-transform: uppercase; letter-spacing: .06em;
+         color: var(--muted); font-weight: 600; margin: 1.6rem 0 .7rem; }
+    .meta { color: var(--muted); font-size: .82rem; }
+    .meta b { color: var(--fg); font-weight: 600; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+           background: var(--pass); margin-right: .35rem; vertical-align: middle; }
+    .dot.stale { background: var(--fail); }
+    main { padding: 1rem 1.25rem 3rem; max-width: 1200px; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* stat tiles */
+    .tiles { display: grid; gap: .7rem;
+             grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+    .tile { background: var(--panel); border: 1px solid var(--border);
+            border-radius: 10px; padding: .7rem .8rem; }
+    .tile .k { color: var(--muted); font-size: .72rem; text-transform: uppercase;
+               letter-spacing: .05em; }
+    .tile .v { font-size: 1.5rem; font-weight: 700; margin-top: .15rem;
+               font-variant-numeric: tabular-nums; }
+    .tile .d { font-size: .74rem; margin-top: .1rem; font-weight: 600; }
+    .d.up { color: var(--up); } .d.down { color: var(--down); }
+    .d.flat { color: var(--muted); }
+
+    /* trend panels */
+    .panels { display: grid; gap: .9rem;
+              grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+    .panel { background: var(--panel); border: 1px solid var(--border);
+             border-radius: 10px; padding: .7rem .8rem .5rem; }
+    .panel .ph { display: flex; justify-content: space-between; align-items: baseline; }
+    .panel .pt { font-size: .8rem; font-weight: 600; }
+    .panel .pn { font-size: .8rem; color: var(--muted);
+                 font-variant-numeric: tabular-nums; }
+    svg { display: block; width: 100%; height: 90px; overflow: visible; }
+    .spark { fill: none; stroke: var(--line); stroke-width: 1.75;
+             stroke-linejoin: round; stroke-linecap: round; }
+    .pt-dot { fill: var(--line); }
+    .hot .spark { stroke: var(--up); } .hot .pt-dot { fill: var(--up); }
+    .hit { fill: transparent; cursor: crosshair; }
+
+    /* in-flight table */
+    .wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th { text-align: left; font-size: .72rem; text-transform: uppercase;
+         letter-spacing: .06em; color: var(--muted); font-weight: 600;
+         padding: .35rem .6rem; border-bottom: 1px solid var(--border); }
+    td { padding: .55rem .6rem; border-bottom: 1px solid var(--border);
+         vertical-align: top; }
+    tr:hover td { background: var(--panel); }
+    .story-id { font-weight: 700; }
+    .branch { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+              font-size: .78rem; }
+    .chip { display: inline-block; padding: .1rem .45rem; border-radius: 999px;
+            font-size: .7rem; font-weight: 600; margin: .1rem .2rem .1rem 0;
+            border: 1px solid transparent; color: #fff; }
+    .chip.foundation { background: var(--l-foundation); }
+    .chip.graph { background: var(--l-graph); }
+    .chip.tools { background: var(--l-tools); }
+    .chip.agents { background: var(--l-agents); }
+    .chip.surfaces { background: var(--l-surfaces); }
+    .risk { display: inline-block; padding: .12rem .55rem; border-radius: 6px;
+            font-size: .72rem; font-weight: 700; border: 1px solid; }
+    .risk.low { color: var(--pass); border-color: var(--pass); }
+    .risk.medium { color: var(--pending); border-color: var(--pending); }
+    .risk.high { color: var(--fail); border-color: var(--fail);
+                 background: color-mix(in srgb, var(--fail) 12%, transparent); }
+    .guard { color: var(--fail); font-size: .72rem; font-weight: 600; }
+    .deltas { color: var(--muted); font-size: .72rem;
+              font-variant-numeric: tabular-nums; }
+    .deltas .g { color: var(--down); } .deltas .b { color: var(--up); }
+    .muted { color: var(--muted); }
+
+    .banner { padding: .6rem .9rem; margin-bottom: 1rem; border-radius: 8px;
+              border: 1px solid var(--pending); color: var(--pending);
+              background: color-mix(in srgb, var(--pending) 10%, transparent); }
+    .empty { color: var(--muted); padding: 1.5rem 0; text-align: center; }
+    #tip { position: fixed; pointer-events: none; z-index: 9; max-width: 260px;
+           background: var(--panel2); border: 1px solid var(--border);
+           border-radius: 8px; padding: .45rem .6rem; font-size: .74rem;
+           color: var(--fg); box-shadow: 0 4px 16px rgba(0,0,0,.25);
+           opacity: 0; transition: opacity .08s; }
+    #tip .s { font-family: ui-monospace, Menlo, monospace; color: var(--muted); }
+    #tip .val { font-weight: 700; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Code health</h1>
+    <span class="meta"><span id="livedot" class="dot"></span><span id="status">loading…</span></span>
+    <span class="meta" id="counts"></span>
+  </header>
+  <main>
+    <div id="banner"></div>
+
+    <h2>Current health <span id="head-sha" class="meta"></span></h2>
+    <div class="tiles" id="tiles"></div>
+
+    <h2>Trend across main (first-parent commits)</h2>
+    <div class="panels" id="panels"></div>
+
+    <h2>In-flight stories <span id="wave-meta" class="meta"></span></h2>
+    <div class="wrap">
+      <table>
+        <thead>
+          <tr><th>Story</th><th>Branch</th><th>Layers touched</th>
+              <th>Risk</th><th>Metric deltas vs main</th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div id="emptyMsg"></div>
+  </main>
+  <div id="tip"></div>
+
+  <script>
+    "use strict";
+    const POLL_MS = 10000;
+    const STALE_MS = 5 * 60 * 1000; // history is slow-cadence; 5min = "fresh enough"
+    const $ = (id) => document.getElementById(id);
+
+    // measures: key, label, format, hot=true means "up is bad" (red spark)
+    const MEASURES = [
+      { k: "source_loc", t: "Source LOC" },
+      { k: "test_loc", t: "Test LOC" },
+      { k: "test_ratio", t: "Test ratio", f: (v) => v.toFixed(3) },
+      { k: "test_count", t: "Test count" },
+      { k: "upward_imports", t: "Upward imports", hot: true },
+      { k: "cross_layer_edges", t: "Cross-layer edges", hot: true },
+      { k: "complex_functions", t: "Complex fns (>12)", hot: true },
+      { k: "long_functions", t: "Long fns (>60 ln)", hot: true },
+      { k: "noqa_count", t: "# noqa", hot: true },
+    ];
+    // subset shown as headline tiles (current value + delta from prev commit)
+    const TILE_KEYS = ["source_loc", "test_loc", "test_ratio", "test_count",
+                       "upward_imports", "cross_layer_edges",
+                       "complex_functions", "long_functions", "noqa_count"];
+    const LAYER_CLASS = { foundation: "foundation", graph: "graph", tools: "tools",
+                          "capture/agents": "agents", surfaces: "surfaces" };
+
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g,
+        (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+    function fmt(m, v) { return m.f ? m.f(v) : String(v); }
+    function deltaClass(m, d) {
+      if (d === 0) return "flat";
+      const worse = m.hot ? d > 0 : d < 0;      // for "hot" measures up is worse
+      return worse ? "up" : "down";
+    }
+    function deltaStr(d, f) {
+      if (d === 0) return "±0";
+      const s = d > 0 ? "+" : "";
+      return s + (f ? f(d) : d);
+    }
+
+    // ---- stat tiles ------------------------------------------------------
+    function renderTiles(commits) {
+      const tiles = $("tiles");
+      if (!commits.length) { tiles.innerHTML = '<div class="empty">No history yet — run <code>python3 scripts/code_health.py --history</code>.</div>'; return; }
+      const cur = commits[commits.length - 1].metrics;
+      const prev = commits.length > 1 ? commits[commits.length - 2].metrics : null;
+      $("head-sha").textContent = commits.length
+        ? `@ ${commits[commits.length - 1].short}` : "";
+      tiles.innerHTML = TILE_KEYS.map((k) => {
+        const m = MEASURES.find((x) => x.k === k);
+        const v = cur[k];
+        let d = "";
+        if (prev) {
+          const diff = Math.round((v - prev[k]) * 1000) / 1000;
+          d = `<div class="d ${deltaClass(m, diff)}">${esc(deltaStr(diff, m.f))} vs prev</div>`;
+        }
+        return `<div class="tile"><div class="k">${esc(m.t)}</div>` +
+               `<div class="v">${esc(fmt(m, v))}</div>${d}</div>`;
+      }).join("");
+    }
+
+    // ---- trend spark panels ---------------------------------------------
+    function renderPanels(commits) {
+      const host = $("panels");
+      if (!commits.length) { host.innerHTML = ""; return; }
+      host.innerHTML = "";
+      const W = 300, H = 90, PAD = 6;
+      for (const m of MEASURES) {
+        const vals = commits.map((c) => c.metrics[m.k]);
+        const min = Math.min(...vals), max = Math.max(...vals);
+        const span = max - min || 1;
+        const n = vals.length;
+        const x = (i) => PAD + (n === 1 ? 0 : (i * (W - 2 * PAD)) / (n - 1));
+        const y = (v) => H - PAD - ((v - min) / span) * (H - 2 * PAD);
+        const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+        const dots = commits.map((c, i) =>
+          `<circle class="pt-dot" cx="${x(i).toFixed(1)}" cy="${y(vals[i]).toFixed(1)}" r="1.6"></circle>` +
+          `<rect class="hit" x="${(x(i) - (W / n) / 2).toFixed(1)}" y="0" ` +
+          `width="${(W / n).toFixed(1)}" height="${H}" ` +
+          `data-i="${i}" data-k="${esc(m.k)}"></rect>`
+        ).join("");
+        const cur = vals[vals.length - 1];
+        const panel = document.createElement("div");
+        panel.className = "panel" + (m.hot ? " hot" : "");
+        panel.innerHTML =
+          `<div class="ph"><span class="pt">${esc(m.t)}</span>` +
+          `<span class="pn">${esc(fmt(m, min))}–${esc(fmt(m, max))}</span></div>` +
+          `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">` +
+          `<polyline class="spark" points="${pts}"></polyline>${dots}</svg>` +
+          `<div class="ph"><span class="pn">now: <b style="color:var(--fg)">${esc(fmt(m, cur))}</b></span></div>`;
+        host.appendChild(panel);
+      }
+      wireTooltips(commits);
+    }
+
+    function wireTooltips(commits) {
+      const tip = $("tip");
+      $("panels").querySelectorAll(".hit").forEach((rect) => {
+        rect.addEventListener("mousemove", (e) => {
+          const i = +rect.dataset.i, k = rect.dataset.k;
+          const c = commits[i], m = MEASURES.find((x) => x.k === k);
+          tip.innerHTML =
+            `<div class="s">${esc(c.short)}${c.iso ? " · " + esc(c.iso.slice(0, 10)) : ""}</div>` +
+            `<div>${esc(c.subject || "")}</div>` +
+            `<div>${esc(m.t)}: <span class="val">${esc(fmt(m, c.metrics[k]))}</span></div>`;
+          tip.style.opacity = "1";
+          const pad = 12;
+          let left = e.clientX + pad, top = e.clientY + pad;
+          if (left + 260 > window.innerWidth) left = e.clientX - 260 - pad;
+          tip.style.left = left + "px"; tip.style.top = top + "px";
+        });
+        rect.addEventListener("mouseleave", () => { tip.style.opacity = "0"; });
+      });
+    }
+
+    // ---- in-flight story table (wave-status.json) -----------------------
+    function deltasCell(d) {
+      if (!d) return '<span class="muted">—</span>';
+      const parts = [];
+      const show = (label, key, hot) => {
+        const v = d[key];
+        if (!v) return;
+        const cls = (hot ? v > 0 : v < 0) ? "b" : "g";
+        const s = v > 0 ? "+" : "";
+        parts.push(`<span class="${cls}">${label} ${s}${v}</span>`);
+      };
+      show("src", "source_loc", true);   // more source without tests = worse-ish
+      show("test", "test_loc", false);
+      show("upward", "upward_imports", true);
+      show("complex", "complex_functions", true);
+      show("long", "long_functions", true);
+      show("noqa", "noqa_count", true);
+      return parts.length ? parts.join(" · ") : '<span class="muted">no change</span>';
+    }
+
+    function renderStories(wave) {
+      const tbody = $("rows");
+      const stories = (wave && wave.stories || []).filter((s) => {
+        const im = s.impact || {};
+        // in-flight = not merged; show anything with a footprint or a live branch
+        return !(s.pr && s.pr.merged);
+      });
+      $("wave-meta").textContent = wave
+        ? `· ${stories.length} active` : "· wave-status.json not found";
+      tbody.innerHTML = "";
+      if (!stories.length) {
+        $("emptyMsg").innerHTML = '<div class="empty">No in-flight stories (or run <code>make wave-status</code>).</div>';
+        return;
+      }
+      $("emptyMsg").innerHTML = "";
+      // riskiest first
+      const order = { high: 0, medium: 1, low: 2 };
+      stories.sort((a, b) => (order[(a.impact || {}).risk] ?? 3) - (order[(b.impact || {}).risk] ?? 3));
+      for (const s of stories) {
+        const im = s.impact || { layers: [], risk: "low", guarded: [], deltas: null };
+        const chips = (im.layers || []).map((l) =>
+          `<span class="chip ${LAYER_CLASS[l] || ""}">${esc(l)}</span>`).join("") ||
+          '<span class="muted">tooling only</span>';
+        const guard = (im.guarded || []).length
+          ? `<div class="guard">⚠ ${im.guarded.length} guarded path${im.guarded.length > 1 ? "s" : ""}</div>` : "";
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          `<td><div class="story-id">${s.story == null ? "—" : "#" + esc(s.story)}</div>` +
+            `<div class="muted" style="font-size:.75rem">${esc(s.slug)}</div></td>` +
+          `<td><div class="branch">${esc(s.branch)}</div>` +
+            (s.pr ? `<div class="muted" style="font-size:.72rem">PR #${esc(s.pr.number)}</div>` : "") + `</td>` +
+          `<td>${chips}${guard}</td>` +
+          `<td><span class="risk ${esc(im.risk || "low")}">${esc((im.risk || "low").toUpperCase())}</span></td>` +
+          `<td class="deltas">${deltasCell(im.deltas)}</td>`;
+        tbody.appendChild(tr);
+      }
+    }
+
+    // ---- polling ---------------------------------------------------------
+    async function getJSON(name) {
+      const res = await fetch(name + "?_=" + Date.now(), { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    }
+
+    async function poll() {
+      let history = null, wave = null, err = null;
+      try { history = await getJSON("code-health-history.json"); }
+      catch (e) { err = e; }
+      try { wave = await getJSON("wave-status.json"); } catch (e) { /* optional */ }
+
+      const commits = (history && history.commits) || [];
+      renderTiles(commits);
+      renderPanels(commits);
+      renderStories(wave);
+
+      const merged = (wave && wave.stories || []).filter((s) => s.pr && s.pr.merged).length;
+      $("counts").innerHTML = commits.length
+        ? `<b>${commits.length}</b> commits scanned` + (wave ? ` · <b>${merged}</b> merged` : "")
+        : "";
+
+      if (!history) {
+        $("livedot").className = "dot stale";
+        $("status").textContent = "waiting for code-health-history.json…";
+        $("banner").innerHTML =
+          '<div class="banner">Can\'t read code-health-history.json (' + esc(err && err.message) +
+          '). Run <code>python3 scripts/code_health.py --history</code> and serve this dir.</div>';
+        return;
+      }
+      const gen = new Date(history.generated_at);
+      const ageMs = Date.now() - gen.getTime();
+      const stale = ageMs > STALE_MS;
+      $("livedot").className = "dot" + (stale ? " stale" : "");
+      $("status").textContent =
+        `history ${gen.toLocaleString()} (${Math.round(ageMs / 1000)}s ago)`;
+      $("banner").innerHTML = stale
+        ? '<div class="banner">History snapshot is old — re-run <code>python3 scripts/code_health.py --history</code> to pick up new commits.</div>'
+        : (wave ? "" : '<div class="banner">wave-status.json not found — the in-flight story table is empty. Run <code>make wave-status</code>.</div>');
+    }
+
+    poll();
+    setInterval(poll, POLL_MS);
+  </script>
+</body>
+</html>
