@@ -107,6 +107,7 @@ BRANCH_RE = re.compile(r"^feat/(\d+)-(.+)$")
 # proposal to a graph write (human-in-the-loop). Matched exactly (repo-relative).
 GUARDED_PATHS = frozenset({
     "backend/app/auth.py",
+    "backend/app/mcp_server.py",
     "backend/app/graph/jobs.py",
     "backend/app/graph/repository.py",
     "backend/app/agents/assistant/proposals.py",
