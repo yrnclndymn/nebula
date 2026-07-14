@@ -27,10 +27,11 @@ ACQ_A = "Nebula Buyer A __pytest45__"
 ACQ_B = "Nebula Buyer B __pytest45__"
 TGT_A = "Nebula Target A __pytest45__"
 TGT_B = "Nebula Target B __pytest45__"
+TGT_C = "Nebula Target C __pytest45__"  # receives the UNDATED deal
 SRC = "https://news.example/pytest45-deal"
 AMT_SRC = "https://filings.example/pytest45-terms"
 
-_NAMES = [ACQ_A, ACQ_B, TGT_A, TGT_B]
+_NAMES = [ACQ_A, ACQ_B, TGT_A, TGT_B, TGT_C]
 
 
 @pytest.fixture(scope="module")
@@ -100,6 +101,16 @@ def test_recent_feed_orders_filters_and_carries_provenance(event_loop):
             ),
         )
 
+        # An UNDATED deal (announced_at absent) must sort LAST, not first —
+        # Cypher nulls are largest, a bare DESC floated it to the top (PR #118).
+        await upsert_acquisitions(
+            driver,
+            AcquisitionRecord(
+                company=ACQ_A,
+                deals=[Deal(acquirer=ACQ_A, target=TGT_C, source=SRC)],
+            ),
+        )
+
         all_deals = await recent_acquisitions(driver, limit=50)
         by_topic = await recent_acquisitions(driver, limit=50, topic=TOPIC)
         by_acquirer = await recent_acquisitions(driver, limit=50, acquirer=ACQ_B)
@@ -116,10 +127,15 @@ def test_recent_feed_orders_filters_and_carries_provenance(event_loop):
 
     # Narrow to our fixtures (a shared DB may hold other edges).
     ours = [d for d in all_deals if d["acquirer"] in (ACQ_A, ACQ_B)]
-    assert {(d["acquirer"], d["target"]) for d in ours} == {(ACQ_A, TGT_A), (ACQ_B, TGT_B)}
-    # Newest announced first: B (2024-06) precedes A (2024-01).
-    order = [d["acquirer"] for d in ours]
-    assert order.index(ACQ_B) < order.index(ACQ_A)
+    assert {(d["acquirer"], d["target"]) for d in ours} == {
+        (ACQ_A, TGT_A),
+        (ACQ_B, TGT_B),
+        (ACQ_A, TGT_C),
+    }
+    # Newest announced first: B (2024-06) precedes A (2024-01); the UNDATED deal
+    # sorts last, never first (the null-ordering regression).
+    order = [d["target"] for d in ours]
+    assert order.index(TGT_B) < order.index(TGT_A) < order.index(TGT_C)
 
     # Topic filter: only the buyer-A deal (buyer A is TAGGED_AS TOPIC).
     topic_pairs = {(d["acquirer"], d["target"]) for d in by_topic}

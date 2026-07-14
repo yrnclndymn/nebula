@@ -138,7 +138,8 @@ async def recent_acquisitions(
     to its citation — an uncited amount is never surfaced.
 
     Read-only. Ordered by announced date descending; edges with no ``announcedAt``
-    sort last (NULLs are lowest in Neo4j DESC ordering).
+    sort LAST via the coalesce-to-empty guard (Cypher treats null as the largest
+    value, so a bare DESC would float undated deals to the top).
     """
     conditions: list[str] = []
     params: dict = {"limit": limit}
@@ -165,7 +166,7 @@ async def recent_acquisitions(
                    r.amount AS amount, r.currency AS currency,
                    r.thesis AS thesis, r.source AS source,
                    r.amountSource AS amount_source
-            ORDER BY r.announcedAt DESC
+            ORDER BY coalesce(r.announcedAt, '') DESC
             LIMIT $limit
             """,
             **params,
