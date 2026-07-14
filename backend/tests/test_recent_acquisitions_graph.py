@@ -103,13 +103,16 @@ def test_recent_feed_orders_filters_and_carries_provenance(event_loop):
         all_deals = await recent_acquisitions(driver, limit=50)
         by_topic = await recent_acquisitions(driver, limit=50, topic=TOPIC)
         by_acquirer = await recent_acquisitions(driver, limit=50, acquirer=ACQ_B)
+        # Partial + differently-cased input must still match (live filter box —
+        # exact equality regressed this; PR #118 review): use a mid-name slice.
+        by_partial = await recent_acquisitions(driver, limit=50, acquirer=ACQ_B[2:14].upper())
 
         async with driver.session() as session:
             await _cleanup(session)
         await close_driver()
-        return all_deals, by_topic, by_acquirer
+        return all_deals, by_topic, by_acquirer, by_partial
 
-    all_deals, by_topic, by_acquirer = event_loop.run_until_complete(scenario())
+    all_deals, by_topic, by_acquirer, by_partial = event_loop.run_until_complete(scenario())
 
     # Narrow to our fixtures (a shared DB may hold other edges).
     ours = [d for d in all_deals if d["acquirer"] in (ACQ_A, ACQ_B)]
@@ -125,6 +128,8 @@ def test_recent_feed_orders_filters_and_carries_provenance(event_loop):
 
     # Acquirer filter narrows to that buyer's deals.
     assert {(d["acquirer"], d["target"]) for d in by_acquirer} == {(ACQ_B, TGT_B)}
+    # Case-insensitive substring works too (live filter box types partials).
+    assert {(d["acquirer"], d["target"]) for d in by_partial} == {(ACQ_B, TGT_B)}
 
     # Provenance rides along: the cited amount carries its amount_source.
     deal_a = next(d for d in ours if d["acquirer"] == ACQ_A)

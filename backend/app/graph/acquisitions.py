@@ -149,7 +149,10 @@ async def recent_acquisitions(
         )
         params["topic"] = topic
     if acquirer:
-        conditions.append("acq.name = $acquirer")
+        # Case-insensitive substring, matching the live-filter precedent in
+        # graph/queries.py — exact equality made partial typing return empty
+        # (PR #118 review).
+        conditions.append("toLower(acq.name) CONTAINS toLower($acquirer)")
         params["acquirer"] = acquirer
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     async with driver.session() as session:
