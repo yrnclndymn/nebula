@@ -88,6 +88,30 @@ def test_sanitize_surrogates_handles_low_and_high_surrogates_and_empty():
     assert sanitize_surrogates("x\uddffy") == "x�y"
 
 
+# --- #131: a UTF-7 charset sniff must not poison response_text with surrogates ---
+
+
+def test_sniffed_utf7_is_distrusted_and_decoded_as_utf8(monkeypatch):
+    # charset sniffers occasionally mis-detect a charset-less page as UTF-7 (a false
+    # positive on runs of '+xxx-'); UTF-7 is effectively extinct on the real web,
+    # and decoding a UTF-8 body with it yields mojibake and lone surrogates. The
+    # sniff is distrusted: decode as UTF-8 instead.
+    monkeypatch.setattr(requests.Response, "apparent_encoding", property(lambda self: "utf_7"))
+    resp = _resp(_TRICKY.encode("utf-8"), "text/html")
+    assert response_text(resp) == _TRICKY
+
+
+def test_response_text_never_emits_lone_surrogates():
+    # UTF-7 can encode a lone UTF-16 surrogate directly (b"+2xE-" -> U+DB11, the
+    # prod crash char). response_text's contract is UTF-8-safe output — lxml
+    # UTF-8-encodes its parser input, so a surrogate here crashed BeautifulSoup
+    # before any downstream sanitization could run (#131).
+    resp = _resp(b"deal +2xE- announced", "text/html; charset=utf-7")
+    out = response_text(resp)
+    out.encode("utf-8")  # must not raise
+    assert "�" in out and "announced" in out
+
+
 # --- Feed XML parses from bytes, honouring the in-band encoding -----------------
 
 _RSS_UTF8 = (

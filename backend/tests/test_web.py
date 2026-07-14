@@ -84,3 +84,17 @@ def test_web_search_sanitizes_lone_surrogates(monkeypatch):
     assert surrogate not in blob
     blob.encode("utf-8")  # must not raise
     assert "Acme" in hit["title"] and "Globex" in hit["snippet"]
+
+
+def test_fetch_page_survives_body_that_decodes_to_surrogates(monkeypatch):
+    # A body whose decode yields a lone surrogate (UTF-7: +2xE- -> U+DB11) crashed
+    # the lxml parse inside BeautifulSoup — before the text-level sanitization ran
+    # (#131). response_text must hand the parser UTF-8-safe html. Fictional (Acme).
+    html_bytes = b"<html><body><p>Acme deal +2xE- closed</p></body></html>"
+    monkeypatch.setattr(
+        "app.tools.web.requests.get",
+        lambda *a, **k: _html_resp(html_bytes, "text/html; charset=utf-7"),
+    )
+    page = _fetch_page_live("https://acme.example/")
+    page["text"].encode("utf-8")  # must not raise
+    assert "closed" in page["text"]
