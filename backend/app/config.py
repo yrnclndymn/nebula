@@ -172,6 +172,16 @@ class Settings(BaseSettings):
             "max_llm_calls": 2,
             "max_companies": 0,
         },
+        # Person expertise summary (#42): pure graph reads + ONE optional LLM call
+        # to phrase the focus paragraph from the person's roles + linked signal
+        # titles. No crawling or searching, so pages/searches are 0; the LLM cap
+        # leaves headroom over the single call.
+        "person_expertise": {
+            "max_pages": 0,
+            "max_searches": 0,
+            "max_llm_calls": 2,
+            "max_companies": 0,
+        },
     }
 
 

@@ -54,6 +54,8 @@ export function formatCustom(v: unknown): string {
 export interface Leader {
   name: string;
   title: string | null;
+  id?: string | null; // Person node elementId — present when the leader resolves to a
+  // graph :Person, so the drawer can open their person page (#42). Absent for older reads.
 }
 
 export interface Citation {
@@ -165,6 +167,10 @@ export interface JobSummary {
     done?: number;
     total?: number;
     error_detail?: string;
+    // #102: resolved focused field (absent = full enrichment). Used by
+    // BacklogPanel's scope-aware per-name dedupe so a focused success doesn't
+    // clear a full-enrichment error card.
+    focus_key?: string | null;
   };
 }
 
@@ -440,4 +446,105 @@ export interface Acquisition {
   thesis: string | null;
   source: string | null;
   amount_source: string | null;
+}
+
+// --- Potential-acquirer analysis (#44) -----------------------------------------
+// Ranked candidate acquirers for a company (drawer section) + the space-level
+// most-active-acquirers view. Each candidate carries machine-shaped `why` reasons
+// (never a bare score); deal facts link back to their source.
+export interface AcquirerDeal {
+  target: string;
+  source: string | null;
+}
+
+export interface AcquirerWhy {
+  // acquired-in-topic | acquired-same-kind | direct-partner | shared-partners
+  //  | shared-clients | active-acquirer
+  signal: string;
+  detail: {
+    count?: number;
+    deals?: AcquirerDeal[];
+    kind?: string | null;
+    partners?: string[];
+    clients?: string[];
+    total_acquisitions?: number;
+  };
+}
+
+export interface AcquirerCandidate {
+  acquirer: string;
+  score: number;
+  total_acquisitions: number;
+  why: AcquirerWhy[];
+}
+
+export interface ActiveAcquirerDeal {
+  target: string;
+  announced_at: string | null;
+  closed_at: string | null;
+  amount: string | null;
+  currency: string | null;
+  thesis: string | null;
+  source: string | null;
+  amount_source: string | null;
+}
+
+export interface ActiveAcquirer {
+  acquirer: string;
+  deal_count: number;
+  recent_deals: ActiveAcquirerDeal[];
+}
+
+// --- Person page + expertise summary (#42) ---------------------------------------
+// The person drawer's payload: identity + roles + their linked-signals timeline +
+// a derived, advisory expertise summary (regenerable, stored with a generation date
+// + the signal URLs it drew from). A person is addressed by its node elementId.
+
+export interface PersonRole {
+  company: string;
+  title: string | null;
+  from?: number | null;
+  to?: number | null;
+}
+
+// A signal linked to a person via AUTHORED / QUOTED_IN / SPOKE_AT (#41). Titles/URLs
+// are crawled — untrusted — so the UI only links out when `url` is http(s).
+export interface PersonSignal {
+  relation: string; // AUTHORED | QUOTED_IN | SPOKE_AT
+  flagged: boolean;
+  url: string | null;
+  title: string | null;
+  kind: string; // news | blog | event
+  publishedAt: string | null;
+  publishedAtRaw: string | null;
+  capturedAt: string | null;
+}
+
+export interface PersonExpertise {
+  summary: string;
+  generatedAt: string | null;
+  sources: string[]; // the signal URLs the summary was grounded in
+}
+
+export interface PersonProfile {
+  id: string; // Person node elementId
+  name: string;
+  linkedin: string | null;
+  bio: string | null;
+  personalSite: string | null;
+  talks: string[];
+  flagged: boolean; // an unreviewed signal-capture stub (#41)
+  origin: string | null;
+  currentRoles: PersonRole[];
+  priorRoles: PersonRole[];
+  signals: PersonSignal[];
+  expertise: PersonExpertise | null;
+}
+
+// The background expertise-generation job (#42), polled by the regenerate button.
+export interface PersonExpertiseJob {
+  job_id: string;
+  status: string;
+  outcome?: string;
+  error?: string;
 }

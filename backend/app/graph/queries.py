@@ -107,7 +107,8 @@ async def get_company(driver: AsyncDriver, name: str) -> dict | None:
                collect(DISTINCT ct.name) AS companyTypes,
                collect(DISTINCT p.name) AS partners,
                collect(DISTINCT cl.name) AS clients,
-               collect(DISTINCT {{name: pe.name, title: lr.title}}) AS leadership,
+               collect(DISTINCT {{name: pe.name, title: lr.title,
+                                  id: elementId(pe)}}) AS leadership,
                collect(DISTINCT {{field: cit.field, value: cit.value,
                                   source: src.url, sourceDate: cit.sourceDate}}) AS citations,
                [k IN $customKeys | {{key: k, value: c[k]}}] AS customFields

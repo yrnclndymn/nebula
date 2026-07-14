@@ -1253,4 +1253,38 @@ td.muted {
   padding: 0.4rem 0.6rem;
   border-bottom: 1px solid var(--border, rgba(128, 128, 128, 0.25));
   vertical-align: top;
+
+/* Potential acquirers (#44): ranked candidate acquirers in the company drawer. */
+.acquirers {
+  margin: 0.4rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.acquirer {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+}
+.acquirer-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+.acquirer-why {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+  line-height: 1.6;
+  font-size: 13px;
+}
+.acquirer-why a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.acquirer-why a:hover {
+  text-decoration: underline;
+}
+.acq-reason {
+  font-weight: 500;
 }

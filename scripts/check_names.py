@@ -449,11 +449,43 @@ def _write_cache(names: list[str]) -> None:
         _warn(f"could not write name cache ({exc})")
 
 
-def _pull_live_names() -> list[str] | None:
+# Out-of-tree env file holding READ-ONLY production Aura creds for this check.
+# The guardrail protects the PRODUCTION tracked list — pulling from the local dev
+# DB would check against fictional test data (or nothing), which inverts the
+# safety goal. Real env vars still win over the file, and the file must never
+# live inside the repo.
+ENV_FILE = Path.home() / ".nebula" / "names-check.env"
+
+
+def _check_env() -> tuple[dict, bool]:
+    """The env for the names pull (process env + ENV_FILE defaults), and whether
+    the source looks like production (Aura `neo4j+s://` scheme)."""
+    env = os.environ.copy()
+    if ENV_FILE.is_file():
+        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            env.setdefault(k.strip(), v.strip())
+    uri = env.get("NEO4J_URI", "")
+    return env, uri.startswith("neo4j+s://")
+
+
+def _pull_live_names() -> tuple[list[str] | None, bool]:
+    env, prod = _check_env()
+    if not prod:
+        _warn(
+            "names list source is NOT the production graph (as far as this hook "
+            f"can tell) — put read-only Aura creds in {ENV_FILE} "
+            "(NEO4J_URI=neo4j+s://… NEO4J_USER=… NEO4J_PASSWORD=…) so the check "
+            "guards the real tracked list, not local test data."
+        )
     try:
         out = subprocess.run(
             ["uv", "run", "python", "-m", "app.graph.company_names"],
             cwd=BACKEND_DIR,
+            env=env,
             capture_output=True,
             text=True,
             check=False,
@@ -461,13 +493,13 @@ def _pull_live_names() -> list[str] | None:
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
         _warn(f"live name pull failed ({exc})")
-        return None
+        return None, prod
     if out.returncode != 0:
-        _warn("live name pull failed (graph unreachable?); see below")
-        if out.stderr.strip():
-            sys.stderr.write(out.stderr)
-        return None
-    return [n for n in out.stdout.splitlines() if n.strip()]
+        # One line, not a traceback dump — the last stderr line carries the cause.
+        tail = out.stderr.strip().splitlines()[-1] if out.stderr.strip() else "unknown error"
+        _warn(f"live name pull failed: {tail}")
+        return None, prod
+    return [n for n in out.stdout.splitlines() if n.strip()], prod
 
 
 def load_names() -> list[str] | None:
@@ -481,7 +513,7 @@ def load_names() -> list[str] | None:
     if cached and (time.time() - cached[0]) < CACHE_TTL_SECONDS:
         return cached[1]
 
-    live = _pull_live_names()
+    live, _prod = _pull_live_names()
     if live is not None:
         _write_cache(live)
         return live

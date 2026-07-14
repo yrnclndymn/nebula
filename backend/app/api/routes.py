@@ -674,3 +674,87 @@ async def recent_ma(
     from app.graph.acquisitions import recent_acquisitions
 
     return await recent_acquisitions(get_driver(), limit=limit, topic=topic, acquirer=acquirer)
+
+
+# --- Potential-acquirer analysis (#44, M&A Intelligence) -------------------------
+# READ-ONLY over the ACQUIRED edges (#43): who might buy a tracked company, and who
+# is most active in the space. Ranking lives in app.graph.acquirers (pure scoring +
+# Cypher gatherers); each candidate carries machine-shaped `why` reasons, deal facts
+# linking back to their source. Imported inside the handlers to keep this an
+# append-only block (no edit to the module's shared import list).
+
+
+@router.get("/companies/{name}/potential-acquirers")
+async def company_potential_acquirers(
+    name: str,
+    limit: int | None = Query(default=None, ge=1),
+) -> list[dict]:
+    """Ranked candidate acquirers for a tracked company (#44), each with an
+    explainable `why` — acquisitions of similar (same-topic/same-kind) companies,
+    shared partners/clients, an existing partnership, overall acquisition activity.
+    404 if the company isn't in the graph; empty list if nothing ties to it."""
+    from app.graph import acquirers
+
+    capped = min(limit or acquirers.ACQUIRERS_DEFAULT, acquirers.ACQUIRERS_MAX)
+    result = await acquirers.potential_acquirers(get_driver(), name, limit=capped)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"No company named {name!r}")
+    return result
+
+
+@router.get("/ma/active-acquirers")
+async def active_acquirers(
+    topic: str | None = None,
+    limit: int | None = Query(default=None, ge=1),
+) -> list[dict]:
+    """Space-level M&A view (#44): the most active acquirers (most distinct deals
+    first), optionally within a topic, each carrying its recent deals with sources."""
+    from app.graph import acquirers
+
+    capped = min(limit or acquirers.ACTIVE_DEFAULT, acquirers.ACTIVE_MAX)
+    return await acquirers.most_active_acquirers(get_driver(), topic=topic, limit=capped)
+
+
+# --- Person page + expertise summary (#42, People Intelligence) -------------------
+# The person page reads identity + roles + their linked-signals timeline (#41) + a
+# derived expertise summary. The summary is DERIVED, ADVISORY content (the weekly
+# digest precedent #51): regenerable, stored with its generation date + the signal
+# URLs it drew from — NOT a person fact, so it does NOT go through propose→review.
+# A person is addressed by its node elementId (the one id that works for both
+# name-only and LinkedIn-keyed people; it's what person_signal_candidates uses).
+
+
+@router.get("/people/expertise/{job_id}")
+async def person_expertise_status(job_id: str) -> dict:
+    """Poll a person-expertise generation job (#42) until status is 'done' (or
+    'error'). Two path segments, so it never collides with `/people/{person_id}`."""
+    job = await jobs.get_job(job_id)
+    if job is None or job.get("type") != "person_expertise":
+        raise HTTPException(status_code=404, detail="unknown expertise job")
+    return job
+
+
+@router.get("/people/{person_id}")
+async def get_person_page(person_id: str) -> dict:
+    """The person page payload (#42): identity + current/prior roles + linked-signals
+    timeline + the stored expertise summary (with its generation date + sources).
+    404 if no such person. `person_id` is the node elementId."""
+    from app.graph import person_expertise
+
+    person = await person_expertise.get_person(get_driver(), person_id)
+    if person is None:
+        raise HTTPException(status_code=404, detail="unknown person")
+    return person
+
+
+@router.post("/people/{person_id}/expertise")
+async def regenerate_person_expertise(person_id: str) -> dict:
+    """(Re)enqueue expertise-summary generation for a person (#42). Returns a job id
+    to poll; the summary is regenerable, so this is safe to call repeatedly. 404 if
+    the person is unknown."""
+    from app.graph import person_expertise
+
+    result = await person_expertise.enqueue_person_expertise(person_id)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
