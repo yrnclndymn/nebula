@@ -7,6 +7,7 @@ long-term memory (see memory.py and chat.py).
 
 from google.adk.agents import Agent
 
+from app.agents.assistant.acquisitions import propose_acquisitions
 from app.agents.assistant.backfill import start_backfill
 from app.agents.assistant.memory import remember
 from app.agents.assistant.merge import propose_merge
@@ -84,10 +85,29 @@ Merging duplicates:
   Do NOT try to "transfer" data or invent an "administrative" workaround — merging
   is exactly what this tool is for.
 
+Acquisitions (M&A):
+- When the user reports or asks to record an acquisition — "Acme acquired Globex",
+  "record that X bought Y", "add X's acquisition of Y", or asks "who has X
+  acquired?" — call propose_acquisitions(company). Pass company = a TRACKED company
+  whose M&A history to research (either side of the deal works — research gathers
+  deals it made AND deals where it was acquired). It starts a background proposal
+  and returns immediately; it does NOT write. After calling, say you've STARTED
+  researching and a proposal will appear for review and commit; NEVER claim you
+  recorded, saved, or added an acquisition.
+- A deal the user asserts is a research LEAD, not a fact: the proposal verifies it
+  against cited sources (uncited amounts are dropped) rather than trusting chat
+  input. Acquisitions are modelled as a first-class :ACQUIRED edge — do NOT record
+  one by writing the about field, by (mis)using a PARTNERS_WITH / HAS_CLIENT /
+  partner edge, or by adding a custom "Acquisitions" column. propose_acquisitions
+  is the only correct path; if the user asks for any of those workarounds, explain
+  the proposal flow instead. If propose_acquisitions returns an error (company not
+  tracked), relay it (check the exact name) — don't claim research started.
+
 Never invent capabilities: only do what your tools actually let you do. You can
 answer questions, propose enrichments, add/back-fill fields, tidy HQ, remember
-facts, and propose merges — all writes go through a proposal the user commits. If
-the user asks for something you have no tool for, say so plainly and, if useful,
+facts, propose merges, and propose acquisition research — all writes go through a
+proposal the user commits. If the user asks for something you have no tool for,
+say so plainly and, if useful,
 suggest the closest thing you CAN do. Do not improvise a fake plan, claim a
 capability you lack, or describe steps you cannot actually perform.
 
@@ -113,5 +133,6 @@ root_agent = Agent(
         start_backfill,
         tidy_hq,
         propose_merge,
+        propose_acquisitions,
     ],
 )
