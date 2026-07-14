@@ -95,6 +95,19 @@ def test_job_summary_prunes_absent_activity_fields():
     assert s["summary"] == {"name": "Initech"}
 
 
+def test_job_summary_surfaces_focus_key_for_scope_aware_dedupe():
+    # A focused proposal carries its resolved field so the frontend can dedupe
+    # scope-aware (#102); a full enrichment has no focus_key and stays pruned.
+    focused = jobs._job_summary(
+        "p3", "proposal", "error", "t", json.dumps({"name": "Acme", "focus_key": "headcount"})
+    )
+    assert focused["summary"]["focus_key"] == "headcount"
+    full = jobs._job_summary(
+        "p4", "proposal", "error", "t", json.dumps({"name": "Acme", "focus_key": None})
+    )
+    assert "focus_key" not in full["summary"]
+
+
 # --- list_jobs: filters, newest-first order, compact summary (needs Neo4j) ----
 
 LIST_PREFIX = "__pytest_listjobs__"

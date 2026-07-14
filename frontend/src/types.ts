@@ -167,6 +167,10 @@ export interface JobSummary {
     done?: number;
     total?: number;
     error_detail?: string;
+    // #102: resolved focused field (absent = full enrichment). Used by
+    // BacklogPanel's scope-aware per-name dedupe so a focused success doesn't
+    // clear a full-enrichment error card.
+    focus_key?: string | null;
   };
 }
 
