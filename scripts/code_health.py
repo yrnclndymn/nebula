@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -85,6 +86,34 @@ METRIC_KEYS = [
     "long_functions",
     "noqa_count",
     "test_ratio",
+    "orphan_endpoints",
+]
+
+# --- Orphan-endpoint sensor (#134) ------------------------------------------
+# A backend route with no frontend/MCP consumer is "drift": the API grew a
+# surface the app never wired (the acquisitions review gap of #43/#126 is the
+# motivating case). We AST-walk backend/app/api/routes.py for served routes and
+# text-scan the consumers for each route's static path segments.
+HTTP_METHODS = frozenset({"get", "post", "put", "delete", "patch"})
+
+# The consumer text we scan for a route's path (relative to backend root).
+CONSUMER_GLOBS = ("frontend/src",)          # scanned recursively (source files)
+CONSUMER_FILES = ("backend/app/mcp_server.py",)
+CONSUMER_EXTS = (".ts", ".tsx", ".js", ".jsx", ".py")
+ROUTES_FILE = "backend/app/api/routes.py"
+
+# Endpoints expected to have no in-app consumer — allowlisted by path prefix,
+# each pinned with a reason (mirrors the import-linter contract's named
+# exceptions). Prefix match is segment-aware (`/health` covers `/health/graph`
+# but never `/healthz-something`). Keep this list *tight*: a too-broad prefix
+# would silence a real orphan.
+ORPHAN_ALLOWLIST: list[tuple[str, str]] = [
+    # Liveness/readiness probes — hit by Cloud Run + uptime checks, never app code.
+    ("/health", "infra health probe (Cloud Run / uptime), no UI or MCP consumer"),
+    # Cloud Tasks callback — the task queue POSTs here with OIDC; no UI consumer.
+    ("/jobs/run", "Cloud Tasks callback, invoked by the queue (OIDC), not app code"),
+    # Cloud Scheduler → Cloud Tasks tick — infra caller, no UI consumer.
+    ("/jobs/schedule-tick", "scheduler tick callback, infra-invoked, not app code"),
 ]
 
 
@@ -253,6 +282,100 @@ def story_risk(n_code_layers: int, guarded: bool) -> str:
     return "low"
 
 
+# --- Orphan-endpoint matcher (pure; unit-tested via --selftest) --------------
+
+_PARAM_SEGMENT = re.compile(r"\{[^}]*\}")  # a FastAPI path param, e.g. {job_id}
+
+
+def _endpoint_from_decorator(dec: ast.AST) -> tuple[str, str] | None:
+    """`@<router>.<verb>("path", ...)` -> ("VERB", "path"), else None.
+
+    Accepts any router-ish object (`router`, `public_router`, `tasks_router`,
+    `app`) so health + Cloud Tasks routes are seen too (they are allowlisted,
+    not ignored, so a future non-allowlisted infra route still surfaces).
+    """
+    if not isinstance(dec, ast.Call):
+        return None
+    fn = dec.func
+    if not isinstance(fn, ast.Attribute) or fn.attr.lower() not in HTTP_METHODS:
+        return None
+    base = fn.value
+    if not (isinstance(base, ast.Name)
+            and (base.id == "app" or base.id.endswith("router"))):
+        return None
+    if not dec.args:
+        return None
+    first = dec.args[0]
+    if not (isinstance(first, ast.Constant) and isinstance(first.value, str)):
+        return None
+    return (fn.attr.upper(), first.value)
+
+
+def extract_endpoints(source: str) -> list[dict]:
+    """Served routes from a routes.py source string, sorted & de-duplicated.
+
+    Returns [{"method": "GET", "path": "/companies/{name}"}, ...]. A malformed
+    source (old/partial commit) yields [] rather than raising.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    found: set[tuple[str, str]] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for dec in node.decorator_list:
+                ep = _endpoint_from_decorator(dec)
+                if ep is not None:
+                    found.add(ep)
+    return [{"method": m, "path": p}
+            for m, p in sorted(found, key=lambda e: (e[1], e[0]))]
+
+
+def path_to_consumer_regex(path: str) -> re.Pattern[str]:
+    """Compile a route path into a regex matching how a consumer references it.
+
+    Static segments must match literally; a `{param}` segment matches a template
+    interpolation only (`${jobId}`, `${encodeURIComponent(name)}`) — NOT a bare
+    word. That distinction matters: `/companies/acquisitions/{job_id}` must not
+    be considered "consumed" by the sibling static route
+    `/companies/acquisitions/research`. The pattern is unanchored (substring
+    search), so query strings and trailing segments don't defeat a match.
+    """
+    parts: list[str] = []
+    for seg in path.split("/"):
+        if seg == "":
+            parts.append("")
+        elif _PARAM_SEGMENT.fullmatch(seg):
+            parts.append(r"\$\{[^}]*\}")
+        else:
+            parts.append(re.escape(seg))
+    return re.compile("/".join(parts))
+
+
+def endpoint_is_consumed(path: str, consumer_blob: str) -> bool:
+    """True if the consumer text references `path` (params as `${...}`)."""
+    return path_to_consumer_regex(path).search(consumer_blob) is not None
+
+
+def is_allowlisted_endpoint(path: str) -> bool:
+    """True if `path` is an expected orphan (segment-aware prefix allowlist)."""
+    return any(path == prefix or path.startswith(prefix + "/")
+               for prefix, _reason in ORPHAN_ALLOWLIST)
+
+
+def find_orphan_endpoints(routes_source: str, consumer_blob: str) -> list[str]:
+    """Served, non-allowlisted routes with zero consumers -> ["VERB /path", ...]."""
+    orphans: list[str] = []
+    for ep in extract_endpoints(routes_source):
+        path = ep["path"]
+        if is_allowlisted_endpoint(path):
+            continue
+        if not endpoint_is_consumed(path, consumer_blob):
+            orphans.append(f"{ep['method']} {path}")
+    return orphans
+
+
 # ----------------------------------------------------------------------------
 # Tree analysis (impure only in that it reads files off a working directory)
 # ----------------------------------------------------------------------------
@@ -278,6 +401,27 @@ def _iter_py(root: Path):
         if "__pycache__" in py.parts:
             continue
         yield py
+
+
+def _orphan_analysis(root: Path) -> tuple[int, list[str]]:
+    """Orphan-endpoint count + list for one tree. Missing files -> (0, [])."""
+    routes_path = root / ROUTES_FILE
+    routes_source = _read(routes_path) if routes_path.exists() else ""
+    if not routes_source:
+        return 0, []
+    chunks: list[str] = []
+    for rel in CONSUMER_GLOBS:
+        base = root / rel
+        if base.exists():
+            for f in sorted(base.rglob("*")):
+                if f.is_file() and f.suffix in CONSUMER_EXTS:
+                    chunks.append(_read(f))
+    for rel in CONSUMER_FILES:
+        f = root / rel
+        if f.exists():
+            chunks.append(_read(f))
+    orphans = find_orphan_endpoints(routes_source, "\n".join(chunks))
+    return len(orphans), orphans
 
 
 def analyze_tree(root: str | Path) -> dict:
@@ -344,6 +488,8 @@ def analyze_tree(root: str | Path) -> dict:
 
     test_ratio = round(test_loc / source_loc, 4) if source_loc else 0.0
 
+    orphan_count, orphan_list = _orphan_analysis(root)
+
     return {
         "source_loc": source_loc,
         "test_loc": test_loc,
@@ -355,6 +501,10 @@ def analyze_tree(root: str | Path) -> dict:
         "long_functions": long_functions,
         "noqa_count": noqa_count,
         "test_ratio": test_ratio,
+        # backend routes with no frontend/MCP consumer (#134): count is trended,
+        # the list is detail (non-numeric, ignored by the delta/tile consumers).
+        "orphan_endpoints": orphan_count,
+        "orphan_endpoint_list": orphan_list,
     }
 
 
@@ -582,6 +732,80 @@ def _selftest() -> int:
     check("risk guarded overrides", story_risk(2, True), "high")
     check("risk guarded tooling", story_risk(0, True), "high")
 
+    # -- orphan-endpoint sensor (#134) ---------------------------------------
+    # decorator extraction across router objects + verbs; non-route decorators
+    # (validators, plain names) are ignored.
+    routes_src = (
+        "@router.get('/companies')\n"
+        "def a(): pass\n"
+        "@router.get('/companies/{name}')\n"
+        "def b(): pass\n"
+        "@router.post('/companies/acquisitions/research')\n"
+        "def c(): pass\n"
+        "@router.get('/companies/acquisitions/{job_id}')\n"
+        "def d(): pass\n"
+        "@public_router.get('/health')\n"
+        "def e(): pass\n"
+        "@tasks_router.post('/jobs/run/{job_id}')\n"
+        "def f(): pass\n"
+        "@some_validator\n"          # non-Call decorator -> ignored
+        "@obj.method('/not-a-route')\n"  # obj isn't router-ish -> ignored
+        "def g(): pass\n"
+    )
+    eps = extract_endpoints(routes_src)
+    check("extract count", len(eps), 6)
+    check("extract sorted+shaped", eps[0], {"method": "GET", "path": "/companies"})
+    check("extract verb upper",
+          {"method": "POST", "path": "/companies/acquisitions/research"} in eps, True)
+    check("extract skips non-router",
+          any(e["path"] == "/not-a-route" for e in eps), False)
+    check("extract malformed -> []", extract_endpoints("@router.get(  # oops\n"), [])
+
+    # {param} matches a `${...}` interpolation, NOT a sibling static word
+    check("param matches template",
+          endpoint_is_consumed("/companies/{name}/acquisitions",
+                               "`/companies/${encodeURIComponent(name)}/acquisitions`"),
+          True)
+    check("param not matched by static sibling",
+          endpoint_is_consumed("/companies/acquisitions/{job_id}",
+                               "`/companies/acquisitions/research`"),
+          False)
+    check("literal route substring-consumed",
+          endpoint_is_consumed("/companies", 'getJson("/companies")'), True)
+    check("literal route via template",
+          endpoint_is_consumed("/topics", "getJson(`/topics`)"), True)
+    check("multi-param path",
+          endpoint_is_consumed("/people/{id}/expertise",
+                               "`/people/${encodeURIComponent(id)}/expertise`"),
+          True)
+    check("query-string tolerated",
+          endpoint_is_consumed("/signals", "`/signals${q ? `?${q}` : ''}`"), True)
+
+    # allowlist is segment-aware prefix (expected orphans stay silent)
+    check("allow health", is_allowlisted_endpoint("/health"), True)
+    check("allow health/graph", is_allowlisted_endpoint("/health/graph"), True)
+    check("allow jobs/run param", is_allowlisted_endpoint("/jobs/run/{job_id}"), True)
+    check("allow schedule-tick", is_allowlisted_endpoint("/jobs/schedule-tick"), True)
+    check("allow not a real route", is_allowlisted_endpoint("/jobs/{job_id}"), False)
+    check("allow no partial-segment", is_allowlisted_endpoint("/healthz"), False)
+
+    # end-to-end: the motivating gap surfaces; consumed + allowlisted don't
+    consumers = (
+        'getJson("/companies");\n'
+        "getJson(`/companies/${encodeURIComponent(name)}`);\n"
+    )
+    orphans = find_orphan_endpoints(routes_src, consumers)
+    check("orphan flags acquisitions status",
+          "GET /companies/acquisitions/{job_id}" in orphans, True)
+    check("orphan flags acquisitions research",
+          "POST /companies/acquisitions/research" in orphans, True)
+    check("orphan clears consumed route",
+          any(o.endswith(" /companies") for o in orphans), False)
+    check("orphan skips allowlisted health",
+          any("/health" in o for o in orphans), False)
+    check("orphan skips allowlisted tasks",
+          any("/jobs/run" in o for o in orphans), False)
+
     if failures:
         print("CODE-HEALTH SELFTEST FAILED:")
         for f in failures:
@@ -605,7 +829,8 @@ def _print_trend(payload: dict) -> None:
           f"src={latest['source_loc']} test={latest['test_loc']} "
           f"ratio={latest['test_ratio']} upward={latest['upward_imports']} "
           f"cross={latest['cross_layer_edges']} "
-          f"complex={latest['complex_functions']} long={latest['long_functions']}")
+          f"complex={latest['complex_functions']} long={latest['long_functions']} "
+          f"orphans={latest.get('orphan_endpoints', 0)}")
 
 
 def main(argv: list[str] | None = None) -> int:
