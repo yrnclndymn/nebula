@@ -210,11 +210,11 @@ export function CompanyDrawer({
           </div>
         )}
 
-        <SignalsSection key={detail.name} name={detail.name} hasWebsite={!!detail.website} />
+        <SignalsSection key={`sig-${detail.name}`} name={detail.name} hasWebsite={!!detail.website} />
 
         <AcquisitionsSection key={`acq-${detail.name}`} name={detail.name} />
 
-        <PotentialAcquirersSection key={detail.name} name={detail.name} />
+        <PotentialAcquirersSection key={`pa-${detail.name}`} name={detail.name} />
 
         {detail.notes && <Field label="Notes" value={detail.notes} />}
 
