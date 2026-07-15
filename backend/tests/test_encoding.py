@@ -88,6 +88,13 @@ def test_sanitize_surrogates_handles_low_and_high_surrogates_and_empty():
     assert sanitize_surrogates("x\uddffy") == "x�y"
 
 
+def test_sanitize_surrogates_covers_exact_range_boundaries():
+    # Pin the INCLUSIVE bounds (wave-008 mutation survivors: <= mutated to < was
+    # not caught because no test hit U+D800 / U+DFFF exactly).
+    assert sanitize_surrogates("\ud800") == "�"
+    assert sanitize_surrogates("\udfff") == "�"
+
+
 # --- #131: a UTF-7 charset sniff must not poison response_text with surrogates ---
 
 
@@ -97,6 +104,14 @@ def test_sniffed_utf7_is_distrusted_and_decoded_as_utf8(monkeypatch):
     # and decoding a UTF-8 body with it yields mojibake and lone surrogates. The
     # sniff is distrusted: decode as UTF-8 instead.
     monkeypatch.setattr(requests.Response, "apparent_encoding", property(lambda self: "utf_7"))
+    resp = _resp(_TRICKY.encode("utf-8"), "text/html")
+    assert response_text(resp) == _TRICKY
+
+
+def test_hyphenated_utf7_sniff_is_also_distrusted(monkeypatch):
+    # Sniffers spell the codec both ways; the hyphen normalization in the UTF-7
+    # check was untested (wave-008 mutation survivor).
+    monkeypatch.setattr(requests.Response, "apparent_encoding", property(lambda self: "UTF-7"))
     resp = _resp(_TRICKY.encode("utf-8"), "text/html")
     assert response_text(resp) == _TRICKY
 

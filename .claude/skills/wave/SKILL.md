@@ -108,7 +108,27 @@ prints file + line + a *redacted* snippet (the matched name is never echoed).
 
 - **CI is the arbiter for graph code** — workers without Docker ship Cypher
   that first executes in CI. Prefer `make db-ephemeral` in the worktree when
-  Docker is up.
+  Docker is up. (Local Docker is colima on this machine: `colima start`, not
+  Docker Desktop.)
+- **A crashed orchestrator session leaves its wave untagged — and the tag
+  counter won't tell you.** `wave_tag.sh` names the next tag from existing
+  `wave-*` tags, so the next wave silently claims the crashed wave's number
+  (wave-008 minted "wave-007" until caught). When resuming or closing out
+  after a crash: compare `git tag -l 'wave-*'` against the merged-story
+  history first; retro-tag the crashed wave at its completion commit (the
+  last of its squash-merges, matching the tag script's message format), then
+  tag the new wave.
+- **A re-review after a findings fix can surface NEW findings** (a round-2
+  pass caught a bug round 1 missed on the very lines round 1 reviewed).
+  Budget an extra CI cycle per substantive PR, and re-read the LATEST
+  verdict — the check going green doesn't mean the newest comment says
+  "looks good", and vice versa: a stale "needs changes" may refer to a
+  finding already fixed in a later sha (match the verdict's comment to the
+  sha it reviewed before acting).
+- **Harness worktree branches accumulate.** Removing a worker's worktree
+  leaves its `worktree-agent-*` branch behind (dozens after a few waves).
+  They're safe to bulk-delete at closeout once the wave's PRs are merged:
+  `git branch --list 'worktree-agent-*' | xargs git branch -D`.
 - The review agent is multi-modal: (a) deep pass with a verdict; (b)/(c)
   silent pass or placeholder-then-death — since #105 these are SENSED: the
   liveness gate fails the run red and `review-rerun.yml` re-runs it once
