@@ -237,10 +237,10 @@
         ? `@ ${commits[commits.length - 1].short}` : "";
       tiles.innerHTML = TILE_KEYS.map((k) => {
         const m = MEASURES.find((x) => x.k === k);
-        const v = cur[k];
+        const v = cur[k] ?? 0; // pre-metric cache entries lack the key (see renderPanels)
         let d = "";
         if (prev) {
-          const diff = Math.round((v - prev[k]) * 1000) / 1000;
+          const diff = Math.round((v - (prev[k] ?? 0)) * 1000) / 1000;
           d = `<div class="d ${deltaClass(m, diff)}">${esc(deltaStr(diff, m.f))} vs prev</div>`;
         }
         return `<div class="tile"><div class="k">${esc(m.t)}</div>` +
@@ -255,7 +255,10 @@
       host.innerHTML = "";
       const W = 300, H = 90, PAD = 6;
       for (const m of MEASURES) {
-        const vals = commits.map((c) => c.metrics[m.k]);
+        // ?? 0: history-cache entries written before a metric existed have no key
+        // for it (the cache is incremental, never rebuilt) — an undefined here
+        // NaN-poisons min/span and blanks the whole sparkline (#139 review).
+        const vals = commits.map((c) => c.metrics[m.k] ?? 0);
         const min = Math.min(...vals), max = Math.max(...vals);
         const span = max - min || 1;
         const n = vals.length;
