@@ -457,7 +457,7 @@ export interface Acquisition {
 export interface AcquisitionProposalRow {
   job_id: string;
   company: string | null;
-  status: string; // pending (researching) | ready | error | committed
+  status: string; // pending (researching) | ready | error — committed rows are filtered out server-side
   deal_count: number;
   new_count: number; // entries in the diff (new/changed deals)
   outcome: string | null;
