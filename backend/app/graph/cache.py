@@ -16,11 +16,32 @@ from urllib.parse import urlparse
 from neo4j import AsyncDriver
 
 from app.config import settings
+from app.graph.sanitize import sanitize_surrogates
 
 
 def domain_of(url: str) -> str:
     netloc = urlparse(url if "://" in url else "https://" + url).netloc.lower()
     return netloc.removeprefix("www.")
+
+
+def _deep_sanitize(value):
+    """Replace lone surrogates in every string within a JSON-like value (#130).
+
+    Legacy `:Page` entries written before the source fix (#131) can hold surrogate
+    escapes inside ``linksJson`` / ``imagesJson`` (a poisoned page whose first
+    surrogate sat past the 5000-char ``text`` cap stored fine — Neo4j rejects a raw
+    surrogate but ``json.dumps`` escapes it — and ``json.loads`` resurrects it on
+    read). Sanitizing on read makes the returned page UTF-8-encodable before it
+    reaches a Gemini prompt. ``sanitize_surrogates`` returns clean strings unchanged
+    (same object), so this is a ~free walk for the overwhelmingly common clean page.
+    """
+    if isinstance(value, str):
+        return sanitize_surrogates(value)
+    if isinstance(value, list):
+        return [_deep_sanitize(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _deep_sanitize(v) for k, v in value.items()}
+    return value
 
 
 async def get_cached_page(
@@ -40,13 +61,18 @@ async def get_cached_page(
         record = await result.single()
     if record is None:
         return None
-    return {
-        "url": url,
-        "text": record["text"] or "",
-        "links": json.loads(record["links"] or "[]"),
-        "images": json.loads(record["images"] or "[]"),
-        "social": json.loads(record["social"] or "{}"),  # {} for pages cached pre-social
-    }
+    # Sanitize on read: json.loads can resurrect lone surrogates escaped into
+    # linksJson/imagesJson by pre-#131 writes; scrub them before this page reaches
+    # a UTF-8 prompt encode (#130). No-op fast path keeps the clean case ~free.
+    return _deep_sanitize(
+        {
+            "url": url,
+            "text": record["text"] or "",
+            "links": json.loads(record["links"] or "[]"),
+            "images": json.loads(record["images"] or "[]"),
+            "social": json.loads(record["social"] or "{}"),  # {} for pages cached pre-social
+        }
+    )
 
 
 async def store_page(driver: AsyncDriver, page: dict) -> None:
@@ -76,6 +102,10 @@ async def get_cached_clients(
             ttl=ttl,
         )
         record = await result.single()
+    # No read-time sanitize needed here (#130): `sc.clients` is a native Neo4j
+    # string list, not JSON — a raw surrogate can't be written to it (the driver
+    # rejects it) and nothing gets json.loads-resurrected on read, so the
+    # linksJson/imagesJson poisoning mechanism can't reach this field.
     return record["clients"] if record else None
 
 
