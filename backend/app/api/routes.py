@@ -626,6 +626,24 @@ async def research_company_acquisitions_commit(job_id: str) -> dict:
     return result
 
 
+# --- #133 SPA review card for acquisition proposals -------------------------------
+# The propose→review→commit loop (#43) had no SPA review surface: proposals could
+# only be committed by curl. This read-only listing lets the M&A page and the drawer
+# discover pending/ready proposals; per-proposal detail + provenance still come from
+# GET /companies/acquisitions/{job_id}, and commit stays the ONLY write path.
+
+
+@router.get("/ma/proposals")
+async def list_ma_proposals(company: str | None = Query(default=None)) -> list[dict]:
+    """Acquisition proposals awaiting review (#133), newest first — the review card's
+    listing. Read-only over the durable job store: pending (still researching), ready
+    (awaiting a commit/discard decision), and errored proposals; committed ones are
+    excluded. `company` narrows to one subject for the drawer's per-company section."""
+    from app.agents.deals.proposals import list_acquisition_proposals
+
+    return await list_acquisition_proposals(company=company)
+
+
 @router.get("/digests")
 async def digests_list(limit: int = Query(default=52, ge=1, le=200)) -> list[dict]:
     """Weekly digests (#51), newest-first — a browsable history of what changed.

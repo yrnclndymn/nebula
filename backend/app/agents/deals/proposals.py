@@ -101,6 +101,60 @@ async def get_acquisition_proposal(job_id: str) -> dict | None:
     return await jobs.get_job(job_id)
 
 
+# How many newest acquisition-proposal jobs the listing scans before giving up on
+# finding `limit` uncommitted ones. Committed jobs accumulate forever in the store,
+# so the scan window must comfortably exceed any realistic committed backlog.
+_LIST_SCAN_CAP = 500
+
+
+async def list_acquisition_proposals(company: str | None = None, *, limit: int = 50) -> list[dict]:
+    """Read-only: acquisition proposals awaiting review (#133), newest first.
+
+    The SPA review card lists these so a reviewer can open a proposal, check each
+    deal's provenance, then commit or discard. Reuses the durable job store — NO
+    writes and NO new commit path; the detail + citations come from
+    :func:`get_acquisition_proposal` and the write stays the existing commit step.
+
+    ``committed`` proposals are excluded (already reviewed); ``pending`` (still
+    researching), ``ready`` (awaiting a decision) and ``error`` proposals are
+    returned so the UI can show in-flight research and surface failures. Optional
+    ``company`` narrows to one subject (the drawer's per-company section). Rows are
+    compact — counts + the subject + status — with the full record fetched on demand.
+    """
+    driver = get_driver()
+    # Over-fetch, then filter: committed proposals are never deleted (their status
+    # stays "ready" by design; `committed` lives in the job data), so they'd
+    # permanently occupy a Cypher-side LIMIT window and eventually push live
+    # proposals out of it — the review card would silently self-hide. Newest-first
+    # plus the early break below keeps the per-job fetches bounded in practice.
+    summaries = await jobs.list_jobs(driver, type="acquisition_proposal", limit=_LIST_SCAN_CAP)
+    rows: list[dict] = []
+    for summary in summaries:
+        if len(rows) >= limit:
+            break
+        job = await jobs.get_job(summary["id"])
+        if job is None or job.get("committed"):
+            continue
+        subject = job.get("company")
+        if company is not None and subject != company:
+            continue
+        deals = (job.get("record") or {}).get("deals") or []
+        rows.append(
+            {
+                "job_id": summary["id"],
+                "company": subject,
+                "status": summary["status"],
+                "deal_count": len(deals),
+                "new_count": len(job.get("diff") or []),
+                "outcome": job.get("outcome"),
+                "error": job.get("error"),
+                "committed": bool(job.get("committed")),
+                "created_at": summary.get("createdAt"),
+            }
+        )
+    return rows
+
+
 async def commit_acquisition_proposal(job_id: str) -> dict:
     """Write a reviewed, ready acquisition proposal to the graph (the user's
     approval). Called by the UI/API, never by the agent. The stored record already
