@@ -339,8 +339,14 @@ def path_to_consumer_regex(path: str) -> re.Pattern[str]:
     interpolation only (`${jobId}`, `${encodeURIComponent(name)}`) — NOT a bare
     word. That distinction matters: `/companies/acquisitions/{job_id}` must not
     be considered "consumed" by the sibling static route
-    `/companies/acquisitions/research`. The pattern is unanchored (substring
-    search), so query strings and trailing segments don't defeat a match.
+    `/companies/acquisitions/research`.
+
+    The start is unanchored (consumers embed the path in template literals /
+    string concatenations), but the END is: a match must not continue into a
+    further path segment or identifier, or a route would be masked "consumed" by
+    a longer, distinct sibling — `/backfill/{job_id}` must not match inside
+    `/backfill/${jobId}/commit` (review finding on #139). A query string (`?`),
+    closing quote/backtick, or end-of-string may follow.
     """
     parts: list[str] = []
     for seg in path.split("/"):
@@ -350,7 +356,7 @@ def path_to_consumer_regex(path: str) -> re.Pattern[str]:
             parts.append(r"\$\{[^}]*\}")
         else:
             parts.append(re.escape(seg))
-    return re.compile("/".join(parts))
+    return re.compile("/".join(parts) + r"(?![\w{}/-])")
 
 
 def endpoint_is_consumed(path: str, consumer_blob: str) -> bool:
@@ -780,6 +786,16 @@ def _selftest() -> int:
           True)
     check("query-string tolerated",
           endpoint_is_consumed("/signals", "`/signals${q ? `?${q}` : ''}`"), True)
+    # End-anchored: a route must not be masked "consumed" by a longer, distinct
+    # sibling path (review finding on #139) — neither via a param segment running
+    # into `/commit`, nor via a static route that prefixes a longer one.
+    check("param route not masked by longer sibling",
+          endpoint_is_consumed("/backfill/{job_id}", "`/backfill/${jobId}/commit`"),
+          False)
+    check("static route not masked by longer sibling",
+          endpoint_is_consumed("/backlog", 'postJson("/backlog/research")'), False)
+    check("end-anchor still allows closing quote",
+          endpoint_is_consumed("/backfill/{job_id}", "`/backfill/${jobId}`"), True)
 
     # allowlist is segment-aware prefix (expected orphans stay silent)
     check("allow health", is_allowlisted_endpoint("/health"), True)
