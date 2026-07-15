@@ -134,6 +134,15 @@
               border: 1px solid var(--pending); color: var(--pending);
               background: color-mix(in srgb, var(--pending) 10%, transparent); }
     .empty { color: var(--muted); padding: 1.5rem 0; text-align: center; }
+    /* orphan-endpoint list (#134) */
+    .orphan-list { display: grid; gap: .35rem;
+                   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+    .orphan { background: var(--panel); border: 1px solid var(--border);
+              border-left: 3px solid var(--fail); border-radius: 8px;
+              padding: .4rem .6rem; font-family: ui-monospace, SFMono-Regular,
+              Menlo, monospace; font-size: .78rem; }
+    .orphan .m { color: var(--fail); font-weight: 700; margin-right: .4rem; }
+    .orphan-ok { color: var(--pass); padding: .4rem 0; }
     #tip { position: fixed; pointer-events: none; z-index: 9; max-width: 260px;
            background: var(--panel2); border: 1px solid var(--border);
            border-radius: 8px; padding: .45rem .6rem; font-size: .74rem;
@@ -157,6 +166,9 @@
 
     <h2>Trend across main (first-parent commits)</h2>
     <div class="panels" id="panels"></div>
+
+    <h2>Orphan endpoints <span id="orphan-meta" class="meta"></span></h2>
+    <div id="orphans"></div>
 
     <h2>In-flight stories <span id="wave-meta" class="meta"></span></h2>
     <div class="wrap">
@@ -189,11 +201,13 @@
       { k: "complex_functions", t: "Complex fns (>12)", hot: true },
       { k: "long_functions", t: "Long fns (>60 ln)", hot: true },
       { k: "noqa_count", t: "# noqa", hot: true },
+      { k: "orphan_endpoints", t: "Orphan endpoints", hot: true },
     ];
     // subset shown as headline tiles (current value + delta from prev commit)
     const TILE_KEYS = ["source_loc", "test_loc", "test_ratio", "test_count",
                        "upward_imports", "cross_layer_edges",
-                       "complex_functions", "long_functions", "noqa_count"];
+                       "complex_functions", "long_functions", "noqa_count",
+                       "orphan_endpoints"];
     const LAYER_CLASS = { foundation: "foundation", graph: "graph", tools: "tools",
                           "capture/agents": "agents", surfaces: "surfaces" };
 
@@ -223,10 +237,10 @@
         ? `@ ${commits[commits.length - 1].short}` : "";
       tiles.innerHTML = TILE_KEYS.map((k) => {
         const m = MEASURES.find((x) => x.k === k);
-        const v = cur[k];
+        const v = cur[k] ?? 0; // pre-metric cache entries lack the key (see renderPanels)
         let d = "";
         if (prev) {
-          const diff = Math.round((v - prev[k]) * 1000) / 1000;
+          const diff = Math.round((v - (prev[k] ?? 0)) * 1000) / 1000;
           d = `<div class="d ${deltaClass(m, diff)}">${esc(deltaStr(diff, m.f))} vs prev</div>`;
         }
         return `<div class="tile"><div class="k">${esc(m.t)}</div>` +
@@ -241,7 +255,10 @@
       host.innerHTML = "";
       const W = 300, H = 90, PAD = 6;
       for (const m of MEASURES) {
-        const vals = commits.map((c) => c.metrics[m.k]);
+        // ?? 0: history-cache entries written before a metric existed have no key
+        // for it (the cache is incremental, never rebuilt) — an undefined here
+        // NaN-poisons min/span and blanks the whole sparkline (#139 review).
+        const vals = commits.map((c) => c.metrics[m.k] ?? 0);
         const min = Math.min(...vals), max = Math.max(...vals);
         const span = max - min || 1;
         const n = vals.length;
@@ -288,6 +305,31 @@
       });
     }
 
+    // ---- orphan endpoints (detail from the head commit's metrics) -------
+    function renderOrphans(commits) {
+      const host = $("orphans");
+      const meta = $("orphan-meta");
+      if (!commits.length) { host.innerHTML = ""; meta.textContent = ""; return; }
+      const cur = commits[commits.length - 1].metrics;
+      const list = cur.orphan_endpoint_list || [];
+      // older cache entries predate the list field; fall back to just the count.
+      if (!("orphan_endpoint_list" in cur)) {
+        meta.textContent = `· ${cur.orphan_endpoints ?? 0} (list not cached)`;
+        host.innerHTML = ""; return;
+      }
+      meta.textContent = `· ${list.length} backend route${list.length === 1 ? "" : "s"} with no frontend/MCP consumer`;
+      if (!list.length) {
+        host.innerHTML = '<div class="orphan-ok">No orphaned endpoints — every served route has a consumer (or is allowlisted).</div>';
+        return;
+      }
+      host.innerHTML = '<div class="orphan-list">' + list.map((o) => {
+        const sp = String(o).indexOf(" ");
+        const method = sp > 0 ? o.slice(0, sp) : "";
+        const path = sp > 0 ? o.slice(sp + 1) : o;
+        return `<div class="orphan"><span class="m">${esc(method)}</span>${esc(path)}</div>`;
+      }).join("") + "</div>";
+    }
+
     // ---- in-flight story table (wave-status.json) -----------------------
     function deltasCell(d) {
       if (!d) return '<span class="muted">—</span>';
@@ -305,6 +347,7 @@
       show("complex", "complex_functions", true);
       show("long", "long_functions", true);
       show("noqa", "noqa_count", true);
+      show("orphan", "orphan_endpoints", true);
       return parts.length ? parts.join(" · ") : '<span class="muted">no change</span>';
     }
 
@@ -362,6 +405,7 @@
       const commits = (history && history.commits) || [];
       renderTiles(commits);
       renderPanels(commits);
+      renderOrphans(commits);
       renderStories(wave);
 
       const merged = (wave && wave.stories || []).filter((s) => s.pr && s.pr.merged).length;
