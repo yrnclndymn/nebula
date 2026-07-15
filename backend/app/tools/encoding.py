@@ -17,6 +17,14 @@ capture/job.py, graph/person_discovery.py) can import it without a cycle.
 
 import requests
 
+# `sanitize_surrogates` now lives in the graph layer so `app.graph.cache` can
+# reuse it without importing up into `app.tools` (the layered contract forbids
+# that direction). Re-exported here so this module's own fetch-site callers and
+# the evidence-boundary consumers keep their `from app.tools.encoding import ...`.
+from app.graph.sanitize import sanitize_surrogates
+
+__all__ = ["declared_charset", "response_text", "sanitize_surrogates"]
+
 
 def declared_charset(resp: requests.Response) -> str | None:
     """The charset explicitly declared in the response's ``Content-Type`` header,
@@ -28,26 +36,6 @@ def declared_charset(resp: requests.Response) -> str | None:
         if sep and key.strip().lower() == "charset":
             return value.strip().strip('"').strip("'") or None
     return None
-
-
-def sanitize_surrogates(text: str, replacement: str = "�") -> str:
-    """Replace lone UTF-16 surrogate code points so ``text`` is UTF-8-encodable (#127).
-
-    Crawled/searched content occasionally decodes to lone surrogates (U+D800–U+DFFF)
-    — e.g. an HTML numeric character reference like ``&#xDB11;``. A Python ``str``
-    can hold them, but encoding to UTF-8 — as the Gemini client does when serializing
-    a prompt — raises ``UnicodeEncodeError: surrogates not allowed`` and kills the
-    job. Untrusted crawled input must never be able to do that, so we replace each
-    surrogate with the Unicode replacement character at the fetch/evidence boundary.
-
-    Clean text is returned unchanged (same object): the common case pays only one
-    encode attempt, and the scan/rebuild happens solely for text that needs it.
-    """
-    try:
-        text.encode("utf-8")
-    except UnicodeEncodeError:
-        return "".join(replacement if "\ud800" <= ch <= "\udfff" else ch for ch in text)
-    return text
 
 
 def response_text(resp: requests.Response) -> str:
