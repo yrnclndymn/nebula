@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { fetchCompany, fetchSimilar, setKind } from "./api";
 import { fetchCompanyAcquisitions } from "./api"; // #45 M&A drawer section
+import { AcquisitionProposalsPanel } from "./AcquisitionProposals"; // #133 review card
 import { DiscoveryPanel } from "./DiscoveryPanel";
 import { PersonDrawer } from "./PersonDrawer";
 import { SignalsSection } from "./SignalsSection";
@@ -434,36 +435,42 @@ export function AcquisitionsSection({ name }: { name: string }) {
     };
   }, [name]);
 
-  if (!loaded || deals.length === 0) return null;
-
   const made = deals.filter((d) => d.acquirer === name);
   const received = deals.filter((d) => d.target === name);
 
+  // #133: pending/ready acquisition proposals for THIS company sit above the
+  // committed edges — the reviewer can commit them here. The panel self-hides when
+  // there are none, so the section still disappears when nothing is stored or pending.
   return (
-    <div className="chips-block acquisitions-section">
-      <span className="field-label">
-        Acquisitions <span className="muted">({deals.length})</span>
-      </span>
-      {made.length > 0 && (
-        <div className="deal-group">
-          <span className="field-sublabel muted small">Acquired ({made.length})</span>
-          <ul className="deal-list">
-            {made.map((d) => (
-              <DealRow key={`m-${d.target}`} deal={d} counterparty={d.target} />
-            ))}
-          </ul>
+    <>
+      <AcquisitionProposalsPanel company={name} heading="Pending acquisition proposals" />
+      {loaded && deals.length > 0 && (
+        <div className="chips-block acquisitions-section">
+          <span className="field-label">
+            Acquisitions <span className="muted">({deals.length})</span>
+          </span>
+          {made.length > 0 && (
+            <div className="deal-group">
+              <span className="field-sublabel muted small">Acquired ({made.length})</span>
+              <ul className="deal-list">
+                {made.map((d) => (
+                  <DealRow key={`m-${d.target}`} deal={d} counterparty={d.target} />
+                ))}
+              </ul>
+            </div>
+          )}
+          {received.length > 0 && (
+            <div className="deal-group">
+              <span className="field-sublabel muted small">Acquired by ({received.length})</span>
+              <ul className="deal-list">
+                {received.map((d) => (
+                  <DealRow key={`r-${d.acquirer}`} deal={d} counterparty={d.acquirer} />
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
-      {received.length > 0 && (
-        <div className="deal-group">
-          <span className="field-sublabel muted small">Acquired by ({received.length})</span>
-          <ul className="deal-list">
-            {received.map((d) => (
-              <DealRow key={`r-${d.acquirer}`} deal={d} counterparty={d.acquirer} />
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
+    </>
   );
 }

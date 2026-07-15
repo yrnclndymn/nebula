@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchRecentAcquisitions } from "./api";
 import type { Acquisition } from "./types";
+import { AcquisitionProposalsPanel } from "./AcquisitionProposals"; // #133 review card
 
 // The M&A page (issue #45, epic #26 M&A Intelligence): recent deals across the
 // tracked space, newest announced first, filterable by topic (either endpoint in
@@ -75,6 +76,10 @@ export function MAPage({ topics, onClose }: { topics: string[]; onClose: () => v
             ×
           </button>
         </div>
+
+        {/* #133: proposals awaiting review — the propose→review→commit surface.
+            Committing here writes ACQUIRED edges that the table below reads. */}
+        <AcquisitionProposalsPanel heading="Proposals awaiting review" />
 
         <div className="filters whatsnew-filters">
           <select value={topic} onChange={(e) => setTopic(e.target.value)}>

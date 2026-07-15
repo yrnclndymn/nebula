@@ -448,6 +448,42 @@ export interface Acquisition {
   amount_source: string | null;
 }
 
+// --- #133 acquisition proposal review card ----------------------------------
+// The propose→review→commit loop (#43) surfaced in the SPA. A compact list row
+// (from GET /ma/proposals) discovers pending/ready proposals; the full detail
+// (GET /companies/acquisitions/{job_id}) carries the proposed deals + citations +
+// diff so a reviewer checks provenance before committing. `record.deals` reuse the
+// Acquisition shape (same fields); all strings are graph/job data rendered escaped.
+export interface AcquisitionProposalRow {
+  job_id: string;
+  company: string | null;
+  status: string; // pending (researching) | ready | error | committed
+  deal_count: number;
+  new_count: number; // entries in the diff (new/changed deals)
+  outcome: string | null;
+  error: string | null;
+  committed: boolean;
+  created_at: string | null;
+}
+
+export interface AcquisitionDiffEntry {
+  deal: Acquisition;
+  status: "new" | "update";
+  old_amount?: string | null;
+}
+
+export interface AcquisitionProposalDetail {
+  job_id?: string;
+  company?: string;
+  status: string;
+  record?: { company: string; deals: Acquisition[] } | null;
+  diff?: AcquisitionDiffEntry[] | null;
+  outcome?: string | null;
+  error?: string | null;
+  error_detail?: string | null;
+  committed?: boolean;
+}
+
 // --- Potential-acquirer analysis (#44) -----------------------------------------
 // Ranked candidate acquirers for a company (drawer section) + the space-level
 // most-active-acquirers view. Each candidate carries machine-shaped `why` reasons

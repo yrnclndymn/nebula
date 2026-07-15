@@ -189,6 +189,26 @@ export const fetchRecentAcquisitions = (
   return getJson<import("./types").Acquisition[]>(`/ma/recent${q ? `?${q}` : ""}`);
 };
 
+// Acquisition proposal review card (#133): discover pending/ready proposals (the
+// #43 propose→review→commit output), read one proposal's full detail + citations,
+// then commit (writes :ACQUIRED edges) or discard (reuses dismissJob). The commit
+// endpoint is the ONLY write path; listing + detail are read-only.
+export const fetchAcquisitionProposals = (company?: string) => {
+  const qs = company ? `?company=${encodeURIComponent(company)}` : "";
+  return getJson<import("./types").AcquisitionProposalRow[]>(`/ma/proposals${qs}`);
+};
+
+export const fetchAcquisitionProposal = (jobId: string) =>
+  getJson<import("./types").AcquisitionProposalDetail>(
+    `/companies/acquisitions/${encodeURIComponent(jobId)}`,
+  );
+
+export const commitAcquisitionProposal = (jobId: string) =>
+  postJson<{ committed?: string; deals?: number; error?: string }>(
+    `/companies/acquisitions/${encodeURIComponent(jobId)}/commit`,
+    {},
+  );
+
 // Potential-acquirer analysis (#44): ranked candidate acquirers for one company
 // (drawer section), and the space-level most-active-acquirers view (optional topic
 // filter) for the M&A page. Read-only.

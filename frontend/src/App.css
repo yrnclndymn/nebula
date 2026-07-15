@@ -1255,6 +1255,20 @@ td.muted {
   vertical-align: top;
 }
 
+/* #133: acquisition proposal review cards — the propose→review→commit surface on
+   the M&A page and the drawer. Reuses .proposal / .deal-* / .activity-badge; only
+   the list wrapper + the deal head arrow layout are new. */
+.acq-proposals {
+  display: block;
+  margin: 0.2rem 0 0.6rem;
+}
+.acq-proposal .deal-head {
+  align-items: center;
+}
+.acq-proposal .deal-list {
+  margin-top: 0.4rem;
+}
+
 /* Potential acquirers (#44): ranked candidate acquirers in the company drawer. */
 .acquirers {
   margin: 0.4rem 0 0;
