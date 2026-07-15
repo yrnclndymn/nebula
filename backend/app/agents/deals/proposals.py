@@ -101,6 +101,12 @@ async def get_acquisition_proposal(job_id: str) -> dict | None:
     return await jobs.get_job(job_id)
 
 
+# How many newest acquisition-proposal jobs the listing scans before giving up on
+# finding `limit` uncommitted ones. Committed jobs accumulate forever in the store,
+# so the scan window must comfortably exceed any realistic committed backlog.
+_LIST_SCAN_CAP = 500
+
+
 async def list_acquisition_proposals(company: str | None = None, *, limit: int = 50) -> list[dict]:
     """Read-only: acquisition proposals awaiting review (#133), newest first.
 
@@ -116,9 +122,16 @@ async def list_acquisition_proposals(company: str | None = None, *, limit: int =
     compact — counts + the subject + status — with the full record fetched on demand.
     """
     driver = get_driver()
-    summaries = await jobs.list_jobs(driver, type="acquisition_proposal", limit=limit)
+    # Over-fetch, then filter: committed proposals are never deleted (their status
+    # stays "ready" by design; `committed` lives in the job data), so they'd
+    # permanently occupy a Cypher-side LIMIT window and eventually push live
+    # proposals out of it — the review card would silently self-hide. Newest-first
+    # plus the early break below keeps the per-job fetches bounded in practice.
+    summaries = await jobs.list_jobs(driver, type="acquisition_proposal", limit=_LIST_SCAN_CAP)
     rows: list[dict] = []
     for summary in summaries:
+        if len(rows) >= limit:
+            break
         job = await jobs.get_job(summary["id"])
         if job is None or job.get("committed"):
             continue

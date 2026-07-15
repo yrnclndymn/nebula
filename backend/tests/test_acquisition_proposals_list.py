@@ -84,6 +84,47 @@ def test_list_returns_pending_and_ready_excludes_committed(monkeypatch):
     assert by_id["aq2"]["new_count"] == 0
 
 
+def test_live_proposal_survives_a_backlog_of_committed_jobs(monkeypatch):
+    # Committed proposals are never deleted, so they accumulate newest-first ahead
+    # of older live ones. The listing must scan past them (over-fetch + filter),
+    # not let them occupy a fixed window — otherwise a genuinely ready proposal
+    # silently vanishes from the review card (review finding on #138).
+    committed_ids = [f"c{i}" for i in range(60)]
+    summaries = [
+        {
+            "id": cid,
+            "type": "acquisition_proposal",
+            "status": "committed",
+            "createdAt": "2026-01-05",
+        }
+        for cid in committed_ids
+    ] + [
+        {"id": "aq1", "type": "acquisition_proposal", "status": "ready", "createdAt": "2026-01-02"}
+    ]
+    jobs_by_id = {cid: {"company": "Umbrella", "committed": True} for cid in committed_ids}
+    jobs_by_id["aq1"] = _jobs_by_id()["aq1"]
+
+    def _install_capturing(limit_seen):
+        async def fake_list_jobs(driver, *, type=None, status=None, limit=50):
+            limit_seen.append(limit)
+            return summaries[:limit]
+
+        async def fake_get_job(job_id):
+            return jobs_by_id.get(job_id)
+
+        monkeypatch.setattr(proposals.jobs, "list_jobs", fake_list_jobs)
+        monkeypatch.setattr(proposals.jobs, "get_job", fake_get_job)
+        monkeypatch.setattr(proposals, "get_driver", lambda: None)
+
+    limit_seen: list[int] = []
+    _install_capturing(limit_seen)
+
+    rows = asyncio.run(proposals.list_acquisition_proposals())
+
+    assert [r["job_id"] for r in rows] == ["aq1"]  # found beyond the old 50-row window
+    assert limit_seen == [proposals._LIST_SCAN_CAP]  # over-fetches, then filters
+
+
 def test_list_filters_by_company(monkeypatch):
     _install(monkeypatch, _summaries(), _jobs_by_id())
 
