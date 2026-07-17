@@ -70,7 +70,7 @@ def test_tick_selection_and_idempotence(monkeypatch):
 
         # Execute the enqueued prune so we can assert the runner's due-work logic.
         job_id = first["enqueued"][0]
-        await jobs.run_job(job_id)
+        await jobs.execute_job(job_id)
         pruned_job = await jobs.get_job(job_id)
 
         async with driver.session() as session:
@@ -207,7 +207,7 @@ def test_job_prune_retention_and_uncommitted_exception():
         # Run the prune (its own recent job node is inside retention, so spared).
         prune_id = f"{RET_PREFIX}_prune"
         await jobs.create_job(prune_id, "job_prune", {"status": "pending"})
-        await schedules.run_job_prune(prune_id)
+        await schedules.execute_job_prune(prune_id)
         prune_job = await jobs.get_job(prune_id)
 
         async with driver.session() as session:
@@ -275,13 +275,13 @@ def test_errored_job_does_not_block_cadence(monkeypatch):
         first = await schedules.run_tick()
         job_id = first["enqueued"][0]
 
-        # Simulate the runner failing: run_scheduled marks the job errored.
+        # Simulate the runner failing: execute_scheduled marks the job errored.
         async def boom(_job_id: str) -> None:
             raise RuntimeError("simulated runner failure")
 
         failing = schedules.Schedule(job_type="cache_prune", cadence_days=7, run=boom)
         monkeypatch.setattr(schedules, "SCHEDULES", [failing])
-        await schedules.run_scheduled(job_id, "cache_prune")
+        await schedules.execute_scheduled(job_id, "cache_prune")
         errored = await jobs.get_job(job_id)
 
         # The errored job must not satisfy the cadence guard: a re-tick re-enqueues.
@@ -292,7 +292,7 @@ def test_errored_job_does_not_block_cadence(monkeypatch):
                 schedules.Schedule(
                     job_type="cache_prune",
                     cadence_days=7,
-                    run=schedules.run_cache_prune,
+                    run=schedules.execute_cache_prune,
                     is_due=schedules._stale_cache_exists,
                 )
             ],
@@ -384,7 +384,7 @@ def test_signal_prune_enforces_caps_and_protects_unreviewed(monkeypatch):
         due_before = await schedules._prunable_signals_exist(driver)
 
         await jobs.create_job(job_id, "signal_prune", {"status": "pending"})
-        await schedules.run_signal_prune(job_id)
+        await schedules.execute_signal_prune(job_id)
         prune_job = await jobs.get_job(job_id)
 
         async with driver.session() as session:
@@ -514,8 +514,8 @@ def test_signal_refresh_fans_out_capture_jobs_for_due_companies(monkeypatch):
         due_before = await schedules._signal_refresh_due(driver)
 
         await jobs.create_job(refresh_job, "signal_refresh", {"status": "pending"})
-        await schedules.run_signal_refresh(refresh_job)
-        run_job = await jobs.get_job(refresh_job)
+        await schedules.execute_signal_refresh(refresh_job)
+        execute_job = await jobs.get_job(refresh_job)
 
         # Read back the child capture jobs this run created (by their refreshOrigin).
         async with driver.session() as session:
@@ -527,21 +527,21 @@ def test_signal_refresh_fans_out_capture_jobs_for_due_companies(monkeypatch):
             children = [{"type": rec["type"], **json.loads(rec["data"])} async for rec in r]
             await _clean_refresh(session)
         await close_driver()
-        return due_before, run_job, children
+        return due_before, execute_job, children
 
     out = asyncio.run(scenario())
     if out == "skip":
         pytest.skip("Neo4j not reachable — run `make db-up`")
-    due_before, run_job, children = out
+    due_before, execute_job, children = out
 
     assert due_before is True
-    assert run_job["status"] == "done"
+    assert execute_job["status"] == "done"
     # 3 refreshable companies (never/stale/fresh); junk, client, and no-website excluded.
-    assert run_job["companiesChecked"] == 3
+    assert execute_job["companiesChecked"] == 3
     # 2 due (never-captured + stale); fresh is within the 7-day window.
-    assert run_job["companiesRefreshed"] == 2
-    assert run_job["jobsEnqueued"] == 4
-    assert "refreshed 2 companies" in run_job["outcome"]
+    assert execute_job["companiesRefreshed"] == 2
+    assert execute_job["jobsEnqueued"] == 4
+    assert "refreshed 2 companies" in execute_job["outcome"]
 
     # One signal_capture + one news_capture per due company, for exactly never/stale.
     by_type = {c["type"] for c in children}
@@ -590,8 +590,8 @@ def test_signal_refresh_batch_caps_fan_out(monkeypatch):
                 u=f"{REF_PREFIX}sig_stale",
             )
         await jobs.create_job(refresh_job, "signal_refresh", {"status": "pending"})
-        await schedules.run_signal_refresh(refresh_job)
-        run_job = await jobs.get_job(refresh_job)
+        await schedules.execute_signal_refresh(refresh_job)
+        execute_job = await jobs.get_job(refresh_job)
         async with driver.session() as session:
             r = await session.run(
                 "MATCH (j:Job) WHERE j.dataJson CONTAINS $origin RETURN j.dataJson AS data",
@@ -600,16 +600,16 @@ def test_signal_refresh_batch_caps_fan_out(monkeypatch):
             children = [json.loads(rec["data"]) async for rec in r]
             await _clean_refresh(session)
         await close_driver()
-        return run_job, children
+        return execute_job, children
 
     out = asyncio.run(scenario())
     if out == "skip":
         pytest.skip("Neo4j not reachable — run `make db-up`")
-    run_job, children = out
+    execute_job, children = out
 
-    assert run_job["companiesChecked"] == 2
-    assert run_job["companiesRefreshed"] == 1  # batch cap
-    assert run_job["jobsEnqueued"] == 2
+    assert execute_job["companiesChecked"] == 2
+    assert execute_job["companiesRefreshed"] == 1  # batch cap
+    assert execute_job["jobsEnqueued"] == 2
     # The never-captured company is the stalest → chosen over the 30-day-old one.
     assert {c["name"] for c in children} == {REF_PREFIX + "never"}
 

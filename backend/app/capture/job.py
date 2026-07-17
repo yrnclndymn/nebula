@@ -238,7 +238,7 @@ async def _existing_signal_urls(driver, urls: list[str]) -> set[str]:
         return {record["url"] async for record in result}
 
 
-async def start_signal_capture(name: str) -> dict:
+async def enqueue_signal_capture(name: str) -> dict:
     """Kick off a background capture of a company's own-site news/blog/events.
     Returns immediately with a job id to poll; nothing runs synchronously."""
     driver = get_driver()
@@ -262,7 +262,7 @@ async def start_signal_capture(name: str) -> dict:
     return {"job_id": job_id, "status": "capturing in the background"}
 
 
-async def run_signal_capture_job(job_id: str) -> None:
+async def execute_signal_capture_job(job_id: str) -> None:
     """Job runner: capture items and write them as Signals (dedup via upsert)."""
     job = await jobs.get_job(job_id)
     if job is None:

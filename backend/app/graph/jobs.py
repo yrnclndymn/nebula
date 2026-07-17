@@ -7,7 +7,7 @@ job's payload/result. `enqueue` triggers the work:
 - "cloudtasks" → enqueue a Cloud Task that POSTs /jobs/run/{id}, which runs it in
                  a request that has CPU (survives scale-to-zero).
 
-Both paths converge on `run_job`, which dispatches to the type's runner (late
+Both paths converge on `execute_job`, which dispatches to the type's runner (late
 imports avoid an import cycle). Poll/commit read the job from the graph.
 """
 
@@ -209,60 +209,60 @@ async def list_jobs(
     ]
 
 
-async def run_job(job_id: str) -> None:  # noqa: C901 — flat dispatch table, one branch per job type
+async def execute_job(job_id: str) -> None:  # noqa: C901 — flat dispatch table, one branch per job type
     """Execute a job by dispatching to its type's runner."""
     job = await get_job(job_id)
     if job is None:
         return
     if job["type"] == "proposal":
-        from app.agents.assistant.proposals import run_proposal_job
+        from app.agents.assistant.proposals import execute_proposal_job
 
-        await run_proposal_job(job_id)
+        await execute_proposal_job(job_id)
     elif job["type"] == "backfill":
-        from app.agents.assistant.backfill import run_backfill_job
+        from app.agents.assistant.backfill import execute_backfill_job
 
-        await run_backfill_job(job_id)
+        await execute_backfill_job(job_id)
     elif job["type"] == "resolution":
-        from app.agents.assistant.resolution import run_resolution_job
+        from app.agents.assistant.resolution import execute_resolution_job
 
-        await run_resolution_job(job_id)
+        await execute_resolution_job(job_id)
     elif job["type"] == "classification":
-        from app.agents.assistant.classification import run_classification_job
+        from app.agents.assistant.classification import execute_classification_job
 
-        await run_classification_job(job_id)
+        await execute_classification_job(job_id)
     elif job["type"] == "signal_capture":
-        from app.capture.job import run_signal_capture_job
+        from app.capture.job import execute_signal_capture_job
 
-        await run_signal_capture_job(job_id)
+        await execute_signal_capture_job(job_id)
     elif job["type"] == "news_capture":
-        from app.capture.news import run_news_capture_job
+        from app.capture.news import execute_news_capture_job
 
-        await run_news_capture_job(job_id)
+        await execute_news_capture_job(job_id)
     elif job["type"] == "discovery":
-        from app.agents.discovery.discovery import run_discovery_job
+        from app.agents.discovery.discovery import execute_discovery_job
 
-        await run_discovery_job(job_id)
+        await execute_discovery_job(job_id)
     elif job["type"] == "person_proposal":
-        from app.agents.people.proposals import run_person_proposal_job
+        from app.agents.people.proposals import execute_person_proposal_job
 
-        await run_person_proposal_job(job_id)
+        await execute_person_proposal_job(job_id)
     elif job["type"] == "acquisition_proposal":
-        from app.agents.deals.proposals import run_acquisition_proposal_job
+        from app.agents.deals.proposals import execute_acquisition_proposal_job
 
-        await run_acquisition_proposal_job(job_id)
+        await execute_acquisition_proposal_job(job_id)
     elif job["type"] == "person_expertise":
         # Derived expertise summary (#42) — a same-layer graph module; lazy import
         # keeps it out of jobs.py's import graph (person_expertise imports jobs).
-        from app.graph.person_expertise import run_person_expertise_job
+        from app.graph.person_expertise import execute_person_expertise_job
 
-        await run_person_expertise_job(job_id)
+        await execute_person_expertise_job(job_id)
     else:
         # Periodic job types (Cloud Scheduler → schedule-tick) dispatch via the
         # schedule registry; late import avoids a cycle (schedules imports jobs).
         from app.graph import schedules
 
         if schedules.owns(job["type"]):
-            await schedules.run_scheduled(job_id, job["type"])
+            await schedules.execute_scheduled(job_id, job["type"])
 
 
 async def enqueue(job_id: str, delay: float = 0.0) -> None:
@@ -274,7 +274,7 @@ async def enqueue(job_id: str, delay: float = 0.0) -> None:
     once and burn the same minute's Gemini quota (issue #65): Cloud Tasks gets a
     `schedule_time`; local mode sleeps before running the inline task."""
     if settings.job_mode != "cloudtasks":
-        asyncio.create_task(_run_after(job_id, delay))
+        asyncio.create_task(_execute_after(job_id, delay))
         return
     try:
         await _enqueue_cloud_task(job_id, delay)
@@ -286,11 +286,11 @@ async def enqueue(job_id: str, delay: float = 0.0) -> None:
             await update_job(job_id, {**job, "error": f"could not start: {exc}"}, status="error")
 
 
-async def _run_after(job_id: str, delay: float) -> None:
+async def _execute_after(job_id: str, delay: float) -> None:
     """Local-mode staggered start: wait `delay` seconds, then run the job inline."""
     if delay > 0:
         await asyncio.sleep(delay)
-    await run_job(job_id)
+    await execute_job(job_id)
 
 
 async def _enqueue_cloud_task(job_id: str, delay: float = 0.0) -> None:

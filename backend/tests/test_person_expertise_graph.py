@@ -129,7 +129,7 @@ def test_expertise_job_writes_cited_summary(event_loop, monkeypatch):
         driver = get_driver()
         eid = await _seed(driver)
         enq = await person_expertise.enqueue_person_expertise(eid)
-        await person_expertise.run_person_expertise_job(enq["job_id"])
+        await person_expertise.execute_person_expertise_job(enq["job_id"])
         person = await person_expertise.get_person(driver, eid)
         job = await person_expertise.jobs.get_job(enq["job_id"])
         async with driver.session() as session:

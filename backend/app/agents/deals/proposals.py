@@ -52,7 +52,7 @@ async def propose_acquisitions(company: str, *, enqueue_delay: float = 0.0) -> d
     return {"job_id": job_id, "company": company, "status": "researching in the background"}
 
 
-async def run_acquisition_proposal_job(job_id: str) -> None:
+async def execute_acquisition_proposal_job(job_id: str) -> None:
     """Job runner: research the company's deals (capture, don't write), filter to
     cited facts, and store the proposal on the job for review."""
     job = await jobs.get_job(job_id)

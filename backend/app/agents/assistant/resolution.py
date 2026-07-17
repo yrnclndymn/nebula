@@ -1,7 +1,7 @@
 """Entity-resolution review: detect variant clusters, let a human dispose.
 
 Follows the back-fill pattern (durable graph-backed job → poll → commit) so it
-survives Cloud Run scale-to-zero. `start_resolution` creates a job and enqueues
+survives Cloud Run scale-to-zero. `enqueue_resolution` creates a job and enqueues
 it; the runner scans the stub companies, runs the heuristics, and stores the
 proposed clusters + junk suggestions; the user reviews and commits a set of
 *decisions* (merge / alias / junk), which are the only things that touch the
@@ -14,13 +14,13 @@ from app.graph import jobs
 from app.graph.driver import get_driver
 
 
-async def start_resolution() -> dict:
+async def enqueue_resolution() -> dict:
     """Kick off a background scan for duplicate/junk company stubs and prepare a
     reviewable batch. Returns immediately; the scan runs as a durable job."""
     return await jobs.enqueue_scan_job("resolution", {"clusters": [], "junk": [], "stub_count": 0})
 
 
-async def run_resolution_job(job_id: str) -> None:
+async def execute_resolution_job(job_id: str) -> None:
     """Job runner: scan stubs, propose clusters + junk candidates, mark ready."""
 
     async def scan(_job: dict) -> dict:

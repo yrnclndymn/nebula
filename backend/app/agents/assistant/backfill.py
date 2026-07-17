@@ -1,7 +1,7 @@
 """Back-fill a custom field across companies of its kind, with batch review.
 
 Durable (graph-backed job via `app.graph.jobs`) so it survives scale-to-zero.
-`start_backfill` creates a job + enqueues it; the runner researches each company
+`enqueue_backfill` creates a job + enqueues it; the runner researches each company
 and updates the job progressively; the user reviews and commits selected rows,
 which writes the value + a provenance citation.
 """
@@ -43,7 +43,7 @@ async def _applicable_companies(
         return [dict(record) async for record in result]
 
 
-async def start_backfill(
+async def enqueue_backfill(
     field_name: str, country: str = "", missing_only: bool = False, company: str = ""
 ) -> dict:
     """Research a custom field for companies of its kind and prepare a batch for the
@@ -103,7 +103,7 @@ async def start_backfill(
     return {"job_id": job_id, "field": field_def["label"], "companies": len(companies)}
 
 
-async def run_backfill_job(job_id: str) -> None:
+async def execute_backfill_job(job_id: str) -> None:
     """Job runner: research each applicable company, updating the job progressively."""
     job = await jobs.get_job(job_id)
     if job is None:

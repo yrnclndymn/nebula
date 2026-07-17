@@ -291,13 +291,13 @@ def test_capture_job_writes_signals_and_dedupes_on_rerun(monkeypatch):
         async with driver.session() as session:
             await session.run("CREATE (c:Company {name: $n, website: $w})", n=ACME, w=home_url)
 
-        first = await capture_job.start_signal_capture(ACME)
-        await capture_job.run_signal_capture_job(first["job_id"])
+        first = await capture_job.enqueue_signal_capture(ACME)
+        await capture_job.execute_signal_capture_job(first["job_id"])
         job1 = await capture_job.get_signal_capture(first["job_id"])
 
         # Re-run: same feed -> no new signals, still deduped to 2.
-        second = await capture_job.start_signal_capture(ACME)
-        await capture_job.run_signal_capture_job(second["job_id"])
+        second = await capture_job.enqueue_signal_capture(ACME)
+        await capture_job.execute_signal_capture_job(second["job_id"])
         job2 = await capture_job.get_signal_capture(second["job_id"])
 
         async with driver.session() as session:

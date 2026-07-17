@@ -178,7 +178,7 @@ async def discover_website(name: str) -> str | None:
     return best.host
 
 
-async def run_proposal_job(proposal_id: str) -> None:
+async def execute_proposal_job(proposal_id: str) -> None:
     """Job runner: research the company (capture, don't write) and fill in the job."""
     job = await jobs.get_job(proposal_id)
     if job is None:

@@ -8,22 +8,22 @@ from app.agents.assistant.backfill import commit_backfill, get_backfill
 from app.agents.assistant.classification import (
     commit_classification,
     get_classification,
-    start_classification,
+    enqueue_classification,
 )
 from app.agents.assistant.proposals import commit_proposal, get_proposal, propose_enrichment
 from app.agents.assistant.resolution import (
     commit_resolution,
     get_resolution,
-    start_resolution,
+    enqueue_resolution,
 )
 from app.agents.assistant.service import respond
 from app.agents.discovery.discovery import (
     get_discovery,
     research_candidates,
-    start_discovery,
+    enqueue_discovery,
 )
-from app.capture.job import get_signal_capture, start_signal_capture
-from app.capture.news import get_news_capture, start_news_capture
+from app.capture.job import get_signal_capture, enqueue_signal_capture
+from app.capture.news import get_news_capture, enqueue_news_capture
 from app.config import settings
 from app.graph import cache, digest, jobs, queries, retention, schedules, signals
 from app.graph.driver import check_connectivity, get_driver
@@ -265,10 +265,10 @@ async def backfill_status(job_id: str) -> dict:
 
 
 @tasks_router.post("/jobs/run/{job_id}")
-async def run_job_endpoint(job_id: str) -> dict:
+async def execute_job_endpoint(job_id: str) -> dict:
     """Runner invoked by Cloud Tasks (prod) to execute a job with CPU allocated.
     Not used in local mode (jobs run inline). Guarded by verify_task (OIDC)."""
-    await jobs.run_job(job_id)
+    await jobs.execute_job(job_id)
     return {"ran": job_id}
 
 
@@ -295,7 +295,7 @@ async def backfill_commit(job_id: str, req: BackfillCommitRequest) -> dict:
 async def resolution_scan() -> dict:
     """Start a background scan for duplicate/junk company stubs. Returns a job id
     to poll; nothing is merged until the user commits reviewed decisions."""
-    return await start_resolution()
+    return await enqueue_resolution()
 
 
 @router.get("/resolution/{job_id}")
@@ -321,7 +321,7 @@ async def classification_scan() -> dict:
     """Start a background scan proposing kind='client' for end-customer stubs
     (only-inbound-HAS_CLIENT, no other signal). Returns a job id to poll; nothing
     is written until the user commits an approved subset."""
-    return await start_classification()
+    return await enqueue_classification()
 
 
 @router.get("/classification/{job_id}")
@@ -401,7 +401,7 @@ async def discover(name: str) -> dict:
     """Start web discovery for a researched company: use its in-graph similar cohort
     as a template to search the web for MORE companies like it that aren't captured
     yet. Returns a durable job id to poll (nothing is written); 404 if unknown."""
-    return _ok_or_404(await start_discovery(name))
+    return _ok_or_404(await enqueue_discovery(name))
 
 
 @router.get("/discovery/{job_id}")
@@ -444,7 +444,7 @@ async def capture_signals(name: str) -> dict:
     RSS/Atom feeds (index-page LLM crawl as fallback) and store items as Signals with
     provenance. Returns a job id to poll; re-runs only add items not already captured
     (canonical-URL dedup). 404 if the company is unknown or has no website."""
-    return _ok_or_404(await start_signal_capture(name))
+    return _ok_or_404(await enqueue_signal_capture(name))
 
 
 @router.get("/signals/capture/{job_id}")
@@ -460,7 +460,7 @@ async def capture_news(name: str) -> dict:
     against name collisions before anything is written. Returns a job id to poll;
     re-runs only add items not already captured (canonical-URL dedup, incl. against
     site-sourced signals). 404 if the company is unknown."""
-    return _ok_or_404(await start_news_capture(name))
+    return _ok_or_404(await enqueue_news_capture(name))
 
 
 @router.get("/news/capture/{job_id}")

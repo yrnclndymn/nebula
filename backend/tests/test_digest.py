@@ -275,30 +275,30 @@ def test_digest_collects_deltas_stores_and_lists(monkeypatch):
 
         job_id = f"{PREFIX}run"
         await jobs.create_job(job_id, "digest", {"status": "pending"})
-        await digest.run_digest_job(job_id)
-        run_job = await jobs.get_job(job_id)
+        await digest.execute_digest_job(job_id)
+        execute_job = await jobs.get_job(job_id)
 
         listed = await digest.list_digests(driver, limit=10)
-        mine = [d for d in listed if d["id"] == run_job.get("digestId")]
-        detail = await digest.get_digest(driver, run_job.get("digestId"))
+        mine = [d for d in listed if d["id"] == execute_job.get("digestId")]
+        detail = await digest.get_digest(driver, execute_job.get("digestId"))
 
         async with driver.session() as session:
             await session.run(
-                "MATCH (d:Digest {id: $id}) DETACH DELETE d", id=run_job.get("digestId")
+                "MATCH (d:Digest {id: $id}) DETACH DELETE d", id=execute_job.get("digestId")
             )
             await _clean(session)
             await session.run("MATCH (j:Job) WHERE j.id STARTS WITH $p DETACH DELETE j", p=PREFIX)
         await close_driver()
-        return due, run_job, mine, detail
+        return due, execute_job, mine, detail
 
     out = asyncio.run(scenario())
     if out == "skip":
         pytest.skip("Neo4j not reachable — run `make db-up`")
-    due, run_job, mine, detail = out
+    due, execute_job, mine, detail = out
 
     assert due is True
-    assert run_job["status"] == "done"
-    assert run_job["digestId"]
+    assert execute_job["status"] == "done"
+    assert execute_job["digestId"]
     # Stored + browsable in the history list.
     assert len(mine) == 1
     payload = detail["payload"]
