@@ -194,10 +194,14 @@ async def get_backfill(job_id: str) -> dict | None:
 
 
 async def commit_backfill(job_id: str, companies: list[str] | None = None) -> dict:
-    """Write selected back-fill rows (all if companies is None) with provenance."""
-    job = await jobs.get_job(job_id)
+    """Write selected back-fill rows (all if companies is None) with provenance.
+
+    Ready-guarded like the sibling flows: a still-running, errored, or already
+    committed job is rejected, so rows land exactly once and never mid-scan.
+    """
+    job = await jobs.get_ready_job(job_id)
     if job is None:
-        return {"error": "unknown job"}
+        return {"error": "back-fill job not found or not ready"}
     driver = get_driver()
     field = job["field"]
     rows = job["rows"]
@@ -214,5 +218,5 @@ async def commit_backfill(job_id: str, companies: list[str] | None = None) -> di
             )
         row["committed"] = True
         written += 1
-    await jobs.update_job(job_id, {**job, "rows": rows})
+    await jobs.mark_committed(job_id, {**job, "rows": rows})
     return {"committed": written}
