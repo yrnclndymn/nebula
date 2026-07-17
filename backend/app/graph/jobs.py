@@ -14,6 +14,7 @@ imports avoid an import cycle). Poll/commit read the job from the graph.
 import asyncio
 import json
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from neo4j import AsyncDriver
@@ -73,6 +74,55 @@ async def delete_job(job_id: str) -> bool:
         )
         record = await result.single()
     return bool(record and record["n"])
+
+
+# --- shared scan→review→commit ceremony ---------------------------------------
+# The review flows (resolution, classification, …) all follow the same durable-job
+# lifecycle: an endpoint ENQUEUES a scan job and returns a poll handle; the runner
+# EXECUTES it later (inline locally, via a Cloud Tasks POST in prod — see
+# `enqueue`) and marks it ready/errored; a commit endpoint then applies the
+# reviewed result exactly once. These helpers hold that ceremony so each flow
+# contributes only its scan and commit logic.
+
+
+async def enqueue_scan_job(job_type: str, payload: dict) -> dict:
+    """Producer half: create a pending scan job with `payload` as its initial
+    (empty) result fields, trigger it, and return the standard poll-me response."""
+    job_id = uuid.uuid4().hex[:8]
+    await create_job(job_id, job_type, {"job_id": job_id, "status": "pending", **payload})
+    await enqueue(job_id)
+    return {"job_id": job_id, "status": "scanning in the background"}
+
+
+async def execute_scan_job(job_id: str, scan) -> None:
+    """Consumer half: run `scan(job)` (a coroutine returning the result fields to
+    merge into the payload) and mark the job ready — or store the error and mark
+    it errored. A vanished job is a no-op."""
+    job = await get_job(job_id)
+    if job is None:
+        return
+    try:
+        result = await scan(job)
+    except Exception as exc:  # noqa: BLE001 — surface scan failures to the client
+        await update_job(job_id, {**job, "error": str(exc)}, status="error")
+        return
+    await update_job(job_id, {**job, **result}, status="ready")
+
+
+async def get_ready_job(job_id: str) -> dict | None:
+    """Commit-time guard: the job, provided it exists and is status='ready' —
+    else None (unknown, still running, errored, or already committed)."""
+    job = await get_job(job_id)
+    if job is None or job.get("status") != "ready":
+        return None
+    return job
+
+
+async def mark_committed(job_id: str, job: dict) -> None:
+    """Flip a reviewed job to 'committed' so a stale double-POST is rejected by
+    `get_ready_job` (the commit ops are idempotent-safe, but there is no reason
+    to redo them)."""
+    await update_job(job_id, {**job, "committed": True}, status="committed")
 
 
 def _job_summary(

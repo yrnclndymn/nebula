@@ -34,6 +34,20 @@ public_router = APIRouter()  # health checks (always open)
 tasks_router = APIRouter()  # Cloud Tasks callbacks (OIDC-authed in prod)
 
 
+def _found_or_404(item: dict | None, label: str) -> dict:
+    """Shared poll/detail guard: None → 404 'unknown <label>'."""
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"unknown {label}")
+    return item
+
+
+def _ok_or_404(result: dict) -> dict:
+    """Shared start/commit translation: an {'error': ...} result → 404."""
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
 @public_router.get("/health")
 async def health() -> dict[str, str]:
     """Liveness: the API process is up. Does not touch the database."""
@@ -219,9 +233,7 @@ async def dismiss_job(job_id: str) -> dict:
     """Dismiss (delete) a finished/errored job from the activity views (#73).
     Pending jobs are refused — they're still queued to run. The UI confirms
     before dismissing a ready (un-reviewed) job."""
-    job = await jobs.get_job(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="unknown job")
+    job = _found_or_404(await jobs.get_job(job_id), "job")
     if job.get("status") == "pending":
         raise HTTPException(status_code=409, detail="job is still running — not dismissable")
     await jobs.delete_job(job_id)
@@ -231,10 +243,7 @@ async def dismiss_job(job_id: str) -> dict:
 @router.get("/proposals/{proposal_id}")
 async def proposal_status(proposal_id: str) -> dict:
     """Poll a background enrichment proposal until status is 'ready' (or 'error')."""
-    proposal = await get_proposal(proposal_id)
-    if proposal is None:
-        raise HTTPException(status_code=404, detail="unknown proposal")
-    return proposal
+    return _found_or_404(await get_proposal(proposal_id), "proposal")
 
 
 class CommitRequest(BaseModel):
@@ -246,19 +255,13 @@ class CommitRequest(BaseModel):
 async def commit(req: CommitRequest) -> dict:
     """Write a reviewed proposal to the graph (the user's approval of an
     agent-prepared enrichment)."""
-    result = await commit_proposal(req.proposal_id, req.scope)
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-    return result
+    return _ok_or_404(await commit_proposal(req.proposal_id, req.scope))
 
 
 @router.get("/backfill/{job_id}")
 async def backfill_status(job_id: str) -> dict:
     """Poll a back-fill job; rows fill in as companies are researched."""
-    job = await get_backfill(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="unknown back-fill job")
-    return job
+    return _found_or_404(await get_backfill(job_id), "back-fill job")
 
 
 @tasks_router.post("/jobs/run/{job_id}")
@@ -285,10 +288,7 @@ class BackfillCommitRequest(BaseModel):
 @router.post("/backfill/{job_id}/commit")
 async def backfill_commit(job_id: str, req: BackfillCommitRequest) -> dict:
     """Write selected back-fill rows (companies=null commits all) with provenance."""
-    result = await commit_backfill(job_id, req.companies)
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-    return result
+    return _ok_or_404(await commit_backfill(job_id, req.companies))
 
 
 @router.post("/resolution/scan")
@@ -301,10 +301,7 @@ async def resolution_scan() -> dict:
 @router.get("/resolution/{job_id}")
 async def resolution_status(job_id: str) -> dict:
     """Poll an entity-resolution scan; proposed clusters + junk fill in when ready."""
-    job = await get_resolution(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="unknown resolution job")
-    return job
+    return _found_or_404(await get_resolution(job_id), "resolution job")
 
 
 class ResolutionCommitRequest(BaseModel):
@@ -316,10 +313,7 @@ class ResolutionCommitRequest(BaseModel):
 @router.post("/resolution/{job_id}/commit")
 async def resolution_commit(job_id: str, req: ResolutionCommitRequest) -> dict:
     """Apply reviewed entity-resolution decisions (merge / alias / junk)."""
-    result = await commit_resolution(job_id, req.decisions)
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-    return result
+    return _ok_or_404(await commit_resolution(job_id, req.decisions))
 
 
 @router.post("/classification/scan")
@@ -333,10 +327,7 @@ async def classification_scan() -> dict:
 @router.get("/classification/{job_id}")
 async def classification_status(job_id: str) -> dict:
     """Poll a client-classification scan; proposed candidates fill in when ready."""
-    job = await get_classification(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="unknown classification job")
-    return job
+    return _found_or_404(await get_classification(job_id), "classification job")
 
 
 class ClassificationCommitRequest(BaseModel):
@@ -348,10 +339,7 @@ class ClassificationCommitRequest(BaseModel):
 @router.post("/classification/{job_id}/commit")
 async def classification_commit(job_id: str, req: ClassificationCommitRequest) -> dict:
     """Apply kind='client' to the user-approved candidate names."""
-    result = await commit_classification(job_id, req.names)
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-    return result
+    return _ok_or_404(await commit_classification(job_id, req.names))
 
 
 class RefreshRequest(BaseModel):
@@ -413,19 +401,13 @@ async def discover(name: str) -> dict:
     """Start web discovery for a researched company: use its in-graph similar cohort
     as a template to search the web for MORE companies like it that aren't captured
     yet. Returns a durable job id to poll (nothing is written); 404 if unknown."""
-    result = await start_discovery(name)
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-    return result
+    return _ok_or_404(await start_discovery(name))
 
 
 @router.get("/discovery/{job_id}")
 async def discovery_status(job_id: str) -> dict:
     """Poll a discovery job; the reviewed candidate list fills in when ready."""
-    job = await get_discovery(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="unknown discovery job")
-    return job
+    return _found_or_404(await get_discovery(job_id), "discovery job")
 
 
 class DiscoveryResearchRequest(BaseModel):
@@ -437,10 +419,7 @@ async def discovery_research(job_id: str, req: DiscoveryResearchRequest) -> dict
     """Feed selected discovery candidates into the existing research pipeline
     (propose→review→commit, ≤10 cap). Only names from this job's reviewed list are
     accepted; each returns a proposal id to poll. Nothing is written until commit."""
-    result = await research_candidates(job_id, req.names)
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-    return result
+    return _ok_or_404(await research_candidates(job_id, req.names))
 
 
 @router.get("/countries")
@@ -465,19 +444,13 @@ async def capture_signals(name: str) -> dict:
     RSS/Atom feeds (index-page LLM crawl as fallback) and store items as Signals with
     provenance. Returns a job id to poll; re-runs only add items not already captured
     (canonical-URL dedup). 404 if the company is unknown or has no website."""
-    result = await start_signal_capture(name)
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-    return result
+    return _ok_or_404(await start_signal_capture(name))
 
 
 @router.get("/signals/capture/{job_id}")
 async def capture_signals_status(job_id: str) -> dict:
     """Poll a signal-capture job; `captured`/`new`/`outcome` fill in when done."""
-    job = await get_signal_capture(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="unknown signal-capture job")
-    return job
+    return _found_or_404(await get_signal_capture(job_id), "signal-capture job")
 
 
 @router.post("/companies/{name}/news/capture")
@@ -487,19 +460,13 @@ async def capture_news(name: str) -> dict:
     against name collisions before anything is written. Returns a job id to poll;
     re-runs only add items not already captured (canonical-URL dedup, incl. against
     site-sourced signals). 404 if the company is unknown."""
-    result = await start_news_capture(name)
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-    return result
+    return _ok_or_404(await start_news_capture(name))
 
 
 @router.get("/news/capture/{job_id}")
 async def capture_news_status(job_id: str) -> dict:
     """Poll a news-capture job; `captured`/`new`/`outcome` fill in when done."""
-    job = await get_news_capture(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="unknown news-capture job")
-    return job
+    return _found_or_404(await get_news_capture(job_id), "news-capture job")
 
 
 @router.get("/companies/{name}/signals")
@@ -544,10 +511,7 @@ async def enrich_person(req: PersonEnrichRequest) -> dict:
     company."""
     from app.agents.people.proposals import propose_person
 
-    result = await propose_person(req.name, req.company)
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-    return result
+    return _ok_or_404(await propose_person(req.name, req.company))
 
 
 @router.get("/people/enrich/{job_id}")
@@ -557,10 +521,7 @@ async def enrich_person_status(job_id: str) -> dict:
     `diff` the changes against what's already stored — the review surface."""
     from app.agents.people.proposals import get_person_proposal
 
-    proposal = await get_person_proposal(job_id)
-    if proposal is None:
-        raise HTTPException(status_code=404, detail="unknown person proposal")
-    return proposal
+    return _found_or_404(await get_person_proposal(job_id), "person proposal")
 
 
 @router.post("/people/enrich/{job_id}/commit")
@@ -569,10 +530,7 @@ async def enrich_person_commit(job_id: str) -> dict:
     only the cited facts prepared by the proposal; idempotent."""
     from app.agents.people.proposals import commit_person_proposal
 
-    result = await commit_person_proposal(job_id)
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-    return result
+    return _ok_or_404(await commit_person_proposal(job_id))
 
 
 # --- Acquisition research (#43, M&A Intelligence) --------------------------------
@@ -595,10 +553,7 @@ async def research_company_acquisitions(req: AcquisitionResearchRequest) -> dict
     commit. 404 if the company isn't tracked in the graph."""
     from app.agents.deals.proposals import propose_acquisitions
 
-    result = await propose_acquisitions(req.company)
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-    return result
+    return _ok_or_404(await propose_acquisitions(req.company))
 
 
 @router.get("/companies/acquisitions/{job_id}")
@@ -608,10 +563,7 @@ async def research_company_acquisitions_status(job_id: str) -> dict:
     and `diff` the new/changed deals against what's already stored."""
     from app.agents.deals.proposals import get_acquisition_proposal
 
-    proposal = await get_acquisition_proposal(job_id)
-    if proposal is None:
-        raise HTTPException(status_code=404, detail="unknown acquisition proposal")
-    return proposal
+    return _found_or_404(await get_acquisition_proposal(job_id), "acquisition proposal")
 
 
 @router.post("/companies/acquisitions/{job_id}/commit")
@@ -620,10 +572,7 @@ async def research_company_acquisitions_commit(job_id: str) -> dict:
     Applies only the cited deals prepared by the proposal; idempotent."""
     from app.agents.deals.proposals import commit_acquisition_proposal
 
-    result = await commit_acquisition_proposal(job_id)
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-    return result
+    return _ok_or_404(await commit_acquisition_proposal(job_id))
 
 
 # --- #133 SPA review card for acquisition proposals -------------------------------
@@ -759,10 +708,7 @@ async def get_person_page(person_id: str) -> dict:
     404 if no such person. `person_id` is the node elementId."""
     from app.graph import person_expertise
 
-    person = await person_expertise.get_person(get_driver(), person_id)
-    if person is None:
-        raise HTTPException(status_code=404, detail="unknown person")
-    return person
+    return _found_or_404(await person_expertise.get_person(get_driver(), person_id), "person")
 
 
 @router.post("/people/{person_id}/expertise")
@@ -772,7 +718,4 @@ async def regenerate_person_expertise(person_id: str) -> dict:
     the person is unknown."""
     from app.graph import person_expertise
 
-    result = await person_expertise.enqueue_person_expertise(person_id)
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-    return result
+    return _ok_or_404(await person_expertise.enqueue_person_expertise(person_id))

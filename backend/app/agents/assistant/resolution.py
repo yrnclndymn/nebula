@@ -9,8 +9,6 @@ graph. No cluster is ever merged silently — detection proposes, the user
 disposes, and merges are irreversible.
 """
 
-import uuid
-
 from app.graph import entity_resolution as er
 from app.graph import jobs
 from app.graph.driver import get_driver
@@ -19,24 +17,14 @@ from app.graph.driver import get_driver
 async def start_resolution() -> dict:
     """Kick off a background scan for duplicate/junk company stubs and prepare a
     reviewable batch. Returns immediately; the scan runs as a durable job."""
-    job_id = uuid.uuid4().hex[:8]
-    await jobs.create_job(
-        job_id,
-        "resolution",
-        {"job_id": job_id, "status": "pending", "clusters": [], "junk": [], "stub_count": 0},
-    )
-    await jobs.enqueue(job_id)
-    return {"job_id": job_id, "status": "scanning in the background"}
+    return await jobs.enqueue_scan_job("resolution", {"clusters": [], "junk": [], "stub_count": 0})
 
 
 async def run_resolution_job(job_id: str) -> None:
     """Job runner: scan stubs, propose clusters + junk candidates, mark ready."""
-    job = await jobs.get_job(job_id)
-    if job is None:
-        return
-    driver = get_driver()
-    try:
-        stubs = await er.list_stub_companies(driver)
+
+    async def scan(_job: dict) -> dict:
+        stubs = await er.list_stub_companies(get_driver())
         by_name = {s["name"]: s for s in stubs}
         names = [s["name"] for s in stubs]
 
@@ -55,14 +43,9 @@ async def run_resolution_job(job_id: str) -> None:
         junk = [
             {"name": s["name"], "edges": s["edges"]} for s in stubs if er.looks_like_junk(s["name"])
         ]
+        return {"clusters": clusters, "junk": junk, "stub_count": len(stubs)}
 
-        await jobs.update_job(
-            job_id,
-            {**job, "clusters": clusters, "junk": junk, "stub_count": len(stubs)},
-            status="ready",
-        )
-    except Exception as exc:  # noqa: BLE001 — surface scan failures to the client
-        await jobs.update_job(job_id, {**job, "error": str(exc)}, status="error")
+    await jobs.execute_scan_job(job_id, scan)
 
 
 async def get_resolution(job_id: str) -> dict | None:
@@ -80,8 +63,8 @@ async def commit_resolution(job_id: str, decisions: list[dict]) -> dict:
     Unknown actions/names are skipped rather than erroring, so a partially stale
     batch (a node already merged by an earlier decision) still commits cleanly.
     """
-    job = await jobs.get_job(job_id)
-    if job is None or job.get("status") != "ready":
+    job = await jobs.get_ready_job(job_id)
+    if job is None:
         return {"error": "resolution job not found or not ready"}
     driver = get_driver()
 
@@ -141,7 +124,5 @@ async def commit_resolution(job_id: str, decisions: list[dict]) -> dict:
             if allowed:
                 flagged += await er.flag_junk(driver, sorted(allowed))
 
-    # Flip status so a stale double-POST is rejected by the ready-guard above
-    # (the ops are idempotent-safe, but there is no reason to redo them).
-    await jobs.update_job(job_id, {**job, "committed": True}, status="committed")
+    await jobs.mark_committed(job_id, job)
     return {"merged": merged, "aliased": aliased, "flagged": flagged, "rejected": rejected}
