@@ -1,8 +1,8 @@
 """Durable web-discovery job: cohort profile → web search → deduped candidates.
 
 Stored in the graph (via `app.graph.jobs`) so it survives Cloud Run scale-to-zero
-and shows on the activity page like every other job. `start_discovery` seeds the
-job from the in-graph similar cohort; `run_discovery_job` builds the profile,
+and shows on the activity page like every other job. `enqueue_discovery` seeds the
+job from the in-graph similar cohort; `execute_discovery_job` builds the profile,
 searches, extracts + dedups candidates, all under a per-run budget; the user
 reviews and selects candidates, which flow into the EXISTING research trigger
 (`propose_enrichment`, ≤10 cap) — never an auto-write.
@@ -28,7 +28,7 @@ from app.tools.web import web_search
 MAX_DISCOVERY_RESEARCH = 10
 
 
-async def start_discovery(seed_name: str) -> dict:
+async def enqueue_discovery(seed_name: str) -> dict:
     """Kick off discovery for a researched company. Seeds the job from its in-graph
     similar cohort (the shipped `similar_companies`), which becomes the search
     template. Returns immediately; the work runs in the background.
@@ -64,7 +64,7 @@ async def start_discovery(seed_name: str) -> dict:
     return {"job_id": job_id, "seed": seed_name, "cohort": len(cohort)}
 
 
-async def run_discovery_job(job_id: str) -> None:
+async def execute_discovery_job(job_id: str) -> None:
     """Job runner: build the profile, search the web, extract + dedup candidates."""
     job = await jobs.get_job(job_id)
     if job is None:

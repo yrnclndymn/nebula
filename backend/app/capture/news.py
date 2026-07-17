@@ -451,7 +451,7 @@ async def _existing_signal_urls(driver, urls: list[str]) -> set[str]:
         return {record["url"] async for record in result}
 
 
-async def start_news_capture(name: str) -> dict:
+async def enqueue_news_capture(name: str) -> dict:
     """Kick off a background search for third-party coverage of a company. Returns
     immediately with a job id to poll; nothing runs synchronously. 404-shaped
     ``error`` when the company is unknown."""
@@ -477,7 +477,7 @@ async def start_news_capture(name: str) -> dict:
     return {"job_id": job_id, "status": "searching news in the background"}
 
 
-async def run_news_capture_job(job_id: str) -> None:
+async def execute_news_capture_job(job_id: str) -> None:
     """Job runner: gather third-party coverage and write each as a Signal (dedup
     via upsert on the canonical URL, incl. against site-sourced signals)."""
     job = await jobs.get_job(job_id)

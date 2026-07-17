@@ -324,7 +324,7 @@ def test_research_candidates_rejects_unknown_job(monkeypatch):
 # --- Full job flow (graph-gated; profile + search mocked) ---------------------
 
 
-def test_run_discovery_job_end_to_end(monkeypatch):
+def test_execute_discovery_job_end_to_end(monkeypatch):
     from app.agents.discovery import discovery
     from app.agents.discovery.profile import CohortProfile
     from app.graph import jobs
@@ -380,7 +380,7 @@ def test_run_discovery_job_end_to_end(monkeypatch):
         monkeypatch.setattr(discovery, "build_profile", fake_profile)
         monkeypatch.setattr(discovery, "web_search", fake_search)
 
-        await discovery.run_discovery_job(job_id)
+        await discovery.execute_discovery_job(job_id)
         job = await jobs.get_job(job_id)
 
         await jobs.delete_job(job_id)

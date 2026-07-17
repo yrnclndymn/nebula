@@ -61,7 +61,7 @@ async def propose_person(
     return {"job_id": job_id, "name": name, "status": "researching in the background"}
 
 
-async def run_person_proposal_job(job_id: str) -> None:
+async def execute_person_proposal_job(job_id: str) -> None:
     """Job runner: research the person (capture, don't write), filter to cited
     facts, and store the proposal on the job for review."""
     job = await jobs.get_job(job_id)

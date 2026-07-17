@@ -2,7 +2,7 @@
 
 Generates a browsable weekly summary of graph deltas and stores each run as a
 `(:Digest)` node, so history is a scrollable list rather than a single live view.
-The scheduled `digest` job (see app/graph/schedules.py) calls `run_digest_job`.
+The scheduled `digest` job (see app/graph/schedules.py) calls `execute_digest_job`.
 
 Delta model — the trailing 7-day window ``[start, end)``:
   - **new signals**        `(:Signal)` with ``capturedAt`` in the window, grouped
@@ -415,7 +415,7 @@ async def get_digest(driver: AsyncDriver, digest_id: str) -> dict | None:
 # --- scheduled runner --------------------------------------------------------
 
 
-async def run_digest_job(job_id: str) -> None:
+async def execute_digest_job(job_id: str) -> None:
     """Generate and store this week's digest. Budgeted (one optional LLM call, no
     crawling/searching); the LLM step fails safe, so only a graph error fails the
     job. Records the stored digest id + a human-readable outcome for the activity

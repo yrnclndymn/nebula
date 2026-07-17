@@ -7,13 +7,14 @@ job's payload/result. `enqueue` triggers the work:
 - "cloudtasks" → enqueue a Cloud Task that POSTs /jobs/run/{id}, which runs it in
                  a request that has CPU (survives scale-to-zero).
 
-Both paths converge on `run_job`, which dispatches to the type's runner (late
+Both paths converge on `execute_job`, which dispatches to the type's runner (late
 imports avoid an import cycle). Poll/commit read the job from the graph.
 """
 
 import asyncio
 import json
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from neo4j import AsyncDriver
@@ -73,6 +74,55 @@ async def delete_job(job_id: str) -> bool:
         )
         record = await result.single()
     return bool(record and record["n"])
+
+
+# --- shared scan→review→commit ceremony ---------------------------------------
+# The review flows (resolution, classification, …) all follow the same durable-job
+# lifecycle: an endpoint ENQUEUES a scan job and returns a poll handle; the runner
+# EXECUTES it later (inline locally, via a Cloud Tasks POST in prod — see
+# `enqueue`) and marks it ready/errored; a commit endpoint then applies the
+# reviewed result exactly once. These helpers hold that ceremony so each flow
+# contributes only its scan and commit logic.
+
+
+async def enqueue_scan_job(job_type: str, payload: dict) -> dict:
+    """Producer half: create a pending scan job with `payload` as its initial
+    (empty) result fields, trigger it, and return the standard poll-me response."""
+    job_id = uuid.uuid4().hex[:8]
+    await create_job(job_id, job_type, {"job_id": job_id, "status": "pending", **payload})
+    await enqueue(job_id)
+    return {"job_id": job_id, "status": "scanning in the background"}
+
+
+async def execute_scan_job(job_id: str, scan) -> None:
+    """Consumer half: run `scan(job)` (a coroutine returning the result fields to
+    merge into the payload) and mark the job ready — or store the error and mark
+    it errored. A vanished job is a no-op."""
+    job = await get_job(job_id)
+    if job is None:
+        return
+    try:
+        result = await scan(job)
+    except Exception as exc:  # noqa: BLE001 — surface scan failures to the client
+        await update_job(job_id, {**job, "error": str(exc)}, status="error")
+        return
+    await update_job(job_id, {**job, **result}, status="ready")
+
+
+async def get_ready_job(job_id: str) -> dict | None:
+    """Commit-time guard: the job, provided it exists and is status='ready' —
+    else None (unknown, still running, errored, or already committed)."""
+    job = await get_job(job_id)
+    if job is None or job.get("status") != "ready":
+        return None
+    return job
+
+
+async def mark_committed(job_id: str, job: dict) -> None:
+    """Flip a reviewed job to 'committed' so a stale double-POST is rejected by
+    `get_ready_job` (the commit ops are idempotent-safe, but there is no reason
+    to redo them)."""
+    await update_job(job_id, {**job, "committed": True}, status="committed")
 
 
 def _job_summary(
@@ -159,60 +209,60 @@ async def list_jobs(
     ]
 
 
-async def run_job(job_id: str) -> None:  # noqa: C901 — flat dispatch table, one branch per job type
+async def execute_job(job_id: str) -> None:  # noqa: C901 — flat dispatch table, one branch per job type
     """Execute a job by dispatching to its type's runner."""
     job = await get_job(job_id)
     if job is None:
         return
     if job["type"] == "proposal":
-        from app.agents.assistant.proposals import run_proposal_job
+        from app.agents.assistant.proposals import execute_proposal_job
 
-        await run_proposal_job(job_id)
+        await execute_proposal_job(job_id)
     elif job["type"] == "backfill":
-        from app.agents.assistant.backfill import run_backfill_job
+        from app.agents.assistant.backfill import execute_backfill_job
 
-        await run_backfill_job(job_id)
+        await execute_backfill_job(job_id)
     elif job["type"] == "resolution":
-        from app.agents.assistant.resolution import run_resolution_job
+        from app.agents.assistant.resolution import execute_resolution_job
 
-        await run_resolution_job(job_id)
+        await execute_resolution_job(job_id)
     elif job["type"] == "classification":
-        from app.agents.assistant.classification import run_classification_job
+        from app.agents.assistant.classification import execute_classification_job
 
-        await run_classification_job(job_id)
+        await execute_classification_job(job_id)
     elif job["type"] == "signal_capture":
-        from app.capture.job import run_signal_capture_job
+        from app.capture.job import execute_signal_capture_job
 
-        await run_signal_capture_job(job_id)
+        await execute_signal_capture_job(job_id)
     elif job["type"] == "news_capture":
-        from app.capture.news import run_news_capture_job
+        from app.capture.news import execute_news_capture_job
 
-        await run_news_capture_job(job_id)
+        await execute_news_capture_job(job_id)
     elif job["type"] == "discovery":
-        from app.agents.discovery.discovery import run_discovery_job
+        from app.agents.discovery.discovery import execute_discovery_job
 
-        await run_discovery_job(job_id)
+        await execute_discovery_job(job_id)
     elif job["type"] == "person_proposal":
-        from app.agents.people.proposals import run_person_proposal_job
+        from app.agents.people.proposals import execute_person_proposal_job
 
-        await run_person_proposal_job(job_id)
+        await execute_person_proposal_job(job_id)
     elif job["type"] == "acquisition_proposal":
-        from app.agents.deals.proposals import run_acquisition_proposal_job
+        from app.agents.deals.proposals import execute_acquisition_proposal_job
 
-        await run_acquisition_proposal_job(job_id)
+        await execute_acquisition_proposal_job(job_id)
     elif job["type"] == "person_expertise":
         # Derived expertise summary (#42) — a same-layer graph module; lazy import
         # keeps it out of jobs.py's import graph (person_expertise imports jobs).
-        from app.graph.person_expertise import run_person_expertise_job
+        from app.graph.person_expertise import execute_person_expertise_job
 
-        await run_person_expertise_job(job_id)
+        await execute_person_expertise_job(job_id)
     else:
         # Periodic job types (Cloud Scheduler → schedule-tick) dispatch via the
         # schedule registry; late import avoids a cycle (schedules imports jobs).
         from app.graph import schedules
 
         if schedules.owns(job["type"]):
-            await schedules.run_scheduled(job_id, job["type"])
+            await schedules.execute_scheduled(job_id, job["type"])
 
 
 async def enqueue(job_id: str, delay: float = 0.0) -> None:
@@ -224,7 +274,7 @@ async def enqueue(job_id: str, delay: float = 0.0) -> None:
     once and burn the same minute's Gemini quota (issue #65): Cloud Tasks gets a
     `schedule_time`; local mode sleeps before running the inline task."""
     if settings.job_mode != "cloudtasks":
-        asyncio.create_task(_run_after(job_id, delay))
+        asyncio.create_task(_execute_after(job_id, delay))
         return
     try:
         await _enqueue_cloud_task(job_id, delay)
@@ -236,11 +286,11 @@ async def enqueue(job_id: str, delay: float = 0.0) -> None:
             await update_job(job_id, {**job, "error": f"could not start: {exc}"}, status="error")
 
 
-async def _run_after(job_id: str, delay: float) -> None:
+async def _execute_after(job_id: str, delay: float) -> None:
     """Local-mode staggered start: wait `delay` seconds, then run the job inline."""
     if delay > 0:
         await asyncio.sleep(delay)
-    await run_job(job_id)
+    await execute_job(job_id)
 
 
 async def _enqueue_cloud_task(job_id: str, delay: float = 0.0) -> None:

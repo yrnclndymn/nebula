@@ -38,13 +38,13 @@ logger = logging.getLogger("nebula.schedules")
 class Schedule:
     """One periodic job type.
 
-    - `job_type`   — the `:Job` type; its runner is dispatched by `run_scheduled`.
+    - `job_type`   — the `:Job` type; its runner is dispatched by `execute_scheduled`.
     - `cadence_days` — minimum spacing between runs; also the idempotence window.
     - `is_due`     — cheap graph check: is there actual work right now? Keeps the
                      tick from enqueuing empty no-op jobs every cadence. Defaults
                      to "always" for schedules that should just run on cadence.
     - `build_payload` — initial `dataJson` for the created job.
-    - `run`        — the async runner, invoked with the job id by `run_scheduled`.
+    - `run`        — the async runner, invoked with the job id by `execute_scheduled`.
     """
 
     job_type: str
@@ -100,8 +100,8 @@ async def run_tick() -> dict:
     return {"enqueued": enqueued, "skipped": skipped}
 
 
-async def run_scheduled(job_id: str, job_type: str) -> None:
-    """Dispatch a scheduled job to its registered runner (called by jobs.run_job
+async def execute_scheduled(job_id: str, job_type: str) -> None:
+    """Dispatch a scheduled job to its registered runner (called by jobs.execute_job
     for any type this registry owns). A runner that raises marks its job errored
     (instead of leaving it pending forever); with errored jobs excluded from the
     cadence guard, the next tick retries it."""
@@ -143,7 +143,7 @@ async def _stale_cache_exists(driver: AsyncDriver) -> bool:
     return record["n"] > 0
 
 
-async def run_cache_prune(job_id: str) -> None:
+async def execute_cache_prune(job_id: str) -> None:
     """Delete crawl-cache entries older than the prune age; record the count."""
     driver = get_driver()
     async with driver.session() as session:
@@ -205,7 +205,7 @@ async def _prunable_jobs_exist(driver: AsyncDriver) -> bool:
     return record["n"] > 0
 
 
-async def run_job_prune(job_id: str) -> None:
+async def execute_job_prune(job_id: str) -> None:
     """Delete :Job nodes older than the retention window, keeping ready-but-
     uncommitted proposal jobs (un-reviewed work). Records the count + outcome.
 
@@ -290,7 +290,7 @@ async def _signals_protected_by_unreviewed_work(driver: AsyncDriver, urls: list[
     return set(record["protected"] or [])
 
 
-async def run_signal_prune(job_id: str) -> None:
+async def execute_signal_prune(job_id: str) -> None:
     """Apply the signal retention policy and record what was removed.
 
     Reads all signals, computes the prune set with the pure selector, removes any
@@ -396,7 +396,7 @@ async def _signal_refresh_due(driver: AsyncDriver) -> bool:
     )
 
 
-async def run_signal_refresh(job_id: str) -> None:
+async def execute_signal_refresh(job_id: str) -> None:
     """Select companies due for a signal refresh and fan out their capture jobs.
 
     Reads refreshable companies with the pure selector (stalest-first, capped at the
@@ -474,35 +474,35 @@ SCHEDULES: list[Schedule] = [
     Schedule(
         job_type="cache_prune",
         cadence_days=7,
-        run=run_cache_prune,
+        run=execute_cache_prune,
         is_due=_stale_cache_exists,
     ),
     Schedule(
         job_type="job_prune",
         cadence_days=1,
-        run=run_job_prune,
+        run=execute_job_prune,
         is_due=_prunable_jobs_exist,
     ),
     Schedule(
         job_type="signal_prune",
         cadence_days=7,
-        run=run_signal_prune,
+        run=execute_signal_prune,
         is_due=_prunable_signals_exist,
     ),
     # Ticks daily; the 7-day staleness gives ~weekly-per-company refresh (see above).
     Schedule(
         job_type="signal_refresh",
         cadence_days=1,
-        run=run_signal_refresh,
+        run=execute_signal_refresh,
         is_due=_signal_refresh_due,
     ),
     # Weekly digest (#51): generate + store a "what changed" summary each week. Its
     # runner + delta queries live in app/graph/digest.py; dispatch is via the
-    # schedules.owns() fallback in jobs.run_job (no jobs.py change needed).
+    # schedules.owns() fallback in jobs.execute_job (no jobs.py change needed).
     Schedule(
         job_type="digest",
         cadence_days=7,
-        run=digest.run_digest_job,
+        run=digest.execute_digest_job,
         is_due=digest.digest_due,
     ),
 ]

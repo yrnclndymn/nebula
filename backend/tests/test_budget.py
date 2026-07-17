@@ -165,7 +165,7 @@ def test_generate_with_retry_charges_llm_before_calling_client():
 
 
 def _wire_backfill(monkeypatch, companies, extract, budget_override):
-    """Stub the graph + extraction seams so run_backfill_job runs without Neo4j.
+    """Stub the graph + extraction seams so execute_backfill_job runs without Neo4j.
     Returns the in-memory job dict that the runner mutates."""
     field_def = {
         "name": "serviceLines",
@@ -215,7 +215,7 @@ def test_backfill_stops_at_companies_cap_keeping_rows(monkeypatch):
         return {"value": ["x"], "source": website}
 
     store = _wire_backfill(monkeypatch, companies, extract, {"max_companies": 2})
-    asyncio.run(backfill.run_backfill_job("jb"))
+    asyncio.run(backfill.execute_backfill_job("jb"))
 
     assert store["status"] == "ready"  # graceful stop, not an error
     assert len(store["rows"]) == 2  # only the companies within budget
@@ -239,7 +239,7 @@ def test_backfill_stops_on_midloop_page_cap_keeping_prior_rows(monkeypatch):
 
     # High companies cap so the page cap is what stops the run.
     store = _wire_backfill(monkeypatch, companies, extract, {"max_companies": 25})
-    asyncio.run(backfill.run_backfill_job("jb"))
+    asyncio.run(backfill.execute_backfill_job("jb"))
 
     assert store["status"] == "ready"
     assert len(store["rows"]) == 1  # the completed first company is kept
@@ -261,7 +261,7 @@ def test_backfill_unlimited_when_budget_uncapped(monkeypatch):
         "max_companies": None,
     }
     store = _wire_backfill(monkeypatch, companies, extract, uncapped)
-    asyncio.run(backfill.run_backfill_job("jb"))
+    asyncio.run(backfill.execute_backfill_job("jb"))
 
     assert store["status"] == "ready"
     assert len(store["rows"]) == 5

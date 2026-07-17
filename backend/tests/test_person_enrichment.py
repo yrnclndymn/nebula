@@ -153,7 +153,7 @@ def test_diff_surfaces_only_changed_cited_facts():
 # --- durable job flow (mocked research + graph; no Gemini, no Neo4j) -----------
 
 
-def test_run_person_proposal_job_stores_cited_facts(monkeypatch):
+def test_execute_person_proposal_job_stores_cited_facts(monkeypatch):
     from app.agents.people import proposals
 
     job = {
@@ -192,7 +192,7 @@ def test_run_person_proposal_job_stores_cited_facts(monkeypatch):
     monkeypatch.setattr(proposals, "get_person_scoped", fake_existing)
     monkeypatch.setattr(proposals, "get_driver", lambda: None)
 
-    asyncio.run(proposals.run_person_proposal_job("pj1"))
+    asyncio.run(proposals.execute_person_proposal_job("pj1"))
 
     assert saved["status"] == "ready"
     assert saved["record"]["title"] == "CEO"

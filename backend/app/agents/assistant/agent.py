@@ -8,7 +8,7 @@ long-term memory (see memory.py and chat.py).
 from google.adk.agents import Agent
 
 from app.agents.assistant.acquisitions import propose_acquisitions
-from app.agents.assistant.backfill import start_backfill
+from app.agents.assistant.backfill import enqueue_backfill
 from app.agents.assistant.memory import remember
 from app.agents.assistant.merge import propose_merge
 from app.agents.assistant.proposals import propose_enrichment
@@ -61,7 +61,7 @@ existing custom field.
    the column exists and offer to fill it in.
 
 3. Fill an EXISTING custom field across companies — "research service lines for
-   all", "fill in X for the UK companies". Call start_backfill(field_name) with the
+   all", "fill in X for the UK companies". Call enqueue_backfill(field_name) with the
    field's key; it researches in the background and returns a batch to review.
    Scope it to what was asked: pass company=<exact name> to fill just one named
    company, country=<full name, e.g. "United Kingdom"> for one country, and/or
@@ -130,7 +130,7 @@ root_agent = Agent(
         remember,
         propose_enrichment,
         add_field,
-        start_backfill,
+        enqueue_backfill,
         tidy_hq,
         propose_merge,
         propose_acquisitions,

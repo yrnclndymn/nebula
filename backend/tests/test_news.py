@@ -242,13 +242,13 @@ def test_news_capture_job_writes_signals_filters_and_dedupes(monkeypatch):
         async with driver.session() as session:
             await session.run("CREATE (c:Company {name: $n, website: $w})", n=ACME, w=website)
 
-        first = await news.start_news_capture(ACME)
-        await news.run_news_capture_job(first["job_id"])
+        first = await news.enqueue_news_capture(ACME)
+        await news.execute_news_capture_job(first["job_id"])
         job1 = await news.get_news_capture(first["job_id"])
 
         # Re-run: same hits -> canonical-URL dedup, nothing new.
-        second = await news.start_news_capture(ACME)
-        await news.run_news_capture_job(second["job_id"])
+        second = await news.enqueue_news_capture(ACME)
+        await news.execute_news_capture_job(second["job_id"])
         job2 = await news.get_news_capture(second["job_id"])
 
         async with driver.session() as session:

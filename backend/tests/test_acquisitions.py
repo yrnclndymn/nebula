@@ -157,7 +157,7 @@ def test_diff_hides_unchanged_deals():
 # --- durable job flow (mocked research + graph; no Gemini, no Neo4j) ----------
 
 
-def test_run_acquisition_proposal_job_stores_cited_deals(monkeypatch):
+def test_execute_acquisition_proposal_job_stores_cited_deals(monkeypatch):
     from app.agents.deals import proposals
 
     job = {"job_id": "aq1", "status": "pending", "company": "Acme"}
@@ -192,7 +192,7 @@ def test_run_acquisition_proposal_job_stores_cited_deals(monkeypatch):
     monkeypatch.setattr(proposals, "canonical_names", fake_canonical)
     monkeypatch.setattr(proposals, "get_driver", lambda: None)
 
-    asyncio.run(proposals.run_acquisition_proposal_job("aq1"))
+    asyncio.run(proposals.execute_acquisition_proposal_job("aq1"))
 
     assert saved["status"] == "ready"
     deals = {d["target"]: d for d in saved["record"]["deals"]}

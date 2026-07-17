@@ -8,7 +8,7 @@ Two things live here, both in the graph layer (like ``app.graph.digest``):
   (a person may be name-only or LinkedIn-keyed; ``elementId`` is the one id that
   works for both, and it is what ``signals.person_signal_candidates`` already uses).
 
-- **Expertise summary** (`run_person_expertise_job` + the pure helpers): a durable
+- **Expertise summary** (`execute_person_expertise_job` + the pure helpers): a durable
   ``person_expertise`` job that phrases a short "what does this person focus on"
   paragraph from the person's roles + linked signal titles, following the weekly
   digest precedent (#51). It is DERIVED, ADVISORY content — regenerable, stored WITH
@@ -370,7 +370,7 @@ async def enqueue_person_expertise(person_id: str) -> dict:
     return {"job_id": job_id, "person_id": person_id, "status": "generating in the background"}
 
 
-async def run_person_expertise_job(job_id: str) -> None:
+async def execute_person_expertise_job(job_id: str) -> None:
     """Job runner: gather the person's roles + linked signals, phrase a summary (LLM
     with a deterministic fallback), and store it with its sources. Budget-capped
     (``person_expertise``); the LLM step fails safe, so only a graph error fails the
