@@ -195,6 +195,66 @@ def test_resolution_scan_proposes_clusters_with_edge_counts(job_store, monkeypat
     assert {m["edges"] for m in cluster["members"]} == {0, 3}
 
 
+def test_commit_backfill_requires_ready_and_commits_once(job_store, monkeypatch):
+    from app.agents.assistant import backfill
+
+    written: list[tuple] = []
+    cited: list[tuple] = []
+
+    async def fake_set(_driver, company, key, value):
+        written.append((company, key, value))
+
+    async def fake_cite(_driver, company, key, _value, source):
+        cited.append((company, key, source))
+
+    monkeypatch.setattr(backfill.queries, "set_custom_field", fake_set)
+    monkeypatch.setattr(backfill.queries, "cite", fake_cite)
+    monkeypatch.setattr(backfill, "get_driver", lambda: None)
+
+    async def scenario():
+        job_id = "bf1"
+        await jobs.create_job(
+            job_id,
+            "backfill",
+            {
+                "job_id": job_id,
+                "status": "pending",
+                "field": {"name": "serviceLines", "label": "Service Lines", "type": "list"},
+                "rows": [],
+            },
+        )
+        results = {"pending": await backfill.commit_backfill(job_id)}
+
+        rows = [
+            {
+                "company": "Acme __pytest__",
+                "value": ["consulting"],
+                "source": "https://acme.example/about",
+                "committed": False,
+            },
+            {"company": "Globex __pytest__", "value": [], "source": "", "committed": False},
+            {"company": "Initech __pytest__", "value": ["tools"], "source": "", "committed": False},
+        ]
+        job = await jobs.get_job(job_id)
+        await jobs.update_job(job_id, {**job, "rows": rows}, status="ready")
+
+        results["first"] = await backfill.commit_backfill(job_id, [r["company"] for r in rows])
+        results["second"] = await backfill.commit_backfill(job_id, ["Initech __pytest__"])
+        results["unknown"] = await backfill.commit_backfill("nope")
+        return results
+
+    results = asyncio.run(scenario())
+    assert "error" in results["pending"]  # a still-running job is not committable
+    assert results["first"] == {"committed": 2}  # the empty-value row was skipped
+    assert written == [
+        ("Acme __pytest__", "serviceLines", ["consulting"]),
+        ("Initech __pytest__", "serviceLines", ["tools"]),
+    ]
+    assert cited == [("Acme __pytest__", "serviceLines", "https://acme.example/about")]
+    assert "error" in results["second"]  # double-POST rejected, rows not re-written
+    assert "error" in results["unknown"]
+
+
 # --- local-mode enqueue triggers the executor ---------------------------------
 
 
