@@ -44,6 +44,25 @@ W_ACTIVITY = 1
 # W_ACTIVITY * ACTIVITY_CAP — a tiebreaker, not a driver of the ranking.
 ACTIVITY_CAP = 3
 
+# --- Size-awareness weights (#165) ---------------------------------------------
+# Two size signals nudge — never gate — a candidate that already has a relationship
+# tie. Each fires ONLY when BOTH sides of its comparison exist; absent size data is
+# strictly neutral, so a candidate with no headcount ranks exactly as it did pre-#165.
+#   * size-plausible — acquirer meaningfully larger than the target (>= SIZE_LARGER_RATIO)
+#     earns a small bonus; an acquirer SMALLER than the target is dampened by a
+#     penalty (reverse takeovers exist but are rare) — a penalty, never an exclusion.
+#   * size-fit — the target's headcount sits within (or near) the acquirer's historical
+#     target-size range, drawn from its past targets' headcounts.
+W_SIZE_PLAUSIBLE = 1
+W_SIZE_SMALLER = -1
+W_SIZE_FIT = 1
+# An acquirer at least this many times the target's headcount reads as "meaningfully
+# larger" — enough of a gap that swallowing the target is plausible.
+SIZE_LARGER_RATIO = 3.0
+# Tolerance band around the historical [min, max] target-size range: a target just
+# outside the observed band (or a single-deal history) still counts as a "fit".
+SIZE_FIT_TOLERANCE = 1.5
+
 # Default / maximum candidates returned for a target company.
 ACQUIRERS_DEFAULT = 5
 ACQUIRERS_MAX = 20
@@ -78,7 +97,79 @@ def _dedup_names(names: list | None) -> list[str]:
     return out
 
 
-def _score_candidate(cand: dict, target_kind: str | None) -> dict | None:
+def _pos_int(value) -> int | None:
+    """A strictly-positive int, or None (missing/zero/garbage headcounts are neutral)."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+def _size_plausibility(acq_headcount, target_headcount) -> tuple[int, dict] | None:
+    """Relative-size signal: bonus when the acquirer is >= SIZE_LARGER_RATIO x the
+    target, penalty when it is smaller, neutral (None) in between or when either side
+    is unknown. Both directions carry the actual numbers so the UI stays explainable."""
+    acq, tgt = _pos_int(acq_headcount), _pos_int(target_headcount)
+    if acq is None or tgt is None:
+        return None
+    ratio = acq / tgt
+    if ratio >= SIZE_LARGER_RATIO:
+        points, direction = W_SIZE_PLAUSIBLE, "larger"
+    elif ratio < 1:
+        points, direction = W_SIZE_SMALLER, "smaller"
+    else:
+        return None
+    detail = {
+        "acquirer_headcount": acq,
+        "target_headcount": tgt,
+        "ratio": round(ratio, 1),
+        "direction": direction,
+    }
+    return points, {"signal": "size-plausible", "detail": detail}
+
+
+def _size_fit(target_headcount, past_headcounts, past_amounts) -> tuple[int, dict] | None:
+    """Historical target-size fit: bonus when the target's headcount sits within (or
+    within SIZE_FIT_TOLERANCE of) the [min, max] range of the acquirer's past targets'
+    headcounts. Neutral when the target has no headcount or no past target does. Cited
+    deal amounts, where present, ride along in the detail as supporting context."""
+    tgt = _pos_int(target_headcount)
+    known = [n for n in (_pos_int(h) for h in past_headcounts or []) if n is not None]
+    if tgt is None or not known:
+        return None
+    low, high = min(known), max(known)
+    if not (low / SIZE_FIT_TOLERANCE <= tgt <= high * SIZE_FIT_TOLERANCE):
+        return None
+    detail: dict = {"low": low, "high": high, "n": len(known)}
+    amounts = [a.strip() for a in past_amounts or [] if isinstance(a, str) and a.strip()]
+    if amounts:
+        detail["amounts"] = amounts
+    return W_SIZE_FIT, {"signal": "size-fit", "detail": detail}
+
+
+def _size_signals(cand: dict, target_headcount) -> tuple[int, list[dict]]:
+    """All size scoring for one candidate, extracted from :func:`_score_candidate` so
+    that its branch complexity stays under the repo's lint cap. Returns the size points
+    to add and the size ``why`` entries; both are empty when no size comparison fires."""
+    points = 0
+    whys: list[dict] = []
+    for result in (
+        _size_plausibility(cand.get("acquirer_headcount"), target_headcount),
+        _size_fit(
+            target_headcount, cand.get("past_target_headcounts"), cand.get("past_target_amounts")
+        ),
+    ):
+        if result is not None:
+            pts, why = result
+            points += pts
+            whys.append(why)
+    return points, whys
+
+
+def _score_candidate(
+    cand: dict, target_kind: str | None, target_headcount: int | None = None
+) -> dict | None:
     """Score one candidate's raw facts, returning ``{acquirer, score, why, …}`` or
     None when nothing relevant to the target connects them (pure activity, with no
     topic/kind/partner/client tie, is not a candidate)."""
@@ -99,6 +190,9 @@ def _score_candidate(cand: dict, target_kind: str | None) -> dict | None:
     if relevance == 0:
         return None
 
+    # Size awareness only reweights a candidate that already cleared the relevance
+    # gate above — it never gates one in, and absent size data contributes nothing.
+    size_points, size_whys = _size_signals(cand, target_headcount)
     activity_bonus = W_ACTIVITY * min(max(total - 1, 0), ACTIVITY_CAP)
     score = (
         W_TOPIC_DEAL * len(topic_deals)
@@ -107,6 +201,7 @@ def _score_candidate(cand: dict, target_kind: str | None) -> dict | None:
         + W_SHARED_PARTNER * len(shared_partners)
         + W_SHARED_CLIENT * len(shared_clients)
         + activity_bonus
+        + size_points
     )
 
     why: list[dict] = []
@@ -142,6 +237,7 @@ def _score_candidate(cand: dict, target_kind: str | None) -> dict | None:
         )
     if total > 1:
         why.append({"signal": "active-acquirer", "detail": {"total_acquisitions": total}})
+    why.extend(size_whys)
 
     return {
         "acquirer": cand["acquirer"],
@@ -155,6 +251,7 @@ def rank_acquirer_candidates(
     candidates: list[dict],
     *,
     target_kind: str | None = None,
+    target_headcount: int | None = None,
     limit: int = ACQUIRERS_DEFAULT,
 ) -> list[dict]:
     """Pure ranking: turn raw per-candidate facts into an ordered candidate list.
@@ -162,11 +259,18 @@ def rank_acquirer_candidates(
     Each input dict carries the raw signals gathered by the Cypher
     (``topic_deals``/``kind_deals`` as ``[{target, source}]`` lists,
     ``shared_partners``/``shared_clients`` as name lists, ``is_direct_partner``,
-    ``total_acquisitions``). Candidates with no relevant tie to the target are
-    dropped; the rest are ordered by score desc then acquirer name (deterministic
-    for stable rendering) and capped at ``limit``.
+    ``total_acquisitions``, plus the #165 size facts ``acquirer_headcount`` /
+    ``past_target_headcounts`` / ``past_target_amounts``). ``target_headcount`` is the
+    open company's own headcount; size signals fire only when both sides exist, so a
+    None here (or absent candidate size data) leaves the pre-#165 ranking untouched.
+    Candidates with no relevant tie to the target are dropped; the rest are ordered by
+    score desc then acquirer name (deterministic for stable rendering) and capped.
     """
-    ranked = [scored for cand in candidates if (scored := _score_candidate(cand, target_kind))]
+    ranked = [
+        scored
+        for cand in candidates
+        if (scored := _score_candidate(cand, target_kind, target_headcount))
+    ]
     ranked.sort(key=lambda r: (-r["score"], r["acquirer"].lower()))
     return ranked[:limit]
 
@@ -197,13 +301,20 @@ _CANDIDATES_CYPHER = """
           WHERE EXISTS { (t)-[:HAS_CLIENT]->(c) }
         | c.name ] AS shared_clients,
       EXISTS { (a)-[:PARTNERS_WITH]-(t) } AS is_direct_partner,
-      COUNT { (a)-[:ACQUIRED]->(:Company) } AS total_acquisitions
+      COUNT { (a)-[:ACQUIRED]->(:Company) } AS total_acquisitions,
+      a.headcount AS acquirer_headcount,
+      [ (a)-[:ACQUIRED]->(x:Company) WHERE x.headcount IS NOT NULL
+        | x.headcount ] AS past_target_headcounts,
+      [ (a)-[r:ACQUIRED]->(:Company) WHERE r.amount IS NOT NULL
+        | r.amount ] AS past_target_amounts
     WITH a.name AS acquirer, topic_deals, kind_deals, shared_partners, shared_clients,
-         is_direct_partner, total_acquisitions
+         is_direct_partner, total_acquisitions, acquirer_headcount,
+         past_target_headcounts, past_target_amounts
     WHERE size(topic_deals) > 0 OR size(kind_deals) > 0 OR size(shared_partners) > 0
        OR size(shared_clients) > 0 OR is_direct_partner
     RETURN acquirer, topic_deals, kind_deals, shared_partners, shared_clients,
-           is_direct_partner, total_acquisitions
+           is_direct_partner, total_acquisitions, acquirer_headcount,
+           past_target_headcounts, past_target_amounts
 """
 
 
@@ -214,21 +325,27 @@ async def potential_acquirers(
 
     Gathers each candidate's raw signals — acquisitions of companies in the
     target's topic / of the target's kind, shared partners/clients, an existing
-    partnership, and overall acquisition activity — then ranks them with the pure
-    :func:`rank_acquirer_candidates`. Returns None if ``name`` is not a company
+    partnership, overall acquisition activity, and (for #165) the acquirer's own
+    headcount plus its past targets' headcounts and cited deal amounts — then ranks
+    them with the pure :func:`rank_acquirer_candidates`. Returns None if ``name`` is
+    not a company
     (so the route can 404); an empty list means no acquirer has any tie to it.
     """
     async with driver.session() as session:
         exists = await session.run(
-            "MATCH (c:Company {name: $name}) RETURN c.kind AS kind", name=name
+            "MATCH (c:Company {name: $name}) RETURN c.kind AS kind, c.headcount AS headcount",
+            name=name,
         )
         record = await exists.single()
         if record is None:
             return None
         target_kind = record["kind"]
+        target_headcount = record["headcount"]
         result = await session.run(_CANDIDATES_CYPHER, name=name)
         rows = [rec.data() async for rec in result]
-    return rank_acquirer_candidates(rows, target_kind=target_kind, limit=limit)
+    return rank_acquirer_candidates(
+        rows, target_kind=target_kind, target_headcount=target_headcount, limit=limit
+    )
 
 
 async def most_active_acquirers(

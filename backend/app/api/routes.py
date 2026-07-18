@@ -210,6 +210,7 @@ async def chat(req: ChatRequest) -> dict:
         "proposals": turn.proposals,
         "backfills": turn.backfills,
         "merges": turn.merges,
+        "acquisitions": turn.acquisitions,
     }
 
 
