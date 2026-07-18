@@ -125,3 +125,32 @@ def test_fetch_page_survives_store_page_failure(monkeypatch):
 
     page = asyncio.run(fetch_page("https://acme.example/"))
     assert page == fetched  # the job continues with the fetched page, uncached
+
+
+def test_fetch_page_sanitizes_url_before_cache_lookup(monkeypatch):
+    # A surrogate-bearing URL must be scrubbed BEFORE the cache read, so the read
+    # key, the store MERGE key, and the returned page all agree — sanitizing only
+    # inside store_page would leave the raw read key permanently missing the
+    # sanitized write key (PR #159 review), and crash the read param encode first.
+    dirty = "https://acme.example/\ud800deal"
+    clean = "https://acme.example/deal"
+    seen: dict[str, str] = {}
+
+    async def _capture_lookup(_driver, url, ttl_days=None):
+        seen["lookup"] = url
+        return None
+
+    async def _capture_store(_driver, page):
+        seen["store"] = page["url"]
+
+    monkeypatch.setattr(web_mod, "get_driver", lambda: object())
+    monkeypatch.setattr(web_mod.cache, "get_cached_page", _capture_lookup)
+    monkeypatch.setattr(web_mod.cache, "store_page", _capture_store)
+    monkeypatch.setattr(
+        web_mod, "_fetch_page_live", lambda url: {"url": url, "text": "Acme", "links": []}
+    )
+
+    page = asyncio.run(fetch_page(dirty))
+    assert seen["lookup"] == clean
+    assert seen["store"] == clean
+    assert page["url"] == clean

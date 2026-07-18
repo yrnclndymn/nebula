@@ -116,6 +116,12 @@ async def fetch_page(url: str) -> dict:
     Returns {url, text (~5000 chars), links:[{url,text}], images:[{src,alt}],
     social:{platform:url}} on success, or {url, error} on failure.
     """
+    # A crawled href can itself carry a lone surrogate. Scrub it once up front so
+    # the cache lookup, the MERGE key inside store_page, and the returned page all
+    # share one clean URL — sanitizing only at store time would make the write key
+    # diverge from the raw read key (a permanent cache miss for exactly the URLs
+    # this guard exists for), and the raw read param would hit the encoder first.
+    url = sanitize_surrogates(url)
     driver = get_driver()
     cached = await cache.get_cached_page(driver, url)
     if cached is not None:
