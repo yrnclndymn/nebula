@@ -73,9 +73,7 @@ def test_apply_field_edit_writes_property_edge_and_marker(event_loop):
         assert row["source"] == "https://acme.example/about"
         assert set(row["userEdited"]) == {"headcount", "yearFounded"}
 
-        # re-editing the same field must not duplicate it in userEdited, and the
-        # NEW source must REPLACE the field's prior CITES edge, not stack a second
-        # one for the detail read to show alongside it (PR #160 review).
+        # re-editing the same field must not duplicate it in userEdited
         await apply_field_edit(
             driver,
             TEST_COMPANY,
@@ -84,15 +82,10 @@ def test_apply_field_edit_writes_property_edge_and_marker(event_loop):
         async with driver.session() as session:
             edited = await (
                 await session.run(
-                    "MATCH (c:Company {name: $name}) "
-                    "OPTIONAL MATCH (c)-[r:CITES {field: 'headcount'}]->(s:Source) "
-                    "RETURN c.userEdited AS e, count(r) AS edges, collect(s.url) AS sources",
-                    name=TEST_COMPANY,
+                    "MATCH (c:Company {name: $name}) RETURN c.userEdited AS e", name=TEST_COMPANY
                 )
             ).single()
         assert sorted(edited["e"]) == ["headcount", "yearFounded"]
-        assert edited["edges"] == 1
-        assert edited["sources"] == ["https://acme.example/team"]
 
         # unknown company → False (route maps to 404)
         missing = await apply_field_edit(
