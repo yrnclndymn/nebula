@@ -1,9 +1,10 @@
 name: Shadow Review (Poolside experiment)
 
-# Experiment #166: a NON-GATING second reviewer powered by poolside/laguna-m.1
-# via OpenRouter (free-promo through end of July 2026; listed at $0.20/$0.40 per M
-# after — still ~15x cheaper than the gating reviewer's model). The gating Claude
-# review in review.yml is unchanged and remains the merge gate.
+# Experiment #166: a NON-GATING second reviewer powered by
+# poolside/laguna-m.1:free via OpenRouter ($0 through end of July 2026 per the
+# maintainer's account; the paid id is $0.20/$0.40 per M if free-tier limits
+# bite). The gating Claude review in review.yml is unchanged and remains the
+# merge gate.
 #
 # The claude-code-action harness speaks the Anthropic API; OpenRouter is
 # OpenAI-compatible. A LiteLLM proxy sidecar bridges them: it exposes an
@@ -84,7 +85,7 @@ jobs:
             # Claude ids), route it to the shadow model. One reviewer, one model.
             - model_name: "*"
               litellm_params:
-                model: openrouter/poolside/laguna-m.1
+                model: openrouter/poolside/laguna-m.1:free
                 api_key: ${OPENROUTER_API_KEY}
           general_settings:
             master_key: sk-shadow-bridge
