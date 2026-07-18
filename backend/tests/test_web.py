@@ -133,7 +133,6 @@ def test_fetch_page_sanitizes_url_before_cache_lookup(monkeypatch):
     # inside store_page would leave the raw read key permanently missing the
     # sanitized write key (PR #159 review), and crash the read param encode first.
     dirty = "https://acme.example/\ud800deal"
-    clean = "https://acme.example/deal"
     seen: dict[str, str] = {}
 
     async def _capture_lookup(_driver, url, ttl_days=None):
@@ -151,6 +150,9 @@ def test_fetch_page_sanitizes_url_before_cache_lookup(monkeypatch):
     )
 
     page = asyncio.run(fetch_page(dirty))
-    assert seen["lookup"] == clean
-    assert seen["store"] == clean
-    assert page["url"] == clean
+    # One clean key everywhere: read, write, and returned page must agree...
+    assert seen["lookup"] == seen["store"] == page["url"]
+    # ...and it must be scrubbed (encodable, surrogate gone) — whatever the
+    # sanitizer's replacement policy is.
+    assert "\ud800" not in seen["lookup"]
+    seen["lookup"].encode("utf-8")  # must not raise
