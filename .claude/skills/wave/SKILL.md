@@ -242,3 +242,10 @@ worst offenders — a survivor on a security/write-path branch matters more than
 one on a log string). A clean run ("none — every executed mutant was killed")
 is itself worth recording as the wave's test-quality baseline. Keep the run
 scoped to touched files: a whole-tree pass is far too slow to be useful.
+
+- **A worker's graph test that doesn't `close_driver()` poisons later test
+  files.** The module-global driver binds to the event loop of whichever test
+  created it; a graph test using its own loop must close the driver afterward
+  (`test_cache_sanitize`'s try/finally pattern) or an alphabetically-later file
+  (test_health's TestClient) dies with "Event loop is closed". Wave-009 shipped
+  this once; check for the pattern when reviewing worker graph tests.
