@@ -131,12 +131,6 @@ async def fetch_page(url: str) -> dict:
     # (unlimited) when no budget is installed on the context.
     budget.charge_page()
     page = await asyncio.to_thread(_fetch_page_live, url)
-    # Deep-sanitize the WHOLE fetched dict, not just the aggregate text: link
-    # text, image alts, and social values are returned to the agent and hit the
-    # Gemini serializer's UTF-8 encode — the same crash class as the cache write
-    # (#146 review round 2). store_page guards itself too; this covers the
-    # returned object.
-    page = cache.deep_sanitize(page)
     if "error" not in page:
         # The cache write is optional garnish (#84): a store failure — e.g. a lone
         # surrogate the driver can't UTF-8-encode — must not propagate and kill the
