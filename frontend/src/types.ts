@@ -495,7 +495,7 @@ export interface AcquirerDeal {
 
 export interface AcquirerWhy {
   // acquired-in-topic | acquired-same-kind | direct-partner | shared-partners
-  //  | shared-clients | active-acquirer
+  //  | shared-clients | active-acquirer | size-plausible | size-fit  (#165)
   signal: string;
   detail: {
     count?: number;
@@ -504,6 +504,17 @@ export interface AcquirerWhy {
     partners?: string[];
     clients?: string[];
     total_acquisitions?: number;
+    // #165 size signals — actual numbers so the reason stays explainable.
+    // size-plausible:
+    acquirer_headcount?: number;
+    target_headcount?: number;
+    ratio?: number;
+    direction?: "larger" | "smaller";
+    // size-fit (historical target-size range from past targets' headcounts):
+    low?: number;
+    high?: number;
+    n?: number;
+    amounts?: string[];
   };
 }
 

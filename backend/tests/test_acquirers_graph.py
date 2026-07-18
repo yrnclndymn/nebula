@@ -74,25 +74,42 @@ async def _cleanup(session) -> None:
 
 
 async def _seed(driver) -> None:
-    # Target: an isv tagged with TOPIC, partnered with SHARED_P, client of INTOPIC_1's
-    # customer set is not needed here.
+    # Target: an isv tagged with TOPIC, partnered with SHARED_P, headcount 100 (so the
+    # #165 size signals have a target side to compare against).
     await upsert_company(
         driver,
-        CompanyRecord(name=TARGET, kind="isv", topics=[TOPIC], partnerships=[SHARED_P]),
+        CompanyRecord(
+            name=TARGET, kind="isv", topics=[TOPIC], partnerships=[SHARED_P], headcount=100
+        ),
     )
-    # In-topic acquired companies (researched: TAGGED_AS TOPIC).
-    for n in (INTOPIC_1, INTOPIC_2):
-        await upsert_company(driver, CompanyRecord(name=n, kind="isv", topics=[TOPIC]))
+    # In-topic acquired companies (researched: TAGGED_AS TOPIC). Headcounts 80/120
+    # bracket the target's 100 -> ACTIVE's historical range is a size-fit.
+    for n, hc in ((INTOPIC_1, 80), (INTOPIC_2, 120)):
+        await upsert_company(
+            driver, CompanyRecord(name=n, kind="isv", topics=[TOPIC], headcount=hc)
+        )
     # Same-kind but off-topic acquired company.
     await upsert_company(driver, CompanyRecord(name=SAMEKIND, kind="isv"))
     await upsert_company(driver, CompanyRecord(name=OFFTOPIC, kind="service_provider"))
-    # ACTIVE also partners with SHARED_P (overlap with target).
-    await upsert_company(driver, CompanyRecord(name=ACTIVE, partnerships=[SHARED_P]))
+    # ACTIVE also partners with SHARED_P (overlap with target); 5000 people -> >=3x the
+    # target, a size-plausible ("larger") acquirer.
+    await upsert_company(
+        driver, CompanyRecord(name=ACTIVE, partnerships=[SHARED_P], headcount=5000)
+    )
     await upsert_company(driver, CompanyRecord(name=PARTNER, partnerships=[TARGET]))
 
     deals = [
-        # ACTIVE acquired two same-topic companies -> strongest.
-        Deal(acquirer=ACTIVE, target=INTOPIC_1, source=SRC, announced_at="2024-01-01"),
+        # ACTIVE acquired two same-topic companies -> strongest. One carries a cited
+        # amount (amount_source set) so past_target_amounts surfaces in size-fit.
+        Deal(
+            acquirer=ACTIVE,
+            target=INTOPIC_1,
+            source=SRC,
+            announced_at="2024-01-01",
+            amount="$100M",
+            currency="USD",
+            amount_source=SRC,
+        ),
         Deal(acquirer=ACTIVE, target=INTOPIC_2, source=SRC, announced_at="2024-06-01"),
         # KINDLY acquired a same-kind (off-topic) company.
         Deal(acquirer=KINDLY, target=SAMEKIND, source=SRC, announced_at="2023-01-01"),
@@ -135,6 +152,17 @@ def test_potential_acquirers_ranks_by_signal(event_loop):
     topic_reason = next(w for w in active["why"] if w["signal"] == "acquired-in-topic")
     assert topic_reason["detail"]["count"] == 2
     assert all(d["source"] == SRC for d in topic_reason["detail"]["deals"])
+
+    # #165 size facts gathered in the same single query: ACTIVE is >=3x the target and
+    # its past targets (80/120) bracket the target's 100 headcount, with a cited amount.
+    assert "size-plausible" in signals and "size-fit" in signals
+    plausible = next(w for w in active["why"] if w["signal"] == "size-plausible")
+    assert plausible["detail"]["direction"] == "larger"
+    assert plausible["detail"]["acquirer_headcount"] == 5000
+    assert plausible["detail"]["target_headcount"] == 100
+    fit = next(w for w in active["why"] if w["signal"] == "size-fit")
+    assert (fit["detail"]["low"], fit["detail"]["high"], fit["detail"]["n"]) == (80, 120, 2)
+    assert fit["detail"]["amounts"] == ["$100M"]
 
     kindly = next(r for r in ranked if r["acquirer"] == KINDLY)
     assert {w["signal"] for w in kindly["why"]} == {"acquired-same-kind"}

@@ -68,6 +68,34 @@ function AcquirerReason({ why }: { why: AcquirerWhy }) {
         <span className="muted">{d.total_acquisitions} acquisitions on record</span>
       </li>
     );
+  // #165 relative-size plausibility: acquirer vs target headcount, both directions.
+  if (why.signal === "size-plausible" && d.acquirer_headcount != null && d.target_headcount != null) {
+    const larger = d.direction === "larger";
+    const ratio = d.ratio != null ? `${d.ratio}×` : null;
+    return (
+      <li>
+        <span className="acq-reason">{larger ? "Larger than target" : "Smaller than target"}</span>{" "}
+        <span className="muted">
+          {d.acquirer_headcount.toLocaleString()} vs {d.target_headcount.toLocaleString()} people
+          {ratio ? ` (${ratio})` : ""}
+        </span>
+      </li>
+    );
+  }
+  // #165 historical target-size fit: target sits inside the acquirer's buying range.
+  if (why.signal === "size-fit" && d.low != null && d.high != null) {
+    const amounts = d.amounts && d.amounts.length > 0 ? `; incl. ${d.amounts.join(", ")}` : "";
+    return (
+      <li>
+        <span className="acq-reason">Fits its buying range</span>{" "}
+        <span className="muted">
+          typically buys companies of {d.low.toLocaleString()}–{d.high.toLocaleString()} people
+          {d.n != null ? ` (n=${d.n})` : ""}
+          {amounts}
+        </span>
+      </li>
+    );
+  }
   return null;
 }
 
