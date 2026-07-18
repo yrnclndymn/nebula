@@ -16,24 +16,16 @@ name: Shadow Review (Poolside experiment)
 # a silent shadow is a data point for the experiment, not a failure to gate on.
 # Skips cleanly (green, no-op) until the OPENROUTER_API_KEY repo secret exists.
 
+# DISPATCH-ONLY since the #166 switch-over: the gating review (review.yml) now
+# runs the Poolside model itself, so a per-PR shadow would double-review with
+# the same model. This workflow remains as the model-evaluation harness — point
+# it at any PR (open, merged, or a canary) to trial a model/prompt change
+# without touching the gate.
 on:
-  pull_request:
-    types: [opened, synchronize, ready_for_review]
-    paths-ignore:
-      - "**.md"
-      - "**.png"
-      - "**.jpg"
-      - "**.svg"
-      - "**.ico"
-      - "LICENSE"
-  # Backtest mode (#166): point the shadow at an EXISTING (even merged) PR to
-  # compare its findings against the recorded gating review of the same diff.
-  # In this mode the shadow posts ONE summary comment, no inline comments (the
-  # inline tool needs a live pull_request context).
   workflow_dispatch:
     inputs:
       pr_number:
-        description: "PR number to backtest against"
+        description: "PR number to review (backtest works on merged/closed PRs)"
         required: true
         type: string
 
@@ -44,12 +36,6 @@ permissions:
 
 jobs:
   shadow-review:
-    # PR events: same-repo, non-draft only — mirrors review.yml so both
-    # reviewers see the same population of PRs. Dispatch (backtest) always runs.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.pull_request.draft == false &&
-       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     # Non-gating experiment on every PR: cap wall-clock so a hung bridge or
     # unresponsive upstream can't burn CI minutes to the 6h default (review nit).
