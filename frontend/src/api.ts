@@ -235,3 +235,19 @@ export const regeneratePersonExpertise = (id: string) =>
 
 export const getPersonExpertiseJob = (jobId: string) =>
   getJson<import("./types").PersonExpertiseJob>(`/people/expertise/${encodeURIComponent(jobId)}`);
+
+// Inline table edit (#149): set one editable scalar column by hand, with an
+// optional/required source URL. The backend tags the write origin='user' and
+// enforces the provenance rule (headcount/funding need a source); a bad or
+// missing-required source is a 422, an unknown company a 404.
+export const patchCompanyField = (
+  name: string,
+  field: "headcount" | "yearFounded" | "funding",
+  value: string | number,
+  sourceUrl: string | null,
+) =>
+  request<{ name: string; field: string; value: number | string; source_url: string | null }>(
+    "PATCH",
+    `/companies/${encodeURIComponent(name)}/field`,
+    { field, value, source_url: sourceUrl },
+  );
