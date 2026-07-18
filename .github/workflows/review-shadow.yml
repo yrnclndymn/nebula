@@ -154,6 +154,27 @@ jobs:
             --max-turns 60
             --allowedTools "Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*)"
 
+      # Experiment observability (#166): the harness transcript and the bridge log
+      # are the only views into WHY a shadow run went silent (first backtests: 25
+      # turns, 3 permission denials, is_error with nothing posted). The bridge log
+      # is redacted before upload; Actions' secret masking is the second layer.
+      - name: Capture shadow transcript + bridge log
+        if: ${{ always() && env.HAS_KEY == 'true' }}
+        run: |
+          mkdir -p /tmp/shadow-artifacts
+          cp /home/runner/work/_temp/claude-execution-output.json /tmp/shadow-artifacts/ 2>/dev/null || true
+          sed "s/${OPENROUTER_API_KEY:-__none__}/[redacted]/g" /tmp/litellm.log > /tmp/shadow-artifacts/litellm.log 2>/dev/null || true
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      - name: Upload shadow artifacts
+        if: ${{ always() && env.HAS_KEY == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: shadow-review-${{ env.SHADOW_PR }}-${{ github.run_id }}
+          path: /tmp/shadow-artifacts/
+          retention-days: 7
+          if-no-files-found: ignore
+
       # Telemetry only (no gate): one canonical line per attempt so the experiment
       # can be evaluated by grepping run logs — did the shadow post, and how often.
       - name: Record shadow outcome (telemetry, non-gating)
