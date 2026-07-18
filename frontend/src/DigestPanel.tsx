@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchDigest, fetchDigests } from "./api";
+import { Page } from "./Page";
 import type { Digest, DigestSummaryRow } from "./types";
 import { signalKindLabel } from "./types";
 import { isHttpUrl } from "./urls";
@@ -119,7 +120,7 @@ function DigestBody({ digest }: { digest: Digest }) {
   );
 }
 
-export function DigestModal({ onClose }: { onClose: () => void }) {
+export function DigestPage() {
   const [rows, setRows] = useState<DigestSummaryRow[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [digest, setDigest] = useState<Digest | null>(null);
@@ -163,14 +164,7 @@ export function DigestModal({ onClose }: { onClose: () => void }) {
   }, [selectedId]);
 
   return (
-    <div className="backfill-overlay" onClick={onClose}>
-      <div className="backfill-modal activity-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="backfill-head">
-          <strong>📰 Weekly digest</strong>
-          <button className="drawer-close" onClick={onClose} aria-label="Close">
-            ×
-          </button>
-        </div>
+    <Page title="📰 Weekly digest">
 
         {rows.length > 0 && (
           <div className="filters whatsnew-filters">
@@ -206,12 +200,6 @@ export function DigestModal({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
-        <div className="backfill-foot">
-          <button className="discard" onClick={onClose}>
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
+    </Page>
   );
 }

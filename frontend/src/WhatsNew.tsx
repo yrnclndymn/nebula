@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchSignals } from "./api";
+import { Page } from "./Page";
 import { SignalList } from "./SignalTimeline";
 import type { Signal } from "./types";
 import { SIGNAL_KINDS, signalKindLabel } from "./types";
@@ -10,7 +11,7 @@ const FEED_LIMIT = 100;
 // newest-first, filterable by kind (news/blog/event) and topic. A cross-company
 // counterpart to the drawer's per-company timeline. Refetches server-side whenever
 // a filter changes (the topic/kind narrowing lives in the graph query).
-export function WhatsNewModal({ topics, onClose }: { topics: string[]; onClose: () => void }) {
+export function WhatsNewPage({ topics }: { topics: string[] }) {
   const [signals, setSignals] = useState<Signal[]>([]);
   const [kind, setKind] = useState("");
   const [topic, setTopic] = useState("");
@@ -31,14 +32,7 @@ export function WhatsNewModal({ topics, onClose }: { topics: string[]; onClose: 
   }, [kind, topic]);
 
   return (
-    <div className="backfill-overlay" onClick={onClose}>
-      <div className="backfill-modal activity-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="backfill-head">
-          <strong>What&rsquo;s new</strong>
-          <button className="drawer-close" onClick={onClose} aria-label="Close">
-            ×
-          </button>
-        </div>
+    <Page title={<>What&rsquo;s new</>}>
 
         <div className="filters whatsnew-filters">
           <select value={kind} onChange={(e) => setKind(e.target.value)}>
@@ -84,12 +78,6 @@ export function WhatsNewModal({ topics, onClose }: { topics: string[]; onClose: 
           )}
         </div>
 
-        <div className="backfill-foot">
-          <button className="discard" onClick={onClose}>
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
+    </Page>
   );
 }

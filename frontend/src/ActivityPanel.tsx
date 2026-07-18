@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { dismissJob, listJobs } from "./api";
+import { Page } from "./Page";
 import type { JobSummary } from "./types";
 
 // How many recent jobs to show, and how often to poll while anything is active.
@@ -11,7 +12,7 @@ const POLL_MS = 3000;
 // (still running), recently completed (with their outcome line, issue #49), and
 // failed (with the human-readable error and a collapsible raw detail). Reads the
 // existing GET /jobs listing endpoint and polls lightly while work is in flight.
-export function ActivityModal({ onClose }: { onClose: () => void }) {
+export function ActivityPage() {
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -63,17 +64,14 @@ export function ActivityModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="backfill-overlay" onClick={onClose}>
-      <div className="backfill-modal activity-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="backfill-head">
-          <strong>
-            Agent activity{" "}
-            {active.length > 0 && <span className="activity-live">● {active.length} running</span>}
-          </strong>
-          <button className="drawer-close" onClick={onClose} aria-label="Close">
-            ×
-          </button>
-        </div>
+    <Page
+      title={
+        <>
+          Agent activity{" "}
+          {active.length > 0 && <span className="activity-live">● {active.length} running</span>}
+        </>
+      }
+    >
 
         <div className="backfill-table-wrap">
           {error ? (
@@ -100,13 +98,7 @@ export function ActivityModal({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
-        <div className="backfill-foot">
-          <button className="discard" onClick={onClose}>
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
+    </Page>
   );
 }
 

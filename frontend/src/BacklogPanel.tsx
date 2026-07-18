@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { dismissJob, fetchBacklog, getProposal, listJobs, researchBacklog } from "./api";
 import type { BacklogRow, JobSummary, Proposal } from "./types";
+import { Page } from "./Page";
 import { ProposalCard } from "./ProposalCard";
 import { dedupeProposalsByScope } from "./proposalDedupe";
 
@@ -23,7 +24,7 @@ type Emphasis = "score" | "client" | "partner";
 // proposal jobs (pending / ready / error), NOT client-session state — so jobs
 // triggered before a refresh (and any completed-but-un-reviewed proposals) survive
 // navigation instead of being stranded.
-export function BacklogModal({ onClose }: { onClose: () => void }) {
+export function BacklogPage() {
   const [rows, setRows] = useState<BacklogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -210,14 +211,7 @@ export function BacklogModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="backfill-overlay" onClick={onClose}>
-      <div className="backfill-modal backlog-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="backfill-head">
-          <strong>Research backlog</strong>
-          <button className="drawer-close" onClick={onClose} aria-label="Close">
-            ×
-          </button>
-        </div>
+    <Page title="Research backlog">
 
         <div className="backlog-filters">
           <label>
@@ -353,12 +347,8 @@ export function BacklogModal({ onClose }: { onClose: () => void }) {
           <button className="commit" onClick={research} disabled={busy || !selected.size}>
             {busy ? "starting…" : `Research selected (${selected.size})`}
           </button>
-          <button className="discard" onClick={onClose}>
-            Close
-          </button>
         </div>
-      </div>
-    </div>
+    </Page>
   );
 }
 

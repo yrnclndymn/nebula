@@ -27,6 +27,109 @@ body {
   padding: 1.5rem 1.25rem 4rem;
 }
 
+/* --- 3-flow shell (#151): sidebar | content column | (fixed chat rail) ------ */
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+  align-items: flex-start;
+}
+.app-shell .app {
+  flex: 1;
+  min-width: 0;
+}
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  width: 200px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 1.5rem 0.75rem 1rem;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+}
+.sidebar-brand {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0 0.5rem 1rem;
+}
+.sidebar-brand .sub {
+  display: block;
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.75rem;
+}
+.sidebar-link {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font-size: 14px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.sidebar-link:hover {
+  background: var(--row-hover);
+}
+.sidebar-link.active {
+  background: var(--row-hover);
+  font-weight: 600;
+}
+.sidebar-icon {
+  margin-right: 0.35rem;
+}
+.sidebar-spacer {
+  flex: 1;
+}
+.sidebar-signout {
+  color: var(--muted);
+}
+
+/* Routed-page shell + flow tabs */
+.page-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+  font-size: 1.1rem;
+}
+.page-head-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 14px;
+}
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1.25rem;
+}
+.tab-link {
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px 8px 0 0;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 14px;
+  border-bottom: 2px solid transparent;
+}
+.tab-link:hover {
+  background: var(--row-hover);
+  color: var(--text);
+}
+.tab-link.active {
+  color: var(--text);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
 .signin {
   min-height: 100vh;
   display: flex;
@@ -436,14 +539,14 @@ td.muted {
   background: var(--row-hover);
 }
 @media (min-width: 1100px) {
-  .app.chat-open {
+  .app-shell.chat-open .app {
     margin-right: 400px;
   }
   /* When the chat is open too, slot the detail card to the LEFT of the chat
      (offset by its width) so the two sit side by side instead of the chat
      covering the card. With only one open, neither rule fires and it stays in
      the right-hand slot. */
-  .app.chat-open .drawer {
+  .app-shell.chat-open .drawer {
     margin-right: 400px;
   }
 }
