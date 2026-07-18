@@ -133,9 +133,13 @@ jobs:
             4. Post findings as inline comments (each prefixed "🏊 ") when the
                inline-comment tool works; if it is unavailable (backtest on a
                merged PR), carry the findings into the summary instead.
-            5. Post the summary comment EXACTLY ONCE with
-               `gh pr comment ${{ github.event.pull_request.number || inputs.pr_number }}`. Never post a second
-               summary; if the command errors, check with `gh pr view` whether it
+            5. Post the summary comment EXACTLY ONCE. NEVER pass the summary as
+               an inline --body argument (multi-line bodies break shell
+               quoting — a prior run lost its entire review this way). Instead:
+               first Write the summary to /tmp/review-summary.md, then post it
+               with `gh pr comment ${{ github.event.pull_request.number || inputs.pr_number }} --body-file /tmp/review-summary.md`.
+               Never post a second summary; if the command errors, check with
+               `gh pr view ${{ github.event.pull_request.number || inputs.pr_number }} --json comments` whether it
                actually posted before retrying.
 
             The summary MUST follow this exact template:
@@ -178,7 +182,7 @@ jobs:
           claude_args: |
             --model claude-sonnet-5
             --max-turns 60
-            --allowedTools "Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*)"
+            --allowedTools "Read,Grep,Glob,Write(/tmp/review-summary.md),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*)"
 
       # Experiment observability (#166): the harness transcript and the bridge log
       # are the only views into WHY a shadow run went silent (first backtests: 25
