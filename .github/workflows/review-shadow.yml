@@ -162,9 +162,15 @@ jobs:
       - name: Capture shadow transcript + bridge log
         if: ${{ always() && env.HAS_KEY == 'true' }}
         run: |
+          # Redact the key from BOTH artifacts before upload — an upstream
+          # auth-error body can echo the offending key, and the harness
+          # transcript records tool/API responses verbatim (PR #168 review).
+          # Artifacts on a public repo are downloadable by anyone with read.
           mkdir -p /tmp/shadow-artifacts
-          cp /home/runner/work/_temp/claude-execution-output.json /tmp/shadow-artifacts/ 2>/dev/null || true
-          sed "s/${OPENROUTER_API_KEY:-__none__}/[redacted]/g" /tmp/litellm.log > /tmp/shadow-artifacts/litellm.log 2>/dev/null || true
+          for src in /home/runner/work/_temp/claude-execution-output.json /tmp/litellm.log; do
+            [ -f "$src" ] || continue
+            sed "s/${OPENROUTER_API_KEY:-__none__}/[redacted]/g" "$src" > "/tmp/shadow-artifacts/$(basename "$src")"
+          done
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       - name: Upload shadow artifacts
