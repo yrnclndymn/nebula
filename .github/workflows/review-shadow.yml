@@ -182,7 +182,7 @@ jobs:
           claude_args: |
             --model claude-sonnet-5
             --max-turns 60
-            --allowedTools "Read,Grep,Glob,Write,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*)"
+            --allowedTools "Read,Grep,Glob,Write(/tmp/review-summary.md),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*)"
 
       # Experiment observability (#166): the harness transcript and the bridge log
       # are the only views into WHY a shadow run went silent (first backtests: 25
