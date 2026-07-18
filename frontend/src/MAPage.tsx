@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchRecentAcquisitions } from "./api";
 import type { Acquisition } from "./types";
-import { AcquisitionProposalsPanel } from "./AcquisitionProposals"; // #133 review card
 import { Page } from "./Page";
 import { isHttpUrl } from "./urls";
 import { whenLabel } from "./dates";
@@ -9,12 +8,14 @@ import { FilterBar, FilterSelect } from "./FilterBar";
 
 // The M&A page (issue #45, epic #26 M&A Intelligence): recent deals across the
 // tracked space, newest announced first, filterable by topic (either endpoint in
-// that topic) and by acquirer. Modal-as-page, same shell as the Digest / What's
-// new panels. Read-only over the ACQUIRED edges written by the #43 propose→commit
-// flow. Deal facts come from graph data; the `source`/`amount_source` URLs
-// originate from crawled evidence (untrusted) so everything renders as escaped
-// text and a link only appears when the URL is http(s). An amount is shown ONLY
-// next to its `amount_source` citation — an uncited figure is never surfaced.
+// that topic) and by acquirer. The News M&A tab, one of three (What's new /
+// Digest / M&A). Read-only over the ACQUIRED edges written by the #43
+// propose→commit flow — pending acquisition proposals are reviewed in the inbox
+// (#153/#177), not here. Deal facts come from graph data; the
+// `source`/`amount_source` URLs originate from crawled evidence (untrusted) so
+// everything renders as escaped text and a link only appears when the URL is
+// http(s). An amount is shown ONLY next to its `amount_source` citation — an
+// uncited figure is never surfaced.
 
 export function MAPage({ topics }: { topics: string[] }) {
   const [deals, setDeals] = useState<Acquisition[]>([]);
@@ -56,10 +57,6 @@ export function MAPage({ topics }: { topics: string[] }) {
 
   return (
     <Page title={<>🤝 Mergers &amp; acquisitions</>}>
-
-        {/* #133: proposals awaiting review — the propose→review→commit surface.
-            Committing here writes ACQUIRED edges that the table below reads. */}
-        <AcquisitionProposalsPanel heading="Proposals awaiting review" />
 
         <FilterBar variant="whatsnew">
           <FilterSelect
