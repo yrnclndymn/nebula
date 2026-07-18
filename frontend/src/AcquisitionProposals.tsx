@@ -12,6 +12,7 @@ import type {
   AcquisitionProposalRow,
 } from "./types";
 import { isHttpUrl } from "./urls";
+import { usePollJob } from "./usePollJob";
 
 // #133 SPA review card for acquisition proposals — the review surface the #43
 // propose→review→commit loop was missing. A proposal (an `acquisition_proposal`
@@ -116,11 +117,7 @@ export function AcquisitionProposalCard({
   // Poll only while the proposal is still researching — a ready/errored board is
   // static, so we stop hitting the endpoint once the work has settled.
   const researching = (detail?.status ?? row.status) === "pending";
-  useEffect(() => {
-    if (!researching) return;
-    const iv = setInterval(load, POLL_MS);
-    return () => clearInterval(iv);
-  }, [researching, load]);
+  usePollJob(researching, load, { intervalMs: POLL_MS });
 
   async function commit() {
     if (!window.confirm(`Commit this acquisition proposal for ${company}? It writes ACQUIRED edges to the graph.`))
@@ -250,11 +247,7 @@ export function AcquisitionProposalsPanel({
   }, [load]);
 
   const anyResearching = rows.some((r) => r.status === "pending");
-  useEffect(() => {
-    if (!anyResearching) return;
-    const iv = setInterval(load, POLL_MS);
-    return () => clearInterval(iv);
-  }, [anyResearching, load]);
+  usePollJob(anyResearching, load, { intervalMs: POLL_MS });
 
   const onResolved = useCallback((jobId: string) => {
     resolved.current.add(jobId);

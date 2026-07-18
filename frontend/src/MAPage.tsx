@@ -4,6 +4,8 @@ import type { Acquisition } from "./types";
 import { AcquisitionProposalsPanel } from "./AcquisitionProposals"; // #133 review card
 import { Page } from "./Page";
 import { isHttpUrl } from "./urls";
+import { whenLabel } from "./dates";
+import { FilterBar, FilterSelect } from "./FilterBar";
 
 // The M&A page (issue #45, epic #26 M&A Intelligence): recent deals across the
 // tracked space, newest announced first, filterable by topic (either endpoint in
@@ -13,14 +15,6 @@ import { isHttpUrl } from "./urls";
 // originate from crawled evidence (untrusted) so everything renders as escaped
 // text and a link only appears when the URL is http(s). An amount is shown ONLY
 // next to its `amount_source` citation — an uncited figure is never surfaced.
-
-
-// A parseable date renders localised; otherwise keep the raw string (or nothing).
-function whenLabel(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const t = Date.parse(raw);
-  return Number.isNaN(t) ? raw : new Date(t).toLocaleDateString();
-}
 
 export function MAPage({ topics }: { topics: string[] }) {
   const [deals, setDeals] = useState<Acquisition[]>([]);
@@ -67,22 +61,20 @@ export function MAPage({ topics }: { topics: string[] }) {
             Committing here writes ACQUIRED edges that the table below reads. */}
         <AcquisitionProposalsPanel heading="Proposals awaiting review" />
 
-        <div className="filters whatsnew-filters">
-          <select value={topic} onChange={(e) => setTopic(e.target.value)}>
-            <option value="">All topics</option>
-            {topics.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
+        <FilterBar variant="whatsnew">
+          <FilterSelect
+            value={topic}
+            onChange={setTopic}
+            allLabel="All topics"
+            options={topics.map((t) => ({ value: t, label: t }))}
+          />
           <input
             type="search"
             placeholder="Filter by acquirer…"
             value={acquirer}
             onChange={(e) => setAcquirer(e.target.value)}
           />
-        </div>
+        </FilterBar>
 
         <div className="backfill-table-wrap">
           {error ? (

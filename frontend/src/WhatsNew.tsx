@@ -4,6 +4,7 @@ import { Page } from "./Page";
 import { SignalList } from "./SignalTimeline";
 import type { Signal } from "./types";
 import { SIGNAL_KINDS, signalKindLabel } from "./types";
+import { ClearFiltersButton, FilterBar, FilterSelect } from "./FilterBar";
 
 const FEED_LIMIT = 100;
 
@@ -34,33 +35,28 @@ export function WhatsNewPage({ topics }: { topics: string[] }) {
   return (
     <Page title={<>What&rsquo;s new</>}>
 
-        <div className="filters whatsnew-filters">
-          <select value={kind} onChange={(e) => setKind(e.target.value)}>
-            <option value="">All kinds</option>
-            {SIGNAL_KINDS.map((k) => (
-              <option key={k} value={k}>
-                {signalKindLabel(k)}
-              </option>
-            ))}
-          </select>
-          <select value={topic} onChange={(e) => setTopic(e.target.value)}>
-            <option value="">All topics</option>
-            {topics.map((t) => (
-              <option key={t}>{t}</option>
-            ))}
-          </select>
+        <FilterBar variant="whatsnew">
+          <FilterSelect
+            value={kind}
+            onChange={setKind}
+            allLabel="All kinds"
+            options={SIGNAL_KINDS.map((k) => ({ value: k, label: signalKindLabel(k) }))}
+          />
+          <FilterSelect
+            value={topic}
+            onChange={setTopic}
+            allLabel="All topics"
+            options={topics.map((t) => ({ value: t, label: t }))}
+          />
           {(kind || topic) && (
-            <button
-              className="clear"
-              onClick={() => {
+            <ClearFiltersButton
+              onClear={() => {
                 setKind("");
                 setTopic("");
               }}
-            >
-              Clear
-            </button>
+            />
           )}
-        </div>
+        </FilterBar>
 
         <div className="backfill-table-wrap">
           {error ? (

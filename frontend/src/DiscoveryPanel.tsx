@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { getDiscovery, researchDiscovery, startDiscovery } from "./api";
 import type { Discovery } from "./types";
+import { usePollJob } from "./usePollJob";
 
 // Web discovery (issue #75): from a researched company's drawer, use its in-graph
 // similar cohort as a template to search the web for MORE companies like it that
@@ -15,49 +16,43 @@ type Phase = "idle" | "running" | "ready" | "note" | "error";
 export function DiscoveryPanel({ seed }: { seed: string }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [job, setJob] = useState<Discovery | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
   const [note, setNote] = useState<string>("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [researching, setResearching] = useState(false);
   const [startedCount, setStartedCount] = useState<number | null>(null);
-  const stop = useRef(false);
 
-  // The drawer unmounts this panel on close/company-switch; without this the
-  // poll loop keeps hitting the API and calling setState on a dead component.
-  useEffect(() => {
-    stop.current = false;
-    return () => {
-      stop.current = true;
-    };
-  }, []);
-
-  async function poll(jobId: string) {
-    try {
-      const d = await getDiscovery(jobId);
-      if (stop.current) return;
-      setJob(d);
-      if (d.status === "ready") {
-        setPhase("ready");
-        return;
+  // Poll the running discovery job until it settles (ready/error). The drawer keys
+  // this panel on the company name, so switching company remounts it and the hook
+  // tears the poll down — no stale setState on a dead component.
+  usePollJob(
+    phase === "running" && jobId !== null,
+    async (cancelled) => {
+      if (!jobId) return;
+      try {
+        const d = await getDiscovery(jobId);
+        if (cancelled()) return;
+        setJob(d);
+        if (d.status === "ready") setPhase("ready");
+        else if (d.status === "error") setPhase("error");
+      } catch {
+        /* keep polling through transient errors */
       }
-      if (d.status === "error") {
-        setPhase("error");
-        return;
-      }
-    } catch {
-      /* keep polling through transient errors */
-    }
-    if (!stop.current) setTimeout(() => poll(jobId), 2500);
-  }
+    },
+    { leading: true },
+  );
 
   async function discover() {
-    stop.current = false;
+    // Clear any prior job id first so the poller can't fire against a stale id
+    // during a retry before the fresh job has started.
+    setJobId(null);
     setPhase("running");
     setStartedCount(null);
     setSelected(new Set());
     try {
       const res = await startDiscovery(seed);
       if (res.job_id) {
-        poll(res.job_id);
+        setJobId(res.job_id);
       } else {
         setNote(res.note ?? "No similar cohort to search from.");
         setPhase("note");

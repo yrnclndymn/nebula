@@ -4,6 +4,8 @@ import { Page } from "./Page";
 import type { Digest, DigestSummaryRow } from "./types";
 import { signalKindLabel } from "./types";
 import { isHttpUrl } from "./urls";
+import { whenLabel } from "./dates";
+import { FilterBar } from "./FilterBar";
 
 // The weekly digest page (issue #51): a browsable history of "what changed" —
 // new signals grouped by company, newly-researched companies, and notable job
@@ -12,14 +14,6 @@ import { isHttpUrl } from "./urls";
 // signal titles/company names inside it originate from crawled feeds — untrusted —
 // so everything renders as auto-escaped text and a signal only links out when its
 // URL is http(s) (same guard as SignalTimeline).
-
-
-// A parseable date renders localised; otherwise keep the raw string (or nothing).
-function whenLabel(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const t = Date.parse(raw);
-  return Number.isNaN(t) ? raw : new Date(t).toLocaleDateString();
-}
 
 function DigestBody({ digest }: { digest: Digest }) {
   const p = digest.payload;
@@ -167,7 +161,7 @@ export function DigestPage() {
     <Page title="📰 Weekly digest">
 
         {rows.length > 0 && (
-          <div className="filters whatsnew-filters">
+          <FilterBar variant="whatsnew">
             <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
               {rows.map((r) => (
                 <option key={r.id} value={r.id}>
@@ -176,7 +170,7 @@ export function DigestPage() {
                 </option>
               ))}
             </select>
-          </div>
+          </FilterBar>
         )}
 
         <div className="backfill-table-wrap">

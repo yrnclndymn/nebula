@@ -1,27 +1,13 @@
 import type { Signal } from "./types";
 import { signalKindLabel } from "./types";
 import { isHttpUrl } from "./urls";
+import { signalWhen } from "./dates";
 
 // Shared renderer for a list of signals (issue #38): the company drawer's activity
 // timeline and the cross-company "What's new" feed both use it. Signals come from
 // crawled feeds — untrusted — so titles/summaries render as plain (auto-escaped)
 // text nodes and a signal only links out when its URL is http(s). Older signals may
 // predate the backend's http(s) guard, so we re-check here too.
-
-
-// Prefer the parsed date; fall back to the raw feed string, then capture time.
-function signalWhen(s: Signal): string | null {
-  if (s.publishedAt) {
-    const t = Date.parse(s.publishedAt);
-    if (!Number.isNaN(t)) return new Date(t).toLocaleDateString();
-  }
-  if (s.publishedAtRaw) return s.publishedAtRaw;
-  if (s.capturedAt) {
-    const t = Date.parse(s.capturedAt);
-    if (!Number.isNaN(t)) return `captured ${new Date(t).toLocaleDateString()}`;
-  }
-  return null;
-}
 
 // A stable-ish key: the canonical URL is unique per signal; fall back to the title.
 function signalKey(s: Signal, i: number): string {

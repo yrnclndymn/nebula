@@ -1,40 +1,13 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { fetchCompany, fetchSimilar, setKind } from "./api";
 import { AcquisitionsSection } from "./AcquisitionsSection";
 import { DiscoveryPanel } from "./DiscoveryPanel";
+import { Field, Chips } from "./Fields";
 import { PersonDrawer } from "./PersonDrawer";
 import { PotentialAcquirersSection } from "./PotentialAcquirers";
 import { SignalsSection } from "./SignalsSection";
 import type { CompanyDetail, FieldDef, SimilarCompany } from "./types";
 import { fieldApplies, formatCustom, KINDS, kindLabel } from "./types";
-
-function Field({ label, value }: { label: string; value: ReactNode }) {
-  if (value == null || value === "") return null;
-  return (
-    <div className="field">
-      <span className="field-label">{label}</span>
-      <span className="field-value">{value}</span>
-    </div>
-  );
-}
-
-function Chips({ label, items }: { label: string; items: string[] }) {
-  if (!items.length) return null;
-  return (
-    <div className="chips-block">
-      <span className="field-label">
-        {label} <span className="muted">({items.length})</span>
-      </span>
-      <div className="chips">
-        {items.map((it) => (
-          <span key={it} className="chip">
-            {it}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 // Human-readable "why" for a similarity match, e.g. "2 shared clients · same country".
 function similarWhy(s: SimilarCompany): string {
