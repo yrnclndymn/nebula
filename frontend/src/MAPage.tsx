@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { fetchRecentAcquisitions } from "./api";
 import type { Acquisition } from "./types";
 import { AcquisitionProposalsPanel } from "./AcquisitionProposals"; // #133 review card
+import { Page } from "./Page";
 import { isHttpUrl } from "./urls";
 
 // The M&A page (issue #45, epic #26 M&A Intelligence): recent deals across the
@@ -21,7 +22,7 @@ function whenLabel(raw: string | null | undefined): string | null {
   return Number.isNaN(t) ? raw : new Date(t).toLocaleDateString();
 }
 
-export function MAPage({ topics, onClose }: { topics: string[]; onClose: () => void }) {
+export function MAPage({ topics }: { topics: string[] }) {
   const [deals, setDeals] = useState<Acquisition[]>([]);
   const [topic, setTopic] = useState("");
   const [acquirer, setAcquirer] = useState("");
@@ -60,14 +61,7 @@ export function MAPage({ topics, onClose }: { topics: string[]; onClose: () => v
   const rows = needle ? deals.filter((d) => d.acquirer.toLowerCase().includes(needle)) : deals;
 
   return (
-    <div className="backfill-overlay" onClick={onClose}>
-      <div className="backfill-modal activity-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="backfill-head">
-          <strong>🤝 Mergers &amp; acquisitions</strong>
-          <button className="drawer-close" onClick={onClose} aria-label="Close">
-            ×
-          </button>
-        </div>
+    <Page title={<>🤝 Mergers &amp; acquisitions</>}>
 
         {/* #133: proposals awaiting review — the propose→review→commit surface.
             Committing here writes ACQUIRED edges that the table below reads. */}
@@ -154,11 +148,7 @@ export function MAPage({ topics, onClose }: { topics: string[]; onClose: () => v
           <span className="muted small">
             {loading ? "" : `${rows.length} deal${rows.length === 1 ? "" : "s"}`}
           </span>
-          <button className="discard" onClick={onClose}>
-            Close
-          </button>
         </div>
-      </div>
-    </div>
+    </Page>
   );
 }

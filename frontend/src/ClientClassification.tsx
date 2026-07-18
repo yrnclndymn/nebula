@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { commitClassification, getClassification, scanClassification } from "./api";
+import { Page } from "./Page";
 import type { Classification } from "./types";
 
 // Human-in-the-loop review for bulk client-kind classification. A heuristic only
 // *proposes* end-customer stubs (only-inbound-HAS_CLIENT, no other signal);
 // nothing is written until the reviewer approves a subset and commits. Mirrors
 // EntityResolutionModal's scan→poll→commit conventions.
-export function ClientClassificationModal({ onClose }: { onClose: () => void }) {
+export function ClassifyPage() {
   const [res, setRes] = useState<Classification | null>(null);
   const [approved, setApproved] = useState<Set<string>>(new Set());
   const [committing, setCommitting] = useState(false);
@@ -63,14 +64,7 @@ export function ClientClassificationModal({ onClose }: { onClose: () => void }) 
   }
 
   return (
-    <div className="backfill-overlay" onClick={onClose}>
-      <div className="backfill-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="backfill-head">
-          <strong>Classify client companies</strong>
-          <button className="drawer-close" onClick={onClose} aria-label="Close">
-            ×
-          </button>
-        </div>
+    <Page title="Classify client companies">
 
         {!res ? (
           <div className="muted" style={{ padding: "1rem" }}>
@@ -127,13 +121,9 @@ export function ClientClassificationModal({ onClose }: { onClose: () => void }) 
                   ? "committing…"
                   : `Classify ${approved.size} as client`}
               </button>
-              <button className="discard" onClick={onClose}>
-                Cancel
-              </button>
             </>
           )}
         </div>
-      </div>
-    </div>
+    </Page>
   );
 }

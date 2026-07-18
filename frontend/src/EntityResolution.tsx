@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { commitResolution, getResolution, scanResolution } from "./api";
+import { Page } from "./Page";
 import type { Resolution, ResolutionDecision } from "./types";
 
 // One reviewer's working choice for a proposed cluster: which spelling survives,
@@ -12,7 +13,7 @@ interface ClusterChoice {
 
 // Human-in-the-loop review for entity resolution. Detection only proposes;
 // merges are irreversible, so nothing is written until the reviewer commits.
-export function EntityResolutionModal({ onClose }: { onClose: () => void }) {
+export function ResolvePage() {
   const [res, setRes] = useState<Resolution | null>(null);
   const [choices, setChoices] = useState<Record<number, ClusterChoice>>({});
   const [junk, setJunk] = useState<Set<string>>(new Set());
@@ -114,14 +115,7 @@ export function EntityResolutionModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="backfill-overlay" onClick={onClose}>
-      <div className="backfill-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="backfill-head">
-          <strong>Resolve stub companies</strong>
-          <button className="drawer-close" onClick={onClose} aria-label="Close">
-            ×
-          </button>
-        </div>
+    <Page title="Resolve stub companies">
 
         {!res ? (
           <div className="muted" style={{ padding: "1rem" }}>
@@ -236,13 +230,9 @@ export function EntityResolutionModal({ onClose }: { onClose: () => void }) {
                   : `Commit ${mergeCount} merge${mergeCount === 1 ? "" : "s"}` +
                     (junk.size ? ` + ${junk.size} junk` : "")}
               </button>
-              <button className="discard" onClick={onClose}>
-                {done ? "Close" : "Cancel"}
-              </button>
             </>
           )}
         </div>
-      </div>
-    </div>
+    </Page>
   );
 }
