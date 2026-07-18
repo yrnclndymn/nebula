@@ -226,6 +226,7 @@ export interface MergeProposal {
 export interface ClientCandidate {
   name: string;
   inbound: number; // count of inbound HAS_CLIENT edges
+  suggested: ClassificationAction; // pre-selected action per the scan heuristic
 }
 
 export interface Classification {
@@ -234,6 +235,16 @@ export interface Classification {
   candidates: ClientCandidate[];
   stub_count: number;
   error?: string;
+}
+
+// A reviewer's per-candidate decision (#158): relabel the stub to a company KIND,
+// or 'remove' it (a hard delete of a true stub — researched companies are refused
+// server-side). The commit sends a batch of these.
+export type ClassificationAction = (typeof KINDS)[number] | "remove";
+
+export interface ClassificationDecision {
+  name: string;
+  action: ClassificationAction;
 }
 
 // Interactive graph view (issue #50). A node's 1-hop neighbourhood, fetched

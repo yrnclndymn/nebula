@@ -3,6 +3,7 @@ import type {
   Backfill,
   BacklogRow,
   Classification,
+  ClassificationDecision,
   CompanyDetail,
   CompanyRow,
   Discovery,
@@ -84,8 +85,11 @@ export const scanClassification = () =>
 export const getClassification = (jobId: string) =>
   getJson<Classification>(`/classification/${jobId}`);
 
-export const commitClassification = (jobId: string, names: string[]) =>
-  postJson<{ classified?: number; error?: string }>(`/classification/${jobId}/commit`, { names });
+export const commitClassification = (jobId: string, decisions: ClassificationDecision[]) =>
+  postJson<{ classified?: number; removed?: number; refused?: string[]; error?: string }>(
+    `/classification/${jobId}/commit`,
+    { decisions },
+  );
 
 export const fetchBacklog = (limit = 200) => getJson<BacklogRow[]>(`/backlog?limit=${limit}`);
 

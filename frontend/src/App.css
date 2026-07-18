@@ -1489,3 +1489,10 @@ td.muted {
 .leader-research:hover {
   opacity: 1;
 }
+
+/* Classify-companies review (#158): a per-row action <select>. A row set to
+   'remove' is tinted so the irreversible hard-delete stands out before commit. */
+.classify-remove {
+  color: #b91c1c;
+  border-color: #b91c1c;
+}

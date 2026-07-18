@@ -388,43 +388,42 @@ async def list_client_stub_candidates(driver: AsyncDriver) -> list[dict]:
         return [dict(record) async for record in result]
 
 
-async def classify_as_client(driver: AsyncDriver, names: list[str]) -> int:
-    """Set kind='client' on the named companies. IDEMPOTENT.
+async def remove_stub_companies(
+    driver: AsyncDriver, names: list[str]
+) -> tuple[list[str], list[str]]:
+    """HARD-DELETE true stubs by name; REFUSE researched companies. IRREVERSIBLE.
 
-    Defensive re-check at commit time (like the merge TOCTOU guard): re-runs the
-    FULL scan predicate from `list_client_stub_candidates` — not just the cheap
-    field checks — so a node that gained any other signal while review sat open
-    (an outbound edge from an enrichment or a merge, an inbound partnership or
-    LEADS, a junk flag, a website/topic/kind) is skipped rather than mislabelled.
-    A false positive here would silently drop a real ecosystem company from the
-    research backlog, so the guard must match the definition exactly. A fresh scan
-    re-proposes against current state. Returns the count actually classified;
-    unknown names are ignored.
+    A "true stub" is a node with no website and no `TAGGED_AS` topic — the same
+    not-yet-researched shape the merge TOCTOU guard protects (see `_merge_tx`).
+    A node that carries a website or a topic tag has been researched: deleting it
+    would destroy real data, so it is refused (skipped) rather than removed, even
+    if the reviewer approved it (a stub may have been promoted while review sat
+    open). Only the human-in-the-loop classification commit calls this, and only
+    for reviewer-approved 'remove' decisions.
+
+    Returns `(removed_names, refused_names)`. Unknown names simply don't match and
+    appear in neither list. Idempotent: a second call removes nothing new.
     """
     if not names:
-        return 0
+        return [], []
     async with driver.session() as session:
         result = await session.run(
             """
             MATCH (c:Company) WHERE c.name IN $names
-              AND c.kind IS NULL
-              AND c.website IS NULL
-              AND NOT coalesce(c.junk, false)
-              AND NOT (c)-[:TAGGED_AS]->(:Topic)
-              AND EXISTS { (:Company)-[:HAS_CLIENT]->(c) }
-            OPTIONAL MATCH (c)-[out]->()
-            WITH c, count(out) AS outDeg
-            OPTIONAL MATCH (c)<-[inc]-()
-            WITH c, outDeg,
-                 sum(CASE WHEN type(inc) = 'HAS_CLIENT' THEN 0 ELSE 1 END) AS inOther
-            WHERE outDeg = 0 AND inOther = 0
-            SET c.kind = 'client', c.updatedAt = datetime()
-            RETURN count(c) AS classified
+            OPTIONAL MATCH (c)-[t:TAGGED_AS]->(:Topic)
+            WITH c, (c.website IS NULL AND count(t) = 0) AS isStub
+            WITH collect(CASE WHEN isStub THEN c.name END) AS removed,
+                 collect(CASE WHEN NOT isStub THEN c.name END) AS refused,
+                 collect(CASE WHEN isStub THEN c END) AS doomed
+            FOREACH (d IN doomed | DETACH DELETE d)
+            RETURN removed, refused
             """,
             names=names,
         )
         record = await result.single()
-    return record["classified"] if record else 0
+    if record is None:
+        return [], []
+    return list(record["removed"]), list(record["refused"])
 
 
 async def flag_junk(driver: AsyncDriver, names: list[str]) -> int:

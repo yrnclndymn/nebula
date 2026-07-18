@@ -332,15 +332,16 @@ async def classification_status(job_id: str) -> dict:
 
 
 class ClassificationCommitRequest(BaseModel):
-    # Names the reviewer approved for kind='client'. Human-in-the-loop commit step;
-    # the mutation re-checks each is still an unclassified stub before writing.
-    names: list[str]
+    # Per-name decisions {"name", "action"}, action ∈ KINDS | 'remove'. Human-in-
+    # the-loop commit step: a kind relabels the stub; 'remove' hard-deletes a true
+    # stub (researched companies are refused server-side, never deleted).
+    decisions: list[dict]
 
 
 @router.post("/classification/{job_id}/commit")
 async def classification_commit(job_id: str, req: ClassificationCommitRequest) -> dict:
-    """Apply kind='client' to the user-approved candidate names."""
-    return _ok_or_404(await commit_classification(job_id, req.names))
+    """Apply the reviewer's per-name classification decisions (set kind / remove)."""
+    return _ok_or_404(await commit_classification(job_id, req.decisions))
 
 
 class RefreshRequest(BaseModel):

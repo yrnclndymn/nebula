@@ -10,6 +10,11 @@ import { useState, type ReactNode } from "react";
 // Built with #158's per-item decisions in mind: the body is a free-form slot, so
 // a per-row kind-select / remove control drops into the flow's body without any
 // change to this shell — the shell only knows "there is a batch to commit".
+//
+// `confirmCommit` is an optional last-chance gate (#158): a flow whose batch may
+// include irreversible actions (a hard 'remove') passes a predicate that returns
+// false to abort the commit before anything is sent. Flows without irreversible
+// actions omit it and commit straight through.
 export function BatchReview<T extends { status: string; error?: string }, R extends { error?: string }>({
   state,
   scanningLabel,
@@ -18,6 +23,7 @@ export function BatchReview<T extends { status: string; error?: string }, R exte
   canCommit,
   onCommit,
   doneMessage,
+  confirmCommit,
 }: {
   state: T | null; // null while the scan is still running
   scanningLabel: string;
@@ -26,12 +32,14 @@ export function BatchReview<T extends { status: string; error?: string }, R exte
   canCommit: boolean;
   onCommit: () => Promise<R>;
   doneMessage: (res: R) => string;
+  confirmCommit?: () => boolean; // return false to abort before committing
 }) {
   const [committing, setCommitting] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function commit() {
+    if (confirmCommit && !confirmCommit()) return; // reviewer backed out — leave state as-is
     setCommitting(true);
     setError(null);
     try {
