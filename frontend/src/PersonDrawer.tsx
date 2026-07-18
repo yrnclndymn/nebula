@@ -5,6 +5,7 @@ import { signalKindLabel } from "./types";
 import { isHttpUrl } from "./urls";
 import { signalWhen } from "./dates";
 import { Field } from "./Fields";
+import { PersonResearchButton } from "./PersonProposalCard";
 import { usePollJob } from "./usePollJob";
 
 // The person page (#42), rendered as a drawer over the company drawer. Opened by
@@ -201,6 +202,18 @@ export function PersonDrawer({ personId, onClose }: { personId: string; onClose:
             </div>
 
             {person.bio && <p className="about">{person.bio}</p>}
+
+            {/* #178: research this person (bio/links/roles, each cited) via #40's
+                propose→review→commit. Scoped by a company they lead so the backend
+                targets this exact human — needs at least one current (LEADS) role. */}
+            {person.currentRoles.length > 0 && (
+              <div className="person-research-section">
+                <PersonResearchButton
+                  name={person.name}
+                  company={person.currentRoles[0].company}
+                />
+              </div>
+            )}
 
             <ExpertiseSection person={person} onRegenerated={load} />
 

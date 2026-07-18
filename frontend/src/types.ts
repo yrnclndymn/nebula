@@ -595,3 +595,49 @@ export interface PersonExpertiseJob {
   outcome?: string;
   error?: string;
 }
+
+// --- Person research proposal (#40 propose→review→commit, surfaced #178) ----------
+// The person-enrichment review payload from GET /people/enrich/{job_id}: the durable
+// `person_proposal` job carrying the provenance-filtered proposed facts + citations +
+// a field-by-field diff against what's already stored. snake_case fields mirror the
+// backend PersonRecord (app/graph/person_models.py) passed straight through. Every
+// fact here is cited by construction; source URLs are still http(s)-guarded at render.
+export interface PersonPriorRole {
+  company: string;
+  title: string | null;
+  from_year: number | null;
+  to_year: number | null;
+  source: string | null;
+}
+
+export interface PersonProposalRecord {
+  name: string;
+  company: string; // scoping company (the person leads it) — locates their :Person node
+  title: string | null;
+  bio: string | null;
+  linkedin: string | null;
+  personal_site: string | null;
+  talks: string[];
+  prior_roles: PersonPriorRole[];
+  citations: { field: string; value: string; source: string; source_date: string | null }[];
+}
+
+// One changed scalar (`{field, old, new}`) or a list field (talks: old/new arrays;
+// prior_roles: old = prior count, new = the proposed roles) from `diff_person`.
+export interface PersonProposalDiffEntry {
+  field: string;
+  old: unknown;
+  new: unknown;
+}
+
+export interface PersonProposal {
+  job_id: string;
+  name: string;
+  company?: string;
+  status: "pending" | "ready" | "error" | "committed";
+  exists?: boolean;
+  record?: PersonProposalRecord;
+  diff?: PersonProposalDiffEntry[];
+  outcome?: string;
+  error?: string;
+}
