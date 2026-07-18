@@ -8,6 +8,7 @@ images (multimodal) when the filename/alt don't reveal them.
 """
 
 import asyncio
+import logging
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -24,6 +25,8 @@ from app.graph import cache
 from app.graph.driver import get_driver
 from app.tools.encoding import response_text, sanitize_surrogates
 from app.tools.social import find_social_links
+
+logger = logging.getLogger("nebula.tools.web")
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; NebulaResearchBot/0.1)"}
 _MAX_LINKS = 60
@@ -123,7 +126,13 @@ async def fetch_page(url: str) -> dict:
     budget.charge_page()
     page = await asyncio.to_thread(_fetch_page_live, url)
     if "error" not in page:
-        await cache.store_page(driver, page)
+        # The cache write is optional garnish (#84): a store failure — e.g. a lone
+        # surrogate the driver can't UTF-8-encode — must not propagate and kill the
+        # whole research job. Log and continue with the freshly fetched page (#146).
+        try:
+            await cache.store_page(driver, page)
+        except Exception as exc:  # noqa: BLE001 — cache is garnish, never fail the job
+            logger.warning("cache store_page failed for %s (%s); continuing uncached", url, exc)
     return page
 
 

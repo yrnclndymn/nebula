@@ -73,6 +73,63 @@ def test_deep_sanitize_is_noop_on_clean_page():
     assert out["text"] is clean_text
 
 
+# --- #146: the WRITE side must scrub surrogates too (symmetry with the read) -----
+
+
+class _FakeSession:
+    """Captures the parameters store_page hands to session.run — no DB needed."""
+
+    def __init__(self, captured: dict):
+        self._captured = captured
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def run(self, _query, **params):
+        self._captured.update(params)
+
+
+class _FakeDriver:
+    def __init__(self):
+        self.captured: dict = {}
+
+    def session(self):
+        return _FakeSession(self.captured)
+
+
+def test_store_page_sanitizes_write_params():
+    """A page carrying a lone surrogate in its text, a link href/text, an image alt
+    and a social URL must be scrubbed before it reaches the driver: `text`/`url` are
+    passed raw (a surrogate there crashes the driver's UTF-8 encode — the #146 crash),
+    and the JSON payloads must not stash a surrogate a later read resurrects."""
+    driver = _FakeDriver()
+    poisoned = {
+        "url": f"https://x.example/{_SURROGATE}",
+        "text": f"clean lead {_SURROGATE} tail",
+        "links": [{"url": f"https://x.example/a{_SURROGATE}", "text": f"About {_SURROGATE} us"}],
+        "images": [{"src": "https://x.example/logo.png", "alt": f"logo {_SURROGATE}"}],
+        "social": {"linkedin": f"https://linkedin.example/{_SURROGATE}"},
+    }
+    asyncio.run(cache.store_page(driver, poisoned))
+
+    # Raw string params must be UTF-8-encodable — this is exactly the encode the
+    # real driver runs, and where the prod job died.
+    driver.captured["text"].encode("utf-8")
+    driver.captured["url"].encode("utf-8")
+    assert _SURROGATE not in driver.captured["text"]
+    assert "clean lead" in driver.captured["text"] and "tail" in driver.captured["text"]
+
+    # JSON payloads: parse them back and confirm no surrogate survived the write.
+    import json
+
+    for key in ("links", "images", "social"):
+        _assert_utf8_encodable(json.loads(driver.captured[key]))
+    assert _SURROGATE not in json.loads(driver.captured["links"])[0]["url"]
+
+
 def test_cached_page_read_sanitizes_legacy_poison_roundtrip():
     """End-to-end reproduction: store a page whose link text holds a surrogate
     (json.dumps escapes it, so Neo4j accepts the write), then read it back and

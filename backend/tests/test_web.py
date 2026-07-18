@@ -1,9 +1,12 @@
 """Logo image MIME filtering — Gemini rejects non-raster types (SVG etc.),
 plus UTF-8-safe page decoding (#89)."""
 
+import asyncio
+
 import requests
 
-from app.tools.web import _fetch_page_live, _gemini_image_mime, web_search
+from app.tools import web as web_mod
+from app.tools.web import _fetch_page_live, _gemini_image_mime, fetch_page, web_search
 
 
 def test_accepts_supported_raster_types():
@@ -98,3 +101,27 @@ def test_fetch_page_survives_body_that_decodes_to_surrogates(monkeypatch):
     page = _fetch_page_live("https://acme.example/")
     page["text"].encode("utf-8")  # must not raise
     assert "closed" in page["text"]
+
+
+# --- #146: a cache-write failure is garnish and must not fail the research job ----
+
+
+def test_fetch_page_survives_store_page_failure(monkeypatch):
+    # The cache write is optional garnish (#84): if store_page raises — e.g. a lone
+    # surrogate the driver can't UTF-8-encode — fetch_page must log and return the
+    # freshly fetched page rather than propagate and kill the whole job (#146).
+    fetched = {"url": "https://acme.example/", "text": "Acme news", "links": [], "images": []}
+
+    async def _no_cache(_driver, _url, ttl_days=None):
+        return None
+
+    async def _boom(_driver, _page):
+        raise UnicodeEncodeError("utf-8", "x", 0, 1, "surrogates not allowed")
+
+    monkeypatch.setattr(web_mod, "get_driver", lambda: object())
+    monkeypatch.setattr(web_mod.cache, "get_cached_page", _no_cache)
+    monkeypatch.setattr(web_mod.cache, "store_page", _boom)
+    monkeypatch.setattr(web_mod, "_fetch_page_live", lambda url: fetched)
+
+    page = asyncio.run(fetch_page("https://acme.example/"))
+    assert page == fetched  # the job continues with the fetched page, uncached

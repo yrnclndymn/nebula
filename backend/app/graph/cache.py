@@ -76,6 +76,13 @@ async def get_cached_page(
 
 
 async def store_page(driver: AsyncDriver, page: dict) -> None:
+    # Sanitize the whole page dict before writing: a lone surrogate anywhere in it
+    # — a link href/text, an image alt, a social URL, or the raw `text`/`url` params
+    # passed straight to the driver — makes the driver's UTF-8 encode raise and would
+    # kill the research job (#146). The read side already scrubs (#130); guard the
+    # write symmetrically so a poisoned crawl never reaches the encoder, and so no
+    # surrogate is stashed into linksJson/imagesJson for a later read to resurrect.
+    page = _deep_sanitize(page)
     async with driver.session() as session:
         await session.run(
             "MERGE (p:Page {url: $url}) "
