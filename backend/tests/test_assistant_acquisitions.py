@@ -108,6 +108,34 @@ def test_tool_relays_not_found_error(monkeypatch):
     assert "error" in out and "no company named" in out["error"]
 
 
+def test_respond_surfaces_turn_acquisitions(monkeypatch):
+    """End-to-end turn wiring: a tool appending to the collector DURING the turn
+    surfaces in ChatTurn.acquisitions (the /chat payload), and the collector is
+    reset afterwards — the same contract the proposals/backfills/merges keep."""
+    from app.agents.assistant import service
+
+    ref = {"job_id": "abc12345", "company": "Acme __acqtest__"}
+
+    class _FakeSessions:
+        async def get_session(self, **kwargs):
+            return object()  # existing session -> no memory preamble path
+
+    class _FakeRunner:
+        async def run_async(self, **kwargs):
+            collected = acq.turn_acquisitions.get()
+            assert collected is not None  # respond() installed the collector
+            collected.append(dict(ref))
+            if False:  # pragma: no cover — makes this an async generator
+                yield
+
+    monkeypatch.setattr(service, "_runner", _FakeRunner())
+    monkeypatch.setattr(service, "_sessions", _FakeSessions())
+
+    turn = asyncio.run(service.respond("sess-acqtest", "record the Acme deal"))
+    assert turn.acquisitions == [ref]
+    assert acq.turn_acquisitions.get() is None  # reset once the turn ended
+
+
 def test_tool_has_no_direct_write_path():
     """The module only delegates — it must not import any graph write path (upsert /
     driver), which would be a way to record an acquisition without the user's commit.
