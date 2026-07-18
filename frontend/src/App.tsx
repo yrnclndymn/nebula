@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
 import "./App.css";
 import {
   fetchCompanies,
@@ -10,8 +9,10 @@ import {
   fetchTopics,
 } from "./api";
 import type { CompanyDetail, CompanyRow, FieldDef } from "./types";
-import { fieldApplies, formatCustom, KINDS, kindLabel } from "./types";
+import { KINDS, kindLabel } from "./types";
 import { CompanyDrawer } from "./CompanyDrawer";
+import { CompanyTable } from "./CompanyTable";
+import { loadColumnOrder, saveColumnOrder } from "./columnOrder";
 import { GraphView } from "./GraphView";
 import { ChatPanel } from "./ChatPanel";
 import { EntityResolutionModal } from "./EntityResolution";
@@ -23,37 +24,10 @@ import { DigestModal } from "./DigestPanel";
 import { MAPage } from "./MAPage"; // #45 M&A view
 import { AUTH_ENABLED, signOutUser } from "./firebase";
 
-type SortKey = "name" | "headcount" | "yearFounded" | "partnerCount" | "clientCount";
-
-type Column = {
-  id: string;
-  label: string;
-  sortKey?: SortKey; // sortable when set
-  numeric?: boolean;
-  cellClass?: string;
-  render: (c: CompanyRow) => ReactNode;
-};
-
-const ORDER_KEY = "nebula.columnOrder";
-
-function loadOrder(): string[] {
-  try {
-    const raw = localStorage.getItem(ORDER_KEY);
-    return raw ? (JSON.parse(raw) as string[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function compare(a: CompanyRow, b: CompanyRow, key: SortKey): number {
-  const av = a[key];
-  const bv = b[key];
-  if (av == null && bv == null) return 0;
-  if (av == null) return 1; // nulls last
-  if (bv == null) return -1;
-  if (typeof av === "number" && typeof bv === "number") return av - bv;
-  return String(av).localeCompare(String(bv));
-}
+// The full-screen review/browse surfaces, each a modal-as-page; one is open at a
+// time. The chat panel and graph view are separate: chat is a side panel that
+// coexists with everything, and the graph carries its own seed state.
+type Modal = "backlog" | "activity" | "whatsnew" | "digest" | "ma" | "resolve" | "classify";
 
 export default function App() {
   const [companies, setCompanies] = useState<CompanyRow[]>([]);
@@ -69,22 +43,12 @@ export default function App() {
   const [companyType, setCompanyType] = useState("");
   const [kind, setKind] = useState("");
   const [country, setCountry] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("name");
-  const [sortAsc, setSortAsc] = useState(true);
 
-  const [order, setOrder] = useState<string[]>(loadOrder);
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [order, setOrder] = useState<string[]>(loadColumnOrder);
 
   const [selected, setSelected] = useState<CompanyDetail | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
-  const [resolveOpen, setResolveOpen] = useState(false);
-  const [classifyOpen, setClassifyOpen] = useState(false);
-  const [backlogOpen, setBacklogOpen] = useState(false);
-  const [activityOpen, setActivityOpen] = useState(false);
-  const [whatsNewOpen, setWhatsNewOpen] = useState(false);
-  const [digestOpen, setDigestOpen] = useState(false);
-  const [maOpen, setMaOpen] = useState(false); // #45 M&A view
+  const [modal, setModal] = useState<Modal | null>(null);
   const [graphSeed, setGraphSeed] = useState<string | null>(null);
   const [graphOpen, setGraphOpen] = useState(false);
 
@@ -109,7 +73,7 @@ export default function App() {
 
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    const filtered = companies.filter((c) => {
+    return companies.filter((c) => {
       if (topic && !c.topics.includes(topic)) return false;
       if (companyType && !c.companyTypes.includes(companyType)) return false;
       if (kind && c.kind !== kind) return false;
@@ -120,86 +84,16 @@ export default function App() {
       }
       return true;
     });
-    filtered.sort((a, b) => (sortAsc ? 1 : -1) * compare(a, b, sortKey));
-    return filtered;
-  }, [companies, search, topic, companyType, kind, country, sortKey, sortAsc]);
+  }, [companies, search, topic, companyType, kind, country]);
 
-  // Every column is one config object, so header and body render from the same list.
-  const allColumns: Column[] = useMemo(
-    () => [
-      { id: "name", label: "Company", sortKey: "name", cellClass: "name", render: (c) => c.name },
-      { id: "headcount", label: "Headcount", sortKey: "headcount", numeric: true, cellClass: "num", render: (c) => c.headcount ?? "—" },
-      { id: "yearFounded", label: "Founded", sortKey: "yearFounded", numeric: true, cellClass: "num", render: (c) => c.yearFounded ?? "—" },
-      { id: "partnerCount", label: "Partners", sortKey: "partnerCount", numeric: true, cellClass: "num", render: (c) => c.partnerCount || "—" },
-      { id: "clientCount", label: "Clients", sortKey: "clientCount", numeric: true, cellClass: "num", render: (c) => c.clientCount || "—" },
-      { id: "kind", label: "Kind", cellClass: "muted", render: (c) => (c.kind ? kindLabel(c.kind) : "—") },
-      {
-        id: "hq",
-        label: "HQ",
-        cellClass: "muted",
-        render: (c) => [c.hqCity, c.hqCountry].filter(Boolean).join(", ") || c.hqLocation || "—",
-      },
-      {
-        id: "types",
-        label: "Types",
-        render: (c) =>
-          c.companyTypes.map((t) => (
-            <span key={t} className="tag">
-              {t}
-            </span>
-          )),
-      },
-      { id: "funding", label: "Funding", cellClass: "muted", render: (c) => c.funding ?? "—" },
-      ...fields.map(
-        (f): Column => ({
-          id: `custom:${f.name}`,
-          label: f.label,
-          cellClass: "muted",
-          render: (c) => (fieldApplies(f, c.kind) ? formatCustom(c.custom?.[f.name]) : "—"),
-        }),
-      ),
-    ],
-    [fields],
-  );
-
-  // Apply the saved order; append any new columns, drop any that no longer exist.
-  const columns: Column[] = useMemo(() => {
-    const byId = new Map(allColumns.map((c) => [c.id, c]));
-    const ordered = order.filter((id) => byId.has(id)).map((id) => byId.get(id)!);
-    const rest = allColumns.filter((c) => !order.includes(c.id));
-    return [...ordered, ...rest];
-  }, [allColumns, order]);
-
-  function saveOrder(ids: string[]) {
+  function reorderColumns(ids: string[]) {
     setOrder(ids);
-    try {
-      localStorage.setItem(ORDER_KEY, JSON.stringify(ids));
-    } catch {
-      /* localStorage unavailable — order just won't persist */
-    }
-  }
-
-  function dropColumn(targetId: string) {
-    if (!dragId || dragId === targetId) return;
-    const ids = columns.map((c) => c.id);
-    ids.splice(ids.indexOf(dragId), 1);
-    ids.splice(ids.indexOf(targetId), 0, dragId);
-    saveOrder(ids);
-    setDragId(null);
-    setDragOverId(null);
+    saveColumnOrder(ids);
   }
 
   function updateCompanyKind(name: string, newKind: string | null) {
     setCompanies((cs) => cs.map((c) => (c.name === name ? { ...c, kind: newKind } : c)));
     setSelected((s) => (s && s.name === name ? { ...s, kind: newKind } : s));
-  }
-
-  function toggleSort(key: SortKey) {
-    if (key === sortKey) setSortAsc((v) => !v);
-    else {
-      setSortKey(key);
-      setSortAsc(key === "name");
-    }
   }
 
   function openCompany(name: string) {
@@ -213,6 +107,16 @@ export default function App() {
     setGraphOpen(true);
   }
 
+  const modalButtons: { modal: Modal; label: string; title: string }[] = [
+    { modal: "backlog", label: "📋 Backlog", title: "Ranked un-researched stubs — review and research" },
+    { modal: "activity", label: "📡 Activity", title: "Live agent job activity — running, completed, failed" },
+    { modal: "whatsnew", label: "🆕 What's new", title: "Recent signals across all companies — news, blog posts, events" },
+    { modal: "digest", label: "📰 Digest", title: "Weekly digest — what changed: new signals, newly-researched companies, notable changes" },
+    { modal: "ma", label: "🤝 M&A", title: "Mergers & acquisitions — recent deals across the space, filter by topic/acquirer" },
+    { modal: "resolve", label: "🧩 Resolve stubs", title: "Dedup stub companies" },
+    { modal: "classify", label: "🏷 Classify clients", title: "Bulk-label end-customer stubs as clients" },
+  ];
+
   return (
     <div className={chatOpen ? "app chat-open" : "app"}>
       <header className="topbar">
@@ -224,31 +128,15 @@ export default function App() {
             {loading ? "loading…" : `${rows.length} / ${companies.length} companies`}
           </span>
           {order.length > 0 && (
-            <button className="chat-toggle" onClick={() => saveOrder([])} title="Reset column order">
+            <button className="chat-toggle" onClick={() => reorderColumns([])} title="Reset column order">
               ↺ Columns
             </button>
           )}
-          <button className="chat-toggle" onClick={() => setBacklogOpen(true)} title="Ranked un-researched stubs — review and research">
-            📋 Backlog
-          </button>
-          <button className="chat-toggle" onClick={() => setActivityOpen(true)} title="Live agent job activity — running, completed, failed">
-            📡 Activity
-          </button>
-          <button className="chat-toggle" onClick={() => setWhatsNewOpen(true)} title="Recent signals across all companies — news, blog posts, events">
-            🆕 What's new
-          </button>
-          <button className="chat-toggle" onClick={() => setDigestOpen(true)} title="Weekly digest — what changed: new signals, newly-researched companies, notable changes">
-            📰 Digest
-          </button>
-          <button className="chat-toggle" onClick={() => setMaOpen(true)} title="Mergers & acquisitions — recent deals across the space, filter by topic/acquirer">
-            🤝 M&amp;A
-          </button>
-          <button className="chat-toggle" onClick={() => setResolveOpen(true)} title="Dedup stub companies">
-            🧩 Resolve stubs
-          </button>
-          <button className="chat-toggle" onClick={() => setClassifyOpen(true)} title="Bulk-label end-customer stubs as clients">
-            🏷 Classify clients
-          </button>
+          {modalButtons.map((b) => (
+            <button key={b.modal} className="chat-toggle" onClick={() => setModal(b.modal)} title={b.title}>
+              {b.label}
+            </button>
+          ))}
           <button
             className="chat-toggle"
             onClick={() => {
@@ -320,62 +208,14 @@ export default function App() {
 
       {error && <div className="error">{error}</div>}
 
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              {columns.map((col) => (
-                <th
-                  key={col.id}
-                  className={[
-                    col.numeric ? "num" : "",
-                    dragId === col.id ? "dragging" : "",
-                    dragOverId === col.id ? "drag-over" : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  draggable
-                  onDragStart={() => setDragId(col.id)}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    if (dragId && dragOverId !== col.id) setDragOverId(col.id);
-                  }}
-                  onDragLeave={() => setDragOverId((d) => (d === col.id ? null : d))}
-                  onDrop={() => dropColumn(col.id)}
-                  onDragEnd={() => {
-                    setDragId(null);
-                    setDragOverId(null);
-                  }}
-                  onClick={() => col.sortKey && toggleSort(col.sortKey)}
-                >
-                  {col.label}
-                  {col.sortKey && sortKey === col.sortKey && (
-                    <span className="arrow">{sortAsc ? " ▲" : " ▼"}</span>
-                  )}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((c) => (
-              <tr key={c.name} onClick={() => openCompany(c.name)}>
-                {columns.map((col) => (
-                  <td key={col.id} className={col.cellClass ?? ""}>
-                    {col.render(c)}
-                  </td>
-                ))}
-              </tr>
-            ))}
-            {!loading && rows.length === 0 && (
-              <tr>
-                <td colSpan={columns.length} className="empty">
-                  No companies match these filters.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <CompanyTable
+        rows={rows}
+        fields={fields}
+        loading={loading}
+        order={order}
+        onReorder={reorderColumns}
+        onOpenCompany={openCompany}
+      />
 
       {graphOpen && (
         <GraphView
@@ -395,13 +235,13 @@ export default function App() {
         />
       )}
       {chatOpen && <ChatPanel onClose={() => setChatOpen(false)} />}
-      {resolveOpen && <EntityResolutionModal onClose={() => setResolveOpen(false)} />}
-      {classifyOpen && <ClientClassificationModal onClose={() => setClassifyOpen(false)} />}
-      {backlogOpen && <BacklogModal onClose={() => setBacklogOpen(false)} />}
-      {activityOpen && <ActivityModal onClose={() => setActivityOpen(false)} />}
-      {whatsNewOpen && <WhatsNewModal topics={topics} onClose={() => setWhatsNewOpen(false)} />}
-      {digestOpen && <DigestModal onClose={() => setDigestOpen(false)} />}
-      {maOpen && <MAPage topics={topics} onClose={() => setMaOpen(false)} />}
+      {modal === "resolve" && <EntityResolutionModal onClose={() => setModal(null)} />}
+      {modal === "classify" && <ClientClassificationModal onClose={() => setModal(null)} />}
+      {modal === "backlog" && <BacklogModal onClose={() => setModal(null)} />}
+      {modal === "activity" && <ActivityModal onClose={() => setModal(null)} />}
+      {modal === "whatsnew" && <WhatsNewModal topics={topics} onClose={() => setModal(null)} />}
+      {modal === "digest" && <DigestModal onClose={() => setModal(null)} />}
+      {modal === "ma" && <MAPage topics={topics} onClose={() => setModal(null)} />}
     </div>
   );
 }
