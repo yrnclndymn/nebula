@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { fetchPerson, getPersonExpertiseJob, regeneratePersonExpertise } from "./api";
 import type { PersonProfile, PersonRole, PersonSignal } from "./types";
 import { signalKindLabel } from "./types";
 import { isHttpUrl } from "./urls";
+import { signalWhen } from "./dates";
+import { Field } from "./Fields";
+import { usePollJob } from "./usePollJob";
 
 // The person page (#42), rendered as a drawer over the company drawer. Opened by
 // clicking a leader's name in CompanyDrawer. Shows identity + roles + their linked-
@@ -10,16 +13,6 @@ import { isHttpUrl } from "./urls";
 // The summary and signal titles are crawled/derived — untrusted — so they render as
 // plain (auto-escaped) text and only link out when a URL is http(s).
 
-
-function Field({ label, value }: { label: string; value: ReactNode }) {
-  if (value == null || value === "") return null;
-  return (
-    <div className="field">
-      <span className="field-label">{label}</span>
-      <span className="field-value">{value}</span>
-    </div>
-  );
-}
 
 function relationLabel(relation: string): string {
   return relation.replace(/_/g, " ").toLowerCase();
@@ -30,19 +23,6 @@ function roleLine(r: PersonRole): string {
   const span =
     r.from || r.to ? ` (${r.from ?? "?"}–${r.to ?? "present"})` : "";
   return base + span;
-}
-
-function personSignalWhen(s: PersonSignal): string | null {
-  if (s.publishedAt) {
-    const t = Date.parse(s.publishedAt);
-    if (!Number.isNaN(t)) return new Date(t).toLocaleDateString();
-  }
-  if (s.publishedAtRaw) return s.publishedAtRaw;
-  if (s.capturedAt) {
-    const t = Date.parse(s.capturedAt);
-    if (!Number.isNaN(t)) return `captured ${new Date(t).toLocaleDateString()}`;
-  }
-  return null;
 }
 
 function formatGeneratedAt(iso: string | null): string {
@@ -62,42 +42,39 @@ function ExpertiseSection({
 }) {
   const [phase, setPhase] = useState<"idle" | "running" | "error">("idle");
   const [note, setNote] = useState("");
-  const stop = useRef(false);
+  const [jobId, setJobId] = useState<string | null>(null);
 
-  useEffect(() => {
-    stop.current = false;
-    return () => {
-      stop.current = true;
-    };
-  }, []);
-
-  async function poll(jobId: string) {
-    try {
-      const job = await getPersonExpertiseJob(jobId);
-      if (stop.current) return;
-      if (job.status === "done") {
-        setPhase("idle");
-        setNote("");
-        onRegenerated();
-        return;
+  // Poll the regeneration job until it settles, then refresh the person so the
+  // new summary shows.
+  usePollJob(
+    phase === "running" && jobId !== null,
+    async (cancelled) => {
+      if (!jobId) return;
+      try {
+        const job = await getPersonExpertiseJob(jobId);
+        if (cancelled()) return;
+        if (job.status === "done") {
+          setPhase("idle");
+          setNote("");
+          onRegenerated();
+        } else if (job.status === "error") {
+          setNote(job.error ?? "generation failed");
+          setPhase("error");
+        }
+      } catch {
+        /* keep polling through transient errors */
       }
-      if (job.status === "error") {
-        setNote(job.error ?? "generation failed");
-        setPhase("error");
-        return;
-      }
-    } catch {
-      /* keep polling through transient errors */
-    }
-    if (!stop.current) setTimeout(() => poll(jobId), 2500);
-  }
+    },
+    { leading: true },
+  );
 
   async function regenerate() {
+    setJobId(null);
     setPhase("running");
     setNote("");
     try {
       const res = await regeneratePersonExpertise(person.id);
-      poll(res.job_id);
+      setJobId(res.job_id);
     } catch {
       setNote("could not start generation");
       setPhase("error");
@@ -144,7 +121,7 @@ function PersonSignalList({ signals }: { signals: PersonSignal[] }) {
   return (
     <ul className="signal-list">
       {signals.map((s, i) => {
-        const when = personSignalWhen(s);
+        const when = signalWhen(s);
         const title = s.title || s.url || "(untitled)";
         return (
           <li key={s.url || s.title || String(i)} className="signal-item">

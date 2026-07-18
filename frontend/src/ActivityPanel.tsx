@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { dismissJob, listJobs } from "./api";
 import { Page } from "./Page";
 import type { JobSummary } from "./types";
+import { usePollJob } from "./usePollJob";
 
 // How many recent jobs to show, and how often to poll while anything is active.
 const ACTIVITY_LIMIT = 60;
@@ -33,17 +34,19 @@ export function ActivityPage() {
 
   // Light polling ONLY while something is still active — a finished board is
   // static, so we stop hitting the endpoint once nothing is running.
-  useEffect(() => {
-    if (active.length === 0) return;
-    const iv = setInterval(async () => {
+  usePollJob(
+    active.length > 0,
+    async (cancelled) => {
       try {
-        setJobs(await listJobs({ limit: ACTIVITY_LIMIT }));
+        const next = await listJobs({ limit: ACTIVITY_LIMIT });
+        if (cancelled()) return;
+        setJobs(next);
       } catch {
         /* transient — keep the last snapshot and try again next tick */
       }
-    }, POLL_MS);
-    return () => clearInterval(iv);
-  }, [active.length]);
+    },
+    { intervalMs: POLL_MS },
+  );
 
   // Dismiss a finished/errored job from history (#73). Ready jobs may hold
   // un-reviewed work, so those confirm first; pending jobs never get the button.

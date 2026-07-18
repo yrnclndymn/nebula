@@ -1406,3 +1406,13 @@ td.muted {
 .acq-reason {
   font-weight: 500;
 }
+
+/* Headcount range filter (#7): two compact number inputs in the companies filter
+   bar. The inner inputs inherit the shared `.filters input` styling. */
+.headcount-range {
+  display: inline-flex;
+  gap: 0.4rem;
+}
+.headcount-range input {
+  width: 6.5rem;
+}

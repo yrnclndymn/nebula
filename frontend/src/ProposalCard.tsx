@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { commitProposal, getProposal } from "./api";
 import type { Proposal, ScalarDiff } from "./types";
+import { usePollJob } from "./usePollJob";
 
 export type CommitStatus = "idle" | "committing" | "committed" | "discarded";
 
@@ -53,18 +54,15 @@ export function ProposalCard({
   const [error, setError] = useState<string | null>(null);
 
   // Poll while the background research is still running.
-  useEffect(() => {
-    if (prop.status !== "pending") return;
-    const iv = setInterval(async () => {
-      try {
-        const updated = await getProposal(prop.proposal_id);
-        if (updated.status !== "pending") setProp(updated);
-      } catch {
-        /* transient — keep polling */
-      }
-    }, 2500);
-    return () => clearInterval(iv);
-  }, [prop.status, prop.proposal_id]);
+  usePollJob(prop.status === "pending", async (cancelled) => {
+    try {
+      const updated = await getProposal(prop.proposal_id);
+      if (cancelled()) return;
+      if (updated.status !== "pending") setProp(updated);
+    } catch {
+      /* transient — keep polling */
+    }
+  });
 
   async function commit(scope: "focus" | "all", setState: (s: CommitStatus) => void) {
     setState("committing");

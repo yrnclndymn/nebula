@@ -5,6 +5,8 @@ import { KINDS, kindLabel } from "./types";
 import { CompanyDrawer } from "./CompanyDrawer";
 import { CompanyTable } from "./CompanyTable";
 import { loadColumnOrder, saveColumnOrder } from "./columnOrder";
+import { ClearFiltersButton, FilterBar, FilterSelect, HeadcountRange } from "./FilterBar";
+import { headcountInRange } from "./filters";
 import { GraphView } from "./GraphView";
 
 // The Companies flow (#151): filterable table with a table ⇄ graph view toggle,
@@ -34,6 +36,10 @@ export function CompaniesPage({
   const [companyType, setCompanyType] = useState("");
   const [kind, setKind] = useState("");
   const [country, setCountry] = useState("");
+  // Headcount range (#7): min/max as strings ("" = unbounded); filtered client-side
+  // over the already-loaded rows, like the other filters.
+  const [hcMin, setHcMin] = useState("");
+  const [hcMax, setHcMax] = useState("");
 
   const [order, setOrder] = useState<string[]>(loadColumnOrder);
 
@@ -48,13 +54,14 @@ export function CompaniesPage({
       if (companyType && !c.companyTypes.includes(companyType)) return false;
       if (kind && c.kind !== kind) return false;
       if (country && c.hqCountry !== country) return false;
+      if (!headcountInRange(c.headcount, hcMin, hcMax)) return false;
       if (needle) {
         const hay = `${c.name} ${c.about ?? ""} ${c.hqLocation ?? ""}`.toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
     });
-  }, [companies, search, topic, companyType, kind, country]);
+  }, [companies, search, topic, companyType, kind, country, hcMin, hcMax]);
 
   function reorderColumns(ids: string[]) {
     setOrder(ids);
@@ -97,54 +104,52 @@ export function CompaniesPage({
         </span>
       </div>
 
-      <div className="filters">
+      <FilterBar>
         <input
           className="search"
           placeholder="Search name, description, location…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <select value={topic} onChange={(e) => setTopic(e.target.value)}>
-          <option value="">All topics</option>
-          {topics.map((t) => (
-            <option key={t}>{t}</option>
-          ))}
-        </select>
-        <select value={kind} onChange={(e) => setKind(e.target.value)}>
-          <option value="">All kinds</option>
-          {KINDS.map((k) => (
-            <option key={k} value={k}>
-              {kindLabel(k)}
-            </option>
-          ))}
-        </select>
-        <select value={country} onChange={(e) => setCountry(e.target.value)}>
-          <option value="">All countries</option>
-          {countries.map((co) => (
-            <option key={co}>{co}</option>
-          ))}
-        </select>
-        <select value={companyType} onChange={(e) => setCompanyType(e.target.value)}>
-          <option value="">All types</option>
-          {types.map((t) => (
-            <option key={t}>{t}</option>
-          ))}
-        </select>
-        {(search || topic || companyType || kind || country) && (
-          <button
-            className="clear"
-            onClick={() => {
+        <FilterSelect
+          value={topic}
+          onChange={setTopic}
+          allLabel="All topics"
+          options={topics.map((t) => ({ value: t, label: t }))}
+        />
+        <FilterSelect
+          value={kind}
+          onChange={setKind}
+          allLabel="All kinds"
+          options={KINDS.map((k) => ({ value: k, label: kindLabel(k) }))}
+        />
+        <FilterSelect
+          value={country}
+          onChange={setCountry}
+          allLabel="All countries"
+          options={countries.map((co) => ({ value: co, label: co }))}
+        />
+        <FilterSelect
+          value={companyType}
+          onChange={setCompanyType}
+          allLabel="All types"
+          options={types.map((t) => ({ value: t, label: t }))}
+        />
+        <HeadcountRange min={hcMin} max={hcMax} onMin={setHcMin} onMax={setHcMax} />
+        {(search || topic || companyType || kind || country || hcMin || hcMax) && (
+          <ClearFiltersButton
+            onClear={() => {
               setSearch("");
               setTopic("");
               setCompanyType("");
               setKind("");
               setCountry("");
+              setHcMin("");
+              setHcMax("");
             }}
-          >
-            Clear
-          </button>
+          />
         )}
-      </div>
+      </FilterBar>
 
       <CompanyTable
         rows={rows}

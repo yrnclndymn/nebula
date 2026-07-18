@@ -4,6 +4,7 @@ import type { BacklogRow, JobSummary, Proposal } from "./types";
 import { Page } from "./Page";
 import { ProposalCard } from "./ProposalCard";
 import { dedupeProposalsByScope } from "./proposalDedupe";
+import { usePollJob } from "./usePollJob";
 
 // Server-side sanity cap: at most this many companies per "Research selected"
 // request (mirrors MAX_BACKLOG_RESEARCH on the backend). The UI enforces the same
@@ -89,27 +90,30 @@ export function BacklogPage() {
   // Light polling while any proposal is still researching: refresh just the
   // pending ones until each resolves (ready/error). ProposalCard is only rendered
   // once a proposal is no longer pending, so there's no duplicate polling.
-  useEffect(() => {
-    const pending = activity.filter((p) => p.status === "pending");
-    if (pending.length === 0) return;
-    const iv = setInterval(() => {
-      pending.forEach(async (p) => {
-        try {
-          const updated = await getProposal(p.proposal_id);
-          if (updated.status !== "pending") {
-            setActivity((a) =>
-              a.map((x) =>
-                x.proposal_id === p.proposal_id ? { ...updated, name: updated.name || p.name } : x,
-              ),
-            );
+  usePollJob(
+    activity.some((p) => p.status === "pending"),
+    (cancelled) => {
+      activity
+        .filter((p) => p.status === "pending")
+        .forEach(async (p) => {
+          try {
+            const updated = await getProposal(p.proposal_id);
+            if (cancelled()) return;
+            if (updated.status !== "pending") {
+              setActivity((a) =>
+                a.map((x) =>
+                  x.proposal_id === p.proposal_id
+                    ? { ...updated, name: updated.name || p.name }
+                    : x,
+                ),
+              );
+            }
+          } catch {
+            /* transient — keep polling */
           }
-        } catch {
-          /* transient — keep polling */
-        }
-      });
-    }, 2500);
-    return () => clearInterval(iv);
-  }, [activity]);
+        });
+    },
+  );
 
   // Latest proposal status per company name (activity is newest-first, so the
   // first match wins) — drives the table's Status column.
