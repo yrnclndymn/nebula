@@ -116,8 +116,14 @@ async def apply_field_edit(driver: AsyncDriver, name: str, edit: ValidatedEdit) 
     the company-detail read then shows alongside the current one (PR #160
     review). Returns False when no such company exists (→ 404).
     """
-    async with driver.session() as session:
-        result = await session.run(
+
+    async def _tx(tx) -> bool:
+        # One transaction for both statements (the upsert_company precedent): a
+        # crash between "delete old citation + set value" and "write new
+        # citation" would otherwise commit a headcount/funding figure with NO
+        # citation — the exact state the provenance guardrail forbids
+        # (PR #160 review).
+        result = await tx.run(
             "MATCH (c:Company {name: $name}) "
             "SET c += $props, c.updatedAt = datetime(), "
             "    c.userEdited = [f IN coalesce(c.userEdited, []) WHERE f <> $field] + $field "
@@ -132,7 +138,7 @@ async def apply_field_edit(driver: AsyncDriver, name: str, edit: ValidatedEdit) 
         if await result.single() is None:
             return False
         if edit.source_url is not None:
-            await session.run(
+            await tx.run(
                 "MATCH (c:Company {name: $name}) "
                 "MERGE (s:Source {url: $source}) "
                 "MERGE (c)-[r:CITES {field: $field}]->(s) "
@@ -143,3 +149,6 @@ async def apply_field_edit(driver: AsyncDriver, name: str, edit: ValidatedEdit) 
                 value=str(edit.value),
             )
         return True
+
+    async with driver.session() as session:
+        return await session.execute_write(_tx)
