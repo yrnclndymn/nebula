@@ -7,7 +7,7 @@ profile-link extraction. All fixtures use fictional people and
 
 import pytest
 
-from app.graph.person_identity import (
+from app.agents.people.person_identity import (
     canonical_linkedin,
     extract_person_linkedins,
     linkedin_slug_matches_name,
@@ -168,7 +168,7 @@ def test_extract_person_linkedins_empty_when_none():
 
 
 def test_discover_for_company_prefers_own_site_then_search(monkeypatch):
-    from app.graph import person_discovery as disc
+    from app.agents.people import person_discovery as disc
 
     # Own-site pages: home links a /leadership page which carries Jane's profile;
     # John is not on the site (forces the search fallback).
@@ -201,7 +201,7 @@ def test_discover_for_company_prefers_own_site_then_search(monkeypatch):
 
 
 def test_discover_for_company_skips_when_no_evidence(monkeypatch):
-    from app.graph import person_discovery as disc
+    from app.agents.people import person_discovery as disc
 
     monkeypatch.setattr(disc, "_fetch", lambda url: "<html>nothing useful</html>")
     # Search returns a profile for a DIFFERENT person — must not be attached.

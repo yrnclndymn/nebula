@@ -27,7 +27,7 @@ import re
 from dataclasses import dataclass
 
 from app.graph.models import SignalRecord
-from app.graph.person_identity import canonical_linkedin
+from app.agents.people.person_identity import canonical_linkedin
 
 logger = logging.getLogger("nebula.capture.people")
 
