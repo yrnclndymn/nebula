@@ -84,42 +84,50 @@ def _plain(value: str | None, limit: int = 500) -> str | None:
     return text[:limit] or None
 
 
-def _parse_entry(entry, base_url: str) -> FeedItem:
-    title: str | None = None
+# Entry child tags (RSS and Atom spellings) → the field slot they fill.
+# `<link>` is handled separately: its URL lives in an attribute in Atom but in
+# the element text in RSS, with a rel-preference rule.
+_ENTRY_FIELDS = {
+    "title": "title",
+    "pubDate": "published",
+    "published": "published",
+    "updated": "updated",
+    "description": "summary",
+    "summary": "summary",
+    "content": "content",
+}
+
+
+def _entry_url(entry, base_url: str) -> str:
+    """The entry's page URL: RSS ``<link>`` element text, else the Atom ``href``
+    attribute preferring rel="alternate" (the canonical page) over other rels.
+    Absolutised against ``base_url``; "" if the entry carries no link."""
     rss_link: str | None = None
     atom_link: str | None = None
-    published: str | None = None
-    updated: str | None = None
-    summary: str | None = None
-    content: str | None = None
     for child in entry:
-        name = _local(child.tag)
-        if name == "title":
-            title = _text(child)
-        elif name == "link":
-            href = child.get("href")  # Atom carries the URL in an attribute
-            if href:
-                # Prefer rel="alternate" (the canonical page) over other rels.
-                if child.get("rel", "alternate") == "alternate" or atom_link is None:
-                    atom_link = href
-            else:
-                rss_link = _text(child)  # RSS carries it as element text
-        elif name == "pubDate" or name == "published":
-            published = _text(child)
-        elif name == "updated":
-            updated = _text(child)
-        elif name in ("description", "summary"):
-            summary = _text(child)
-        elif name == "content":
-            content = _text(child)
+        if _local(child.tag) != "link":
+            continue
+        href = child.get("href")
+        if href:
+            if child.get("rel", "alternate") == "alternate" or atom_link is None:
+                atom_link = href
+        else:
+            rss_link = _text(child)
     url = rss_link or atom_link or ""
-    if url and base_url:
-        url = urljoin(base_url, url)
+    return urljoin(base_url, url) if url and base_url else url
+
+
+def _parse_entry(entry, base_url: str) -> FeedItem:
+    fields: dict[str, str | None] = {}
+    for child in entry:
+        slot = _ENTRY_FIELDS.get(_local(child.tag))
+        if slot:
+            fields[slot] = _text(child)
     return FeedItem(
-        title=(title or "").strip(),
-        url=url,
-        published_at=published or updated,
-        summary=_plain(summary or content),
+        title=(fields.get("title") or "").strip(),
+        url=_entry_url(entry, base_url),
+        published_at=fields.get("published") or fields.get("updated"),
+        summary=_plain(fields.get("summary") or fields.get("content")),
     )
 
 
