@@ -25,7 +25,7 @@ from app.agents.discovery.discovery import (
 from app.capture.job import get_signal_capture, enqueue_signal_capture
 from app.capture.news import get_news_capture, enqueue_news_capture
 from app.config import settings
-from app.graph import cache, digest, jobs, queries, retention, schedules, signals
+from app.graph import cache, digest, field_edit, jobs, queries, retention, schedules, signals
 from app.graph.driver import check_connectivity, get_driver
 from app.graph.models import APPLIES_TO, KINDS, field_key
 
@@ -719,3 +719,25 @@ async def regenerate_person_expertise(person_id: str) -> dict:
     from app.graph import person_expertise
 
     return _ok_or_404(await person_expertise.enqueue_person_expertise(person_id))
+
+
+class FieldEditRequest(BaseModel):
+    field: str
+    value: int | str | float | None = None
+    source_url: str | None = None
+
+
+@router.patch("/companies/{name}/field")
+async def set_field(name: str, req: FieldEditRequest) -> dict:
+    """Set one editable scalar column by hand (headcount / yearFounded / funding),
+    tagging the write origin='user' (#149). Headcount and funding require an
+    http(s) source URL (provenance rule); yearFounded is optional. 422 on a bad
+    field/value/missing-required-source, 404 on an unknown company. The human is
+    the reviewer, so this is a direct write (like set_kind) — agents still can't."""
+    try:
+        edit = field_edit.validate_field_edit(req.field, req.value, req.source_url)
+    except field_edit.FieldEditError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    if not await field_edit.apply_field_edit(get_driver(), name, edit):
+        raise HTTPException(status_code=404, detail=f"No company named {name!r}")
+    return {"name": name, "field": edit.field, "value": edit.value, "source_url": edit.source_url}
