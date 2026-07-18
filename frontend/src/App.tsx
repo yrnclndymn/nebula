@@ -9,14 +9,13 @@ import {
   fetchTopics,
 } from "./api";
 import type { CompanyRow, FieldDef } from "./types";
-import { ActivityPage } from "./ActivityPanel";
-import { BacklogPage } from "./BacklogPanel";
 import { ChatPanel } from "./ChatPanel";
 import { ClassifyPage } from "./ClientClassification";
 import { CompaniesPage } from "./CompaniesPage";
 import { DigestPage } from "./DigestPanel";
 import { ResolvePage } from "./EntityResolution";
 import { MAPage } from "./MAPage";
+import { QueuePage } from "./QueuePanel";
 import { Sidebar } from "./Sidebar";
 import { WhatsNewPage } from "./WhatsNew";
 
@@ -42,8 +41,7 @@ function TabbedFlow({ tabs }: { tabs: { to: string; label: string }[] }) {
 }
 
 const REVIEW_TABS = [
-  { to: "backlog", label: "📋 Backlog" },
-  { to: "activity", label: "📡 Activity" },
+  { to: "queue", label: "📋 Queue & activity" },
   { to: "resolve", label: "🧩 Resolve stubs" },
   { to: "classify", label: "🏷 Classify clients" },
 ];
@@ -111,9 +109,8 @@ export default function App() {
               }
             />
             <Route path="/review" element={<TabbedFlow tabs={REVIEW_TABS} />}>
-              <Route index element={<Navigate to="backlog" replace />} />
-              <Route path="backlog" element={<BacklogPage />} />
-              <Route path="activity" element={<ActivityPage />} />
+              <Route index element={<Navigate to="queue" replace />} />
+              <Route path="queue" element={<QueuePage />} />
               <Route path="resolve" element={<ResolvePage />} />
               <Route path="classify" element={<ClassifyPage />} />
             </Route>
