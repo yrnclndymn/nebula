@@ -4,6 +4,7 @@ import { AcquisitionsSection } from "./AcquisitionsSection";
 import { DiscoveryPanel } from "./DiscoveryPanel";
 import { Field, Chips } from "./Fields";
 import { PersonDrawer } from "./PersonDrawer";
+import { PersonResearchButton } from "./PersonProposalCard";
 import { PotentialAcquirersSection } from "./PotentialAcquirers";
 import { SignalsSection } from "./SignalsSection";
 import type { CompanyDetail, FieldDef, SimilarCompany } from "./types";
@@ -42,6 +43,9 @@ export function CompanyDrawer({
   // Leader name → open that person's page (#42). Set when a leader with a resolved
   // Person id is clicked; renders <PersonDrawer> over this drawer.
   const [personId, setPersonId] = useState<string | null>(null);
+  // Leader name → research that person in place (#178). This company scopes the person
+  // (they lead it), so the enrich call never 404s on an unknown pairing.
+  const [researchLeader, setResearchLeader] = useState<string | null>(null);
 
   useEffect(() => {
     setDetail(company);
@@ -155,6 +159,26 @@ export function CompanyDrawer({
                     p.name
                   )}
                   {p.title && <span className="muted"> — {p.title}</span>}
+                  {/* #178: research a resolved leader in place (bio/links/roles, each
+                      cited) via #40's propose→review→commit. Only for leaders with a
+                      Person id — an unresolved stub has no node to enrich. */}
+                  {p.id && researchLeader !== p.name && (
+                    <button
+                      className="leader-research"
+                      title={`Research ${p.name}`}
+                      onClick={() => setResearchLeader(p.name)}
+                    >
+                      🔎
+                    </button>
+                  )}
+                  {researchLeader === p.name && (
+                    <PersonResearchButton
+                      key={`research-${p.name}`}
+                      name={p.name}
+                      company={detail.name}
+                      autoStart
+                    />
+                  )}
                 </li>
               ))}
             </ul>

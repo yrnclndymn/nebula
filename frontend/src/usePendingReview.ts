@@ -19,16 +19,25 @@ export function usePendingReview(): number {
 
   const load = useCallback(async () => {
     try {
-      const [proposals, backfills, acqs] = await Promise.all([
+      const [proposals, personProposals, backfills, acqs] = await Promise.all([
         listJobs({ type: "proposal", limit: 50 }),
+        listJobs({ type: "person_proposal", status: "ready", limit: 50 }),
         listJobs({ type: "backfill", status: "ready", limit: 50 }),
         fetchAcquisitionProposals(),
       ]);
       const readyProposals = dedupeProposalsByScope(proposals).filter(
         (j) => j.status === "ready" && !j.summary.committed,
       );
+      // Person proposals flip to "committed" on commit, so a "ready" status filter
+      // already excludes committed ones (no per-summary committed flag needed).
+      const readyPersonProposals = personProposals.filter((j) => j.status === "ready");
       const readyAcqs = acqs.filter((a) => a.status === "ready");
-      setCount(readyProposals.length + backfills.length + readyAcqs.length);
+      setCount(
+        readyProposals.length +
+          readyPersonProposals.length +
+          backfills.length +
+          readyAcqs.length,
+      );
     } catch {
       /* transient — keep the last count */
     }

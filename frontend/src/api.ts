@@ -237,6 +237,22 @@ export const regeneratePersonExpertise = (id: string) =>
 export const getPersonExpertiseJob = (jobId: string) =>
   getJson<import("./types").PersonExpertiseJob>(`/people/expertise/${encodeURIComponent(jobId)}`);
 
+// Person research proposal (#40, surfaced in the SPA by #178): start a background
+// person-enrichment proposal (`{name, company}` scopes which person via their LEADS
+// edge), poll the status endpoint for the proposed facts + citations + diff, then
+// commit (the ONLY write path) or discard (reuses dismissJob). No new backend.
+export const enrichPerson = (name: string, company: string) =>
+  postJson<{ job_id: string; name: string; status: string }>("/people/enrich", { name, company });
+
+export const getPersonProposal = (jobId: string) =>
+  getJson<import("./types").PersonProposal>(`/people/enrich/${encodeURIComponent(jobId)}`);
+
+export const commitPersonProposal = (jobId: string) =>
+  postJson<{ committed?: string; action?: string; error?: string }>(
+    `/people/enrich/${encodeURIComponent(jobId)}/commit`,
+    {},
+  );
+
 // Inline table edit (#149): set one editable scalar column by hand, with an
 // optional/required source URL. The backend tags the write origin='user' and
 // enforces the provenance rule (headcount/funding need a source); a bad or

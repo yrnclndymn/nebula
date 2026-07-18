@@ -5,6 +5,7 @@ import { BackfillCard, BackfillModal } from "./BackfillReview";
 import { ClassifyBatch } from "./ClientClassification";
 import { ResolveBatch } from "./EntityResolution";
 import { Page } from "./Page";
+import { PersonProposalCard } from "./PersonProposalCard";
 import { ProposalCard } from "./ProposalCard";
 import { dedupeProposalsByScope } from "./proposalDedupe";
 import type { Backfill, JobSummary, Proposal } from "./types";
@@ -31,6 +32,9 @@ type ScanKind = "resolve" | "classify";
 // actions that produce reviewable batches via the shared BatchReview template.
 export function InboxPage() {
   const [proposals, setProposals] = useState<Proposal[]>([]);
+  // Person-enrichment proposals (#178): the card self-fetches its full detail + diff
+  // and self-polls while pending, so the inbox only needs the compact job rows here.
+  const [personProposals, setPersonProposals] = useState<JobSummary[]>([]);
   const [backfills, setBackfills] = useState<BackfillRef[]>([]);
   const [topics, setTopics] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,8 +53,11 @@ export function InboxPage() {
   useEffect(() => {
     let stop = false;
     async function load() {
-      const [proposalJobs, backfillJobs, topicList] = await Promise.all([
+      const [proposalJobs, personJobs, backfillJobs, topicList] = await Promise.all([
         listJobs({ type: "proposal", limit: PROPOSAL_LIMIT }).catch(() => [] as JobSummary[]),
+        listJobs({ type: "person_proposal", limit: PROPOSAL_LIMIT }).catch(
+          () => [] as JobSummary[],
+        ),
         listJobs({ type: "backfill", status: "ready", limit: 50 }).catch(() => [] as JobSummary[]),
         fetchTopics().catch(() => [] as string[]),
       ]);
@@ -63,6 +70,11 @@ export function InboxPage() {
       const hydratedBackfills = await Promise.all(backfillJobs.map(hydrateBackfill));
       if (stop) return;
       setProposals(hydratedProposals);
+      // Person proposals flip to status "committed" on commit (not "ready"), so
+      // pending + ready are exactly the ones still awaiting a decision.
+      setPersonProposals(
+        personJobs.filter((j) => j.status === "pending" || j.status === "ready"),
+      );
       setBackfills(hydratedBackfills.filter((b): b is BackfillRef => b !== null));
       setTopics(topicList);
       setLoading(false);
@@ -108,10 +120,24 @@ export function InboxPage() {
     }
   }
 
+  async function dismissPersonProposal(jobId: string) {
+    try {
+      await dismissJob(jobId);
+      setPersonProposals((ps) => ps.filter((j) => j.id !== jobId));
+      reviewChanged();
+    } catch {
+      /* leave the card in place; the user can retry */
+    }
+  }
+
   const readyProposals = proposals.filter((p) => p.status === "ready");
   const pendingProposals = proposals.filter((p) => p.status === "pending");
   const nothingPending =
-    !loading && readyProposals.length === 0 && pendingProposals.length === 0 && backfills.length === 0;
+    !loading &&
+    readyProposals.length === 0 &&
+    pendingProposals.length === 0 &&
+    personProposals.length === 0 &&
+    backfills.length === 0;
 
   return (
     <Page title="Review inbox">
@@ -170,6 +196,17 @@ export function InboxPage() {
                 existingTopics={topics}
                 onCommitted={reviewChanged}
                 onDiscard={() => dismissProposal(p)}
+              />
+            ))}
+
+            {personProposals.map((job) => (
+              <PersonProposalCard
+                key={job.id}
+                jobId={job.id}
+                name={job.summary.name || job.id}
+                initialStatus={job.status as "pending" | "ready"}
+                onCommitted={reviewChanged}
+                onDiscard={() => dismissPersonProposal(job.id)}
               />
             ))}
 

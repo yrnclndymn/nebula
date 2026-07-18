@@ -1448,3 +1448,44 @@ td.muted {
 .headcount-range input {
   width: 6.5rem;
 }
+
+/* Person research trigger + review card (#178): the SPA half of #40's person
+   propose→review→commit. The card itself reuses the shared `.proposal` / `.diff-*`
+   styles; only the trigger affordances are new here. */
+.person-research-section {
+  margin: 0.5rem 0 0.75rem;
+}
+.person-research-trigger {
+  margin: 0.4rem 0;
+}
+.person-research-btn {
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.person-research-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.person-research-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+/* The inline 🔎 on a resolved leadership entry — a compact icon action. */
+.leader-research {
+  border: none;
+  background: none;
+  padding: 0 0.2rem;
+  margin-left: 0.35rem;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.65;
+}
+.leader-research:hover {
+  opacity: 1;
+}
