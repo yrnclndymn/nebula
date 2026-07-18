@@ -130,6 +130,24 @@ def test_store_page_sanitizes_write_params():
     assert _SURROGATE not in json.loads(driver.captured["links"])[0]["url"]
 
 
+def test_deep_sanitize_walks_all_shapes():
+    """Strings anywhere in a JSON-like value are scrubbed; non-string leaves
+    (numbers, bools, None) pass through untouched."""
+    from app.graph.sanitize import deep_sanitize
+
+    dirty = {
+        "text": f"a{_SURROGATE}b",
+        "links": [{"text": f"x{_SURROGATE}", "depth": 2}],
+        "count": 3,
+        "flag": True,
+        "none": None,
+    }
+    clean = deep_sanitize(dirty)
+    _assert_utf8_encodable(clean)
+    assert clean["count"] == 3 and clean["flag"] is True and clean["none"] is None
+    assert _SURROGATE not in clean["text"] and _SURROGATE not in clean["links"][0]["text"]
+
+
 def test_store_clients_sanitizes_names():
     """A client name mined from logo alt text can carry a lone surrogate; the
     write must scrub it before the driver's UTF-8 encode (PR #159 review r2 —

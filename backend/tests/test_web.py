@@ -187,3 +187,24 @@ def test_fetch_page_returns_deep_sanitized_page(monkeypatch):
     assert "\ud800" not in page["links"][0]["text"]
     assert "\udb11" not in page["images"][0]["alt"]
     assert "\ud800" not in page["social"]["linkedin"]
+
+
+def test_store_clients_best_effort_is_garnish(monkeypatch):
+    # Mirrors the fetch_page guard: a failing clients-cache write logs and
+    # returns instead of killing the research job; a healthy one stores.
+    stored: dict = {}
+
+    async def _ok(_driver, domain, clients):
+        stored["domain"] = domain
+        stored["clients"] = clients
+
+    async def _boom(_driver, _domain, _clients):
+        raise UnicodeEncodeError("utf-8", "x", 0, 1, "surrogates not allowed")
+
+    monkeypatch.setattr(web_mod, "get_driver", lambda: object())
+    monkeypatch.setattr(web_mod.cache, "store_clients", _ok)
+    asyncio.run(web_mod._store_clients_best_effort("acme.example", ["Globex"]))
+    assert stored == {"domain": "acme.example", "clients": ["Globex"]}
+
+    monkeypatch.setattr(web_mod.cache, "store_clients", _boom)
+    asyncio.run(web_mod._store_clients_best_effort("acme.example", ["Globex"]))  # must not raise
