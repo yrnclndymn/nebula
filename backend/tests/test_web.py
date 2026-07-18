@@ -2,6 +2,7 @@
 plus UTF-8-safe page decoding (#89)."""
 
 import asyncio
+import json
 
 import requests
 
@@ -156,3 +157,33 @@ def test_fetch_page_sanitizes_url_before_cache_lookup(monkeypatch):
     # sanitizer's replacement policy is.
     assert "\ud800" not in seen["lookup"]
     seen["lookup"].encode("utf-8")  # must not raise
+
+
+def test_fetch_page_returns_deep_sanitized_page(monkeypatch):
+    # The RETURNED dict feeds the Gemini serializer's UTF-8 encode, so nested
+    # link text / image alts / social values must be scrubbed too — sanitizing
+    # only inside store_page left the returned object dirty (PR #159 review r2).
+    fetched = {
+        "url": "https://acme.example/",
+        "text": "Acme news",
+        "links": [{"url": "https://acme.example/a", "text": "deal \ud800 update"}],
+        "images": [{"src": "logo.png", "alt": "Globex \udb11 logo"}],
+        "social": {"linkedin": "https://linkedin.example/\ud800acme"},
+    }
+
+    async def _no_cache(_driver, _url, ttl_days=None):
+        return None
+
+    async def _no_store(_driver, _page):
+        return None
+
+    monkeypatch.setattr(web_mod, "get_driver", lambda: object())
+    monkeypatch.setattr(web_mod.cache, "get_cached_page", _no_cache)
+    monkeypatch.setattr(web_mod.cache, "store_page", _no_store)
+    monkeypatch.setattr(web_mod, "_fetch_page_live", lambda url: fetched)
+
+    page = asyncio.run(fetch_page("https://acme.example/"))
+    json.dumps(page).encode("utf-8")  # whole payload must serialize
+    assert "\ud800" not in page["links"][0]["text"]
+    assert "\udb11" not in page["images"][0]["alt"]
+    assert "\ud800" not in page["social"]["linkedin"]

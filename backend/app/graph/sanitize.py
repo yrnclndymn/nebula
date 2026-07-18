@@ -26,3 +26,22 @@ def sanitize_surrogates(text: str, replacement: str = "�") -> str:
     except UnicodeEncodeError:
         return "".join(replacement if "\ud800" <= ch <= "\udfff" else ch for ch in text)
     return text
+
+
+def deep_sanitize(value):
+    """Apply :func:`sanitize_surrogates` to every string in a JSON-like value.
+
+    A crawled page carries surrogate-prone text in many nested places — link
+    text, image ``alt``s, social URLs — not just the aggregate ``text`` field, and
+    every one of them eventually hits a UTF-8 encoder (the Neo4j driver on write,
+    the Gemini client when a tool result is serialized). One deep walk at the
+    fetch boundary covers them all; clean strings come back unchanged (same
+    object), so the common clean page pays almost nothing (#146 review).
+    """
+    if isinstance(value, str):
+        return sanitize_surrogates(value)
+    if isinstance(value, list):
+        return [deep_sanitize(v) for v in value]
+    if isinstance(value, dict):
+        return {k: deep_sanitize(v) for k, v in value.items()}
+    return value

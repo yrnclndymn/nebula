@@ -130,6 +130,16 @@ def test_store_page_sanitizes_write_params():
     assert _SURROGATE not in json.loads(driver.captured["links"])[0]["url"]
 
 
+def test_store_clients_sanitizes_names():
+    """A client name mined from logo alt text can carry a lone surrogate; the
+    write must scrub it before the driver's UTF-8 encode (PR #159 review r2 —
+    same bug class as store_page, sibling path)."""
+    driver = _FakeDriver()
+    asyncio.run(cache.store_clients(driver, "acme.example", ["Globex", f"Ac{_SURROGATE}me"]))
+    _assert_utf8_encodable(driver.captured["clients"])
+    assert all(_SURROGATE not in c for c in driver.captured["clients"])
+
+
 def test_cached_page_read_sanitizes_legacy_poison_roundtrip():
     """End-to-end reproduction: store a page whose link text holds a surrogate
     (json.dumps escapes it, so Neo4j accepts the write), then read it back and
