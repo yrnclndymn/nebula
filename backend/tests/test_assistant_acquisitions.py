@@ -41,6 +41,60 @@ def test_tool_delegates_to_deals_proposals_and_never_writes(monkeypatch):
     assert out["company"] == "Acme __acqtest__"
 
 
+def test_tool_surfaces_ref_in_turn_collector(monkeypatch):
+    """A successful proposal appends a {job_id, company} ref to the per-turn collector
+    so /chat can return an inline review card — mirroring turn_backfills/turn_merges."""
+
+    async def fake_propose(company, **kwargs):
+        return {"job_id": "abc12345", "company": company, "status": "researching in the background"}
+
+    monkeypatch.setattr(acq.deal_proposals, "propose_acquisitions", fake_propose)
+
+    collected: list = []
+    token = acq.turn_acquisitions.set(collected)
+    try:
+        out = asyncio.run(acq.propose_acquisitions("Acme __acqtest__"))
+    finally:
+        acq.turn_acquisitions.reset(token)
+
+    assert len(collected) == 1  # surfaced in the turn
+    assert collected[0] == {"job_id": "abc12345", "company": "Acme __acqtest__"}
+    assert out["job_id"] == "abc12345"  # result still returned to the model verbatim
+
+
+def test_tool_error_surfaces_no_card(monkeypatch):
+    """A 404-shaped error must NOT surface a card — there is no proposal to review."""
+
+    async def fake_propose(company, **kwargs):
+        return {"error": f"no company named {company!r} to research acquisitions for"}
+
+    monkeypatch.setattr(acq.deal_proposals, "propose_acquisitions", fake_propose)
+
+    collected: list = []
+    token = acq.turn_acquisitions.set(collected)
+    try:
+        out = asyncio.run(acq.propose_acquisitions("Ghost __acqtest__"))
+    finally:
+        acq.turn_acquisitions.reset(token)
+
+    assert collected == []  # nothing to review, so no inline card
+    assert "error" in out
+
+
+def test_tool_without_collector_does_not_raise(monkeypatch):
+    """Outside a chat turn the collector is unset (default None); the tool must still
+    delegate and return cleanly rather than blowing up on the missing collector."""
+
+    async def fake_propose(company, **kwargs):
+        return {"job_id": "def67890", "company": company, "status": "researching in the background"}
+
+    monkeypatch.setattr(acq.deal_proposals, "propose_acquisitions", fake_propose)
+
+    assert acq.turn_acquisitions.get() is None  # no collector set
+    out = asyncio.run(acq.propose_acquisitions("Acme __acqtest__"))
+    assert out["job_id"] == "def67890"
+
+
 def test_tool_relays_not_found_error(monkeypatch):
     """A 404-shaped error from the deals layer (company not tracked) is relayed, not
     swallowed — the assistant tells the user rather than claiming research started."""

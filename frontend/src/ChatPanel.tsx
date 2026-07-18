@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { sendChat } from "./api";
 import type { Backfill, MergeProposal, Proposal } from "./types";
+import { AcquisitionProposalCard } from "./AcquisitionProposals";
 import { BackfillCard, BackfillModal } from "./BackfillReview";
 import { MergeCard } from "./MergeCard";
 import { ProposalCard } from "./ProposalCard";
@@ -11,12 +12,20 @@ interface JobRef {
   total: number;
 }
 
+// A chat-started acquisition proposal (#147): just the job id + company; the card
+// polls /ma detail itself, so this is all the turn needs to carry.
+interface AcquisitionRef {
+  job_id: string;
+  company: string;
+}
+
 interface Msg {
   role: "user" | "assistant";
   text: string;
   proposals?: Proposal[];
   backfills?: JobRef[];
   merges?: MergeProposal[];
+  acquisitions?: AcquisitionRef[];
 }
 
 const SUGGESTIONS = [
@@ -32,6 +41,10 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(false);
   const [reviewJob, setReviewJob] = useState<Backfill | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  // Acquisition cards remove themselves on commit/discard by calling onResolved;
+  // in chat there's no list to prune, so track resolved job ids and hide them (the
+  // card otherwise stays stuck "committing…" waiting for a parent that never drops it).
+  const [resolvedAcq, setResolvedAcq] = useState<Record<string, boolean>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -54,6 +67,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
           proposals: res.proposals,
           backfills: res.backfills,
           merges: res.merges,
+          acquisitions: res.acquisitions,
         },
       ]);
     } catch (e) {
@@ -98,6 +112,27 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
             {m.merges?.map((mg) => (
               <MergeCard key={mg.job_id} m={mg} />
             ))}
+            {m.acquisitions
+              ?.filter((a) => !resolvedAcq[a.job_id])
+              .map((a) => (
+                <AcquisitionProposalCard
+                  key={a.job_id}
+                  row={{
+                    job_id: a.job_id,
+                    company: a.company,
+                    status: "pending",
+                    deal_count: 0,
+                    new_count: 0,
+                    outcome: null,
+                    error: null,
+                    committed: false,
+                    created_at: null,
+                  }}
+                  onResolved={(jobId) =>
+                    setResolvedAcq((r) => ({ ...r, [jobId]: true }))
+                  }
+                />
+              ))}
           </div>
         ))}
         {loading && <div className="msg msg-assistant thinking">thinking…</div>}
