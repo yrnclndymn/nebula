@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { dismissJob, fetchBacklog, getProposal, listJobs, researchBacklog } from "./api";
 import type { BacklogRow, JobSummary, Proposal } from "./types";
-import { ProposalCard } from "./ChatPanel";
+import { ProposalCard } from "./ProposalCard";
 import { dedupeProposalsByScope } from "./proposalDedupe";
 
 // Server-side sanity cap: at most this many companies per "Research selected"

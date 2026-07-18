@@ -83,6 +83,24 @@ def candidate_name(title: str) -> str:
     return name
 
 
+def _accepted(hit: dict, exclude: set[str]) -> tuple[str, str, str] | None:
+    """``(domain, name, url)`` for a result that could seed a candidate, else None.
+
+    Only real web URLs pass: `sources` is rendered as links in the review UI, so a
+    hostile result with a javascript:/data: scheme must never get through.
+    """
+    url = hit.get("url", "") or ""
+    if not url.lower().startswith(("http://", "https://")):
+        return None
+    domain = official_domain(url)
+    if not domain or domain in exclude:
+        return None
+    name = candidate_name(hit.get("title", "") or "")
+    if not name:
+        return None
+    return domain, name, url
+
+
 def extract_candidates(
     results: list[dict], terms: list[str], *, exclude_domains: set[str] | None = None
 ) -> list[dict]:
@@ -98,30 +116,18 @@ def extract_candidates(
     by_domain: dict[str, dict] = {}
 
     for hit in results:
-        url = hit.get("url", "") or ""
-        # Only real web URLs: `sources` is rendered as links in the review UI, so a
-        # hostile result with a javascript:/data: scheme must never get through.
-        if not url.lower().startswith(("http://", "https://")):
+        accepted = _accepted(hit, exclude)
+        if accepted is None:
             continue
-        domain = official_domain(url)
-        if not domain or domain in exclude:
-            continue
-        name = candidate_name(hit.get("title", "") or "")
-        if not name:
-            continue
+        domain, name, url = accepted
         haystack = f"{hit.get('title', '')} {hit.get('snippet', '')}".lower()
-        matched = [t for t in lowered_terms if t in haystack]
-
-        entry = by_domain.get(domain)
-        if entry is None:
-            entry = {"name": name, "website": domain, "why": [], "sources": []}
-            by_domain[domain] = entry
-        if url and url not in entry["sources"]:
+        entry = by_domain.setdefault(
+            domain, {"name": name, "website": domain, "why": [], "sources": []}
+        )
+        if url not in entry["sources"]:
             entry["sources"].append(url)
-        for t in matched:
-            if t not in entry["why"]:
+        for t in lowered_terms:
+            if t in haystack and t not in entry["why"]:
                 entry["why"].append(t)
 
-    candidates = list(by_domain.values())
-    candidates.sort(key=lambda c: (-len(c["why"]), c["name"].lower()))
-    return candidates
+    return sorted(by_domain.values(), key=lambda c: (-len(c["why"]), c["name"].lower()))

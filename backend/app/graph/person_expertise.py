@@ -109,35 +109,46 @@ def _relation_breakdown(signals: list[dict]) -> str:
     return ", ".join(parts)
 
 
+def _role_phrases(roles: list[dict] | None) -> list[str]:
+    """The company-bearing roles as phrases; roles without a company drop out."""
+    return [b for b in (_role_phrase(r) for r in roles or []) if b]
+
+
+def _roles_clause(context: dict) -> str | None:
+    """`"currently CTO at Acme"` — current roles, else up to two prior ones. Pure."""
+    current = _role_phrases(context.get("currentRoles"))
+    if current:
+        return "currently " + ", ".join(current)
+    prior = _role_phrases(context.get("priorRoles"))
+    if prior:
+        return "previously " + ", ".join(prior[:2])
+    return None
+
+
+def _signals_clause(signals: list[dict]) -> str | None:
+    """`"linked to 3 signal(s) (2 authored, 1 spoke at)"`, or None without signals."""
+    if not signals:
+        return None
+    breakdown = _relation_breakdown(signals)
+    detail = f" ({breakdown})" if breakdown else ""
+    return f"linked to {len(signals)} signal(s){detail}"
+
+
+def _topics_sentence(signals: list[dict]) -> str:
+    """`" Recent topics: …"` from up to three signal titles; "" without any."""
+    titles = [s["title"] for s in signals if s.get("title")][:3]
+    return " Recent topics: " + "; ".join(titles) + "." if titles else ""
+
+
 def render_expertise_fallback(context: dict) -> str:
     """Deterministic one-paragraph summary — the fallback when the LLM is
     unavailable, and the grounding the LLM phrases from. Pure/never empty."""
     name = context.get("name") or "This person"
-    roles = [r for r in (context.get("currentRoles") or []) if r.get("company")]
-    prior = [r for r in (context.get("priorRoles") or []) if r.get("company")]
     signals = context.get("signals") or []
-    if not roles and not prior and not signals:
+    clauses = [c for c in (_roles_clause(context), _signals_clause(signals)) if c]
+    if not clauses:
         return f"No linked signals or roles yet to derive an expertise profile for {name}."
-
-    clauses: list[str] = []
-    role_bits = [_role_phrase(r) for r in roles]
-    role_bits = [b for b in role_bits if b]
-    if role_bits:
-        clauses.append("currently " + ", ".join(role_bits))
-    elif prior:
-        prior_bits = [b for b in (_role_phrase(r) for r in prior) if b]
-        if prior_bits:
-            clauses.append("previously " + ", ".join(prior_bits[:2]))
-    if signals:
-        breakdown = _relation_breakdown(signals)
-        detail = f" ({breakdown})" if breakdown else ""
-        clauses.append(f"linked to {len(signals)} signal(s){detail}")
-
-    summary = f"{name} is " + "; ".join(clauses) + "."
-    titles = [s["title"] for s in signals if s.get("title")][:3]
-    if titles:
-        summary += " Recent topics: " + "; ".join(titles) + "."
-    return summary
+    return f"{name} is " + "; ".join(clauses) + "." + _topics_sentence(signals)
 
 
 def build_expertise_prompt(context: dict) -> str:

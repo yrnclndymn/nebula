@@ -1,5 +1,6 @@
 import type { Signal } from "./types";
 import { signalKindLabel } from "./types";
+import { isHttpUrl } from "./urls";
 
 // Shared renderer for a list of signals (issue #38): the company drawer's activity
 // timeline and the cross-company "What's new" feed both use it. Signals come from
@@ -7,15 +8,6 @@ import { signalKindLabel } from "./types";
 // text nodes and a signal only links out when its URL is http(s). Older signals may
 // predate the backend's http(s) guard, so we re-check here too.
 
-function isHttpUrl(url: string | null | undefined): url is string {
-  if (!url) return false;
-  try {
-    const u = new URL(url);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
 
 // Prefer the parsed date; fall back to the raw feed string, then capture time.
 function signalWhen(s: Signal): string | null {

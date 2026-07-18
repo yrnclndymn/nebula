@@ -11,6 +11,7 @@ import type {
   AcquisitionProposalDetail,
   AcquisitionProposalRow,
 } from "./types";
+import { isHttpUrl } from "./urls";
 
 // #133 SPA review card for acquisition proposals — the review surface the #43
 // propose→review→commit loop was missing. A proposal (an `acquisition_proposal`
@@ -25,15 +26,6 @@ import type {
 
 const POLL_MS = 3000;
 
-function isHttpUrl(url: string | null | undefined): url is string {
-  if (!url) return false;
-  try {
-    const u = new URL(url);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
 
 function whenLabel(deal: Acquisition): string | null {
   const raw = deal.announced_at || deal.closed_at;

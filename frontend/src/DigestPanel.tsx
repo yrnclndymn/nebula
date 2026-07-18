@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { fetchDigest, fetchDigests } from "./api";
 import type { Digest, DigestSummaryRow } from "./types";
 import { signalKindLabel } from "./types";
+import { isHttpUrl } from "./urls";
 
 // The weekly digest page (issue #51): a browsable history of "what changed" —
 // new signals grouped by company, newly-researched companies, and notable job
@@ -11,15 +12,6 @@ import { signalKindLabel } from "./types";
 // so everything renders as auto-escaped text and a signal only links out when its
 // URL is http(s) (same guard as SignalTimeline).
 
-function isHttpUrl(url: string | null | undefined): url is string {
-  if (!url) return false;
-  try {
-    const u = new URL(url);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
 
 // A parseable date renders localised; otherwise keep the raw string (or nothing).
 function whenLabel(raw: string | null | undefined): string | null {
