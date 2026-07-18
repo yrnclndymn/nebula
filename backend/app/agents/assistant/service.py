@@ -12,6 +12,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
+from app.agents.assistant.acquisitions import turn_acquisitions
 from app.agents.assistant.agent import root_agent
 from app.agents.assistant.backfill import turn_backfills
 from app.agents.assistant.memory import load_memories
@@ -29,6 +30,7 @@ class ChatTurn:
     proposals: list[dict] = field(default_factory=list)
     backfills: list[dict] = field(default_factory=list)
     merges: list[dict] = field(default_factory=list)
+    acquisitions: list[dict] = field(default_factory=list)
 
 
 _sessions: InMemorySessionService | None = None
@@ -68,9 +70,11 @@ async def respond(session_id: str, message: str) -> ChatTurn:
     proposals: list[dict] = []
     backfills: list[dict] = []
     merges: list[dict] = []
+    acquisitions: list[dict] = []
     p_token = turn_proposals.set(proposals)
     b_token = turn_backfills.set(backfills)
     m_token = turn_merges.set(merges)
+    a_token = turn_acquisitions.set(acquisitions)
     content = types.Content(role="user", parts=[types.Part(text=text)])
     reply = ""
     try:
@@ -83,4 +87,11 @@ async def respond(session_id: str, message: str) -> ChatTurn:
         turn_proposals.reset(p_token)
         turn_backfills.reset(b_token)
         turn_merges.reset(m_token)
-    return ChatTurn(reply=reply, proposals=proposals, backfills=backfills, merges=merges)
+        turn_acquisitions.reset(a_token)
+    return ChatTurn(
+        reply=reply,
+        proposals=proposals,
+        backfills=backfills,
+        merges=merges,
+        acquisitions=acquisitions,
+    )

@@ -43,6 +43,7 @@ export const sendChat = (sessionId: string, message: string) =>
     proposals: Proposal[];
     backfills: { job_id: string; field: string; total: number }[];
     merges: MergeProposal[];
+    acquisitions: { job_id: string; company: string }[];
   }>("/chat", { session_id: sessionId, message });
 
 export const getBackfill = (jobId: string) => getJson<Backfill>(`/backfill/${jobId}`);
