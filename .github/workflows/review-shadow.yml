@@ -1,9 +1,10 @@
 name: Shadow Review (Poolside experiment)
 
-# Experiment #166: a NON-GATING second reviewer powered by poolside/laguna-m.1
-# via OpenRouter (free-promo through end of July 2026; listed at $0.20/$0.40 per M
-# after — still ~15x cheaper than the gating reviewer's model). The gating Claude
-# review in review.yml is unchanged and remains the merge gate.
+# Experiment #166: a NON-GATING second reviewer powered by
+# poolside/laguna-m.1:free via OpenRouter ($0 through end of July 2026 per the
+# maintainer's account; the paid id is $0.20/$0.40 per M if free-tier limits
+# bite). The gating Claude review in review.yml is unchanged and remains the
+# merge gate.
 #
 # The claude-code-action harness speaks the Anthropic API; OpenRouter is
 # OpenAI-compatible. A LiteLLM proxy sidecar bridges them: it exposes an
@@ -84,7 +85,7 @@ jobs:
             # Claude ids), route it to the shadow model. One reviewer, one model.
             - model_name: "*"
               litellm_params:
-                model: openrouter/poolside/laguna-m.1
+                model: openrouter/poolside/laguna-m.1:free
                 api_key: ${OPENROUTER_API_KEY}
           general_settings:
             master_key: sk-shadow-bridge
@@ -153,6 +154,33 @@ jobs:
             --model claude-sonnet-5
             --max-turns 60
             --allowedTools "Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*)"
+
+      # Experiment observability (#166): the harness transcript and the bridge log
+      # are the only views into WHY a shadow run went silent (first backtests: 25
+      # turns, 3 permission denials, is_error with nothing posted). The bridge log
+      # is redacted before upload; Actions' secret masking is the second layer.
+      - name: Capture shadow transcript + bridge log
+        if: ${{ always() && env.HAS_KEY == 'true' }}
+        run: |
+          # Redact the key from BOTH artifacts before upload — an upstream
+          # auth-error body can echo the offending key, and the harness
+          # transcript records tool/API responses verbatim (PR #168 review).
+          # Artifacts on a public repo are downloadable by anyone with read.
+          mkdir -p /tmp/shadow-artifacts
+          for src in /home/runner/work/_temp/claude-execution-output.json /tmp/litellm.log; do
+            [ -f "$src" ] || continue
+            sed "s/${OPENROUTER_API_KEY:-__none__}/[redacted]/g" "$src" > "/tmp/shadow-artifacts/$(basename "$src")"
+          done
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      - name: Upload shadow artifacts
+        if: ${{ always() && env.HAS_KEY == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: shadow-review-${{ env.SHADOW_PR }}-${{ github.run_id }}
+          path: /tmp/shadow-artifacts/
+          retention-days: 7
+          if-no-files-found: ignore
 
       # Telemetry only (no gate): one canonical line per attempt so the experiment
       # can be evaluated by grepping run logs — did the shadow post, and how often.
