@@ -12,7 +12,7 @@ and fall back to UTF-8 — never the ISO-8859-1 default. A genuinely ISO-8859-1 
 that *declares* its charset is untouched and stays correct.
 
 This module deliberately depends only on ``requests`` so every fetch site (web.py,
-capture/job.py, graph/person_discovery.py) can import it without a cycle.
+capture/job.py, agents/people/person_discovery.py) can import it without a cycle.
 """
 
 import requests

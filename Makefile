@@ -36,10 +36,10 @@ normalize-linkedin: ## Canonicalise stored LinkedIn URLs (uk.->www., trailing sl
 	cd backend && uv run python scripts/normalize_linkedin.py $(ARGS)
 
 migrate-person-identity: ## Re-key Person on LinkedIn URL (dry-run by default). ARGS=--commit to apply
-	cd backend && uv run python -m app.graph.person_identity $(ARGS)
+	cd backend && uv run python -m app.agents.people.person_identity $(ARGS)
 
 discover-leader-linkedin: ## Discover leaders' LinkedIn profiles (reviewable dry-run). ARGS="--commit --limit N --company NAME"
-	cd backend && uv run python -m app.graph.person_discovery $(ARGS)
+	cd backend && uv run python -m app.agents.people.person_discovery $(ARGS)
 
 repair-mojibake:  ## Repair UTF-8-as-Latin-1 mojibake in stored Signal titles/summaries (dry-run). ARGS=--commit
 	cd backend && uv run python -m app.graph.repair_mojibake $(ARGS)

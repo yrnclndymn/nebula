@@ -10,7 +10,6 @@ enrichment updates in place instead of duplicating.
 from neo4j import AsyncDriver, AsyncManagedTransaction
 
 from app.graph.models import CompanyRecord
-from app.graph.person_identity import canonical_linkedin
 
 
 async def upsert_company(driver: AsyncDriver, record: CompanyRecord) -> None:
@@ -90,6 +89,11 @@ async def _upsert_tx(tx: AsyncManagedTransaction, record: CompanyRecord) -> None
     #    and falls back to name-keying (with the caller's variant reconciliation)
     #    otherwise. The two are split so each UNWIND has a single MERGE key.
     if record.leadership:
+        # Lazy import: canonicalisation lives in the people entity-domain
+        # (above graph), so the write path reaches UP for it inside the function
+        # — same pinned-exception pattern as the graph/jobs.py dispatch.
+        from app.agents.people.person_identity import canonical_linkedin
+
         keyed, by_name = [], []
         for leader in record.leadership:
             canon = canonical_linkedin(leader.linkedin)

@@ -5,7 +5,7 @@ functions there are shared, hot, and owned by other work — this module adds
 person-specific functions without touching them. It reuses the person-identity
 primitives from #39: identity keys on the canonical LinkedIn URL, and attaching a
 newly discovered URL to an existing name-only person goes through
-:func:`app.graph.person_identity.attach_linkedin` (company-scoped, so a namesake
+:func:`app.agents.people.person_identity.attach_linkedin` (company-scoped, so a namesake
 leading an unrelated company is never rewritten — the #87 lesson).
 
 Writes are gated: nothing here runs except from the explicit commit step of a
@@ -20,7 +20,6 @@ company MERGE'd as a stub when unknown.
 
 from neo4j import AsyncDriver, AsyncManagedTransaction
 
-from app.graph.person_identity import attach_linkedin, canonical_linkedin
 from app.graph.person_models import PersonRecord
 
 
@@ -152,6 +151,11 @@ async def upsert_person(driver: AsyncDriver, record: PersonRecord) -> dict:
     canonical URL if set, else the name-only leader of the scoping company) and the
     reviewed facts + provenance are applied. Idempotent. Returns the action taken.
     """
+    # Lazy import: identity canonicalisation + attach live in the people
+    # entity-domain (above graph); this write path reaches UP for them inside the
+    # function — the same pinned-exception pattern as the graph/jobs.py dispatch.
+    from app.agents.people.person_identity import attach_linkedin, canonical_linkedin
+
     canon = canonical_linkedin(record.linkedin)
     # Establish/dedup identity on the canonical URL first (reuses #39's reviewable
     # attach; only ever touches a name-only leader of THIS company).

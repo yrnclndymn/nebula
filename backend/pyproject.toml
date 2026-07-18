@@ -120,14 +120,17 @@ ignore_imports = [
     # agents area, imported inside the function (no load-time cycle). Resolves when
     # discovery folds into the `companies` domain and the shared propose step moves.
     "app.agents.discovery.discovery -> app.agents.assistant.proposals",
-    # The leader-LinkedIn backfill and person-identity canonicalisation are graph
-    # modules that still reach UP into the crawl/search/social tools. `web_search`
-    # is a genuine tool (search backends) that cannot move down; the small social
-    # helper is cohesive with the other social-link helpers. These migrate into the
-    # `people` entity-domain package rather than being papered over now.
-    "app.graph.person_discovery -> app.tools.web",
-    "app.graph.person_discovery -> app.tools.encoding",
-    "app.graph.person_identity -> app.tools.social",
+    # Person identity + discovery now live in the `people` entity-domain (#179).
+    # Canonicalisation (`canonical_linkedin`) is pure but leans on `normalize_linkedin`
+    # in tools, which stays there — so the two GRAPH write paths that key a Person on
+    # its canonical LinkedIn URL reach UP into `people` for it. Both imports are LAZY
+    # (inside the write function, no load-time cycle), the same pinned pattern as the
+    # jobs dispatch above; `capture.people` is a domain sibling doing the same canonical
+    # key on a captured mention. These are consumer reaches into the domain, not domain
+    # logic squatting in the storage layer.
+    "app.graph.repository -> app.agents.people.person_identity",
+    "app.graph.person_enrichment -> app.agents.people.person_identity",
+    "app.capture.people -> app.agents.people.person_identity",
 ]
 
 [tool.uv]

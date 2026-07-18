@@ -14,7 +14,7 @@ import pytest
 
 from app.graph.driver import check_connectivity, close_driver, get_driver
 from app.graph.models import CompanyRecord, Leader
-from app.graph.person_identity import attach_linkedin, migrate_person_identity
+from app.agents.people.person_identity import attach_linkedin, migrate_person_identity
 from app.graph.repository import upsert_company
 from app.graph.schema import apply_schema
 

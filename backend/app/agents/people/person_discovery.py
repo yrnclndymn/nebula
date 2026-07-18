@@ -13,7 +13,7 @@ happens only when a human re-runs with ``--commit`` after reading the report.
 Spend goes through the existing budget rails (`app.budget`) so a large graph
 can't burn unbounded fetches/searches.
 
-    cd backend && uv run python -m app.graph.person_discovery [--commit] [--limit N] [--company NAME]
+    cd backend && uv run python -m app.agents.people.person_discovery [--commit] [--limit N] [--company NAME]
     # or:  make discover-leader-linkedin ARGS="--commit --limit 10"
 """
 
@@ -26,7 +26,7 @@ import requests
 
 from app import budget
 from app.graph.driver import close_driver, get_driver
-from app.graph.person_identity import (
+from app.agents.people.person_identity import (
     attach_linkedin,
     canonical_linkedin,
     extract_person_linkedins,
