@@ -7,7 +7,7 @@ import asyncio
 
 import pytest
 
-from app.graph.driver import check_connectivity, get_driver
+from app.graph.driver import check_connectivity, close_driver, get_driver
 from app.graph.field_edit import ValidatedEdit, apply_field_edit
 from app.graph.schema import apply_schema
 
@@ -73,7 +73,9 @@ def test_apply_field_edit_writes_property_edge_and_marker(event_loop):
         assert row["source"] == "https://acme.example/about"
         assert set(row["userEdited"]) == {"headcount", "yearFounded"}
 
-        # re-editing the same field must not duplicate it in userEdited
+        # re-editing the same field must not duplicate it in userEdited, and the
+        # NEW source must REPLACE the field's prior CITES edge, not stack a second
+        # one for the detail read to show alongside it (PR #160 review).
         await apply_field_edit(
             driver,
             TEST_COMPANY,
@@ -82,10 +84,15 @@ def test_apply_field_edit_writes_property_edge_and_marker(event_loop):
         async with driver.session() as session:
             edited = await (
                 await session.run(
-                    "MATCH (c:Company {name: $name}) RETURN c.userEdited AS e", name=TEST_COMPANY
+                    "MATCH (c:Company {name: $name}) "
+                    "OPTIONAL MATCH (c)-[r:CITES {field: 'headcount'}]->(s:Source) "
+                    "RETURN c.userEdited AS e, count(r) AS edges, collect(s.url) AS sources",
+                    name=TEST_COMPANY,
                 )
             ).single()
         assert sorted(edited["e"]) == ["headcount", "yearFounded"]
+        assert edited["edges"] == 1
+        assert edited["sources"] == ["https://acme.example/team"]
 
         # unknown company → False (route maps to 404)
         missing = await apply_field_edit(
@@ -102,4 +109,11 @@ def test_apply_field_edit_writes_property_edge_and_marker(event_loop):
                 name=TEST_COMPANY,
             )
 
-    event_loop.run_until_complete(scenario())
+    try:
+        event_loop.run_until_complete(scenario())
+    finally:
+        # The module-global driver was created on THIS loop; close it so later
+        # test files (e.g. test_health's TestClient) build a fresh one on their
+        # own loop instead of hitting "Event loop is closed" (same pattern as
+        # test_cache_sanitize's round-trip test).
+        event_loop.run_until_complete(close_driver())

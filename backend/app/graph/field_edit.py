@@ -110,14 +110,21 @@ async def apply_field_edit(driver: AsyncDriver, name: str, edit: ValidatedEdit) 
     Sets the scalar property, dedupe-appends the field to `c.userEdited`, and —
     when a source URL is present — MERGEs the `(c)-[:CITES {field}]->(:Source)`
     edge with `origin='user'` (same edge shape as the agent citation write in
-    `repository.py`). Returns False when no such company exists (→ 404).
+    `repository.py`). The field's PRIOR citation edges are deleted first: a user
+    edit supersedes whatever previously justified the value, and without the
+    delete each re-edit with a new source would stack another CITES edge that
+    the company-detail read then shows alongside the current one (PR #160
+    review). Returns False when no such company exists (→ 404).
     """
     async with driver.session() as session:
         result = await session.run(
             "MATCH (c:Company {name: $name}) "
             "SET c += $props, c.updatedAt = datetime(), "
             "    c.userEdited = [f IN coalesce(c.userEdited, []) WHERE f <> $field] + $field "
-            "RETURN c.name AS name",
+            "WITH c "
+            "OPTIONAL MATCH (c)-[old:CITES {field: $field}]->() "
+            "DELETE old "
+            "RETURN DISTINCT c.name AS name",
             name=name,
             props={edit.field: edit.value},
             field=edit.field,
