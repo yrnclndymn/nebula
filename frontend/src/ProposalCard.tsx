@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { commitProposal, getProposal } from "./api";
+import { useEffect, useState } from "react";
+import { commitProposal, fetchTopics, getProposal } from "./api";
 import type { Proposal, ScalarDiff } from "./types";
 import { usePollJob } from "./usePollJob";
 
@@ -41,17 +41,46 @@ function ChipGroup({ title, items }: { title: string; items: string[] }) {
 // onDiscard: optional override for the Discard button. In chat, discard is a
 // local hide (the card just collapses); host pages that persist activity (the
 // backlog) pass a handler that actually dismisses the underlying job (#73).
+// onCommitted: fires after a successful commit so a host (the Review inbox) can
+// re-count its pending badge.
+// existingTopics: the graph's current topics — when passed, the card flags a
+// proposal whose topic isn't among them ("⚠ creates new topic", the UI half of
+// #148). When omitted it fetches them itself, so the flag also shows in chat.
 export function ProposalCard({
   p: initial,
   onDiscard,
+  onCommitted,
+  existingTopics,
 }: {
   p: Proposal;
   onDiscard?: () => void;
+  onCommitted?: () => void;
+  existingTopics?: string[];
 }) {
   const [prop, setProp] = useState<Proposal>(initial);
   const [primary, setPrimary] = useState<CommitStatus>("idle");
   const [others, setOthers] = useState<CommitStatus>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [knownTopics, setKnownTopics] = useState<string[] | null>(existingTopics ?? null);
+
+  // Fall back to fetching the topic list ourselves when a host didn't supply it,
+  // so the new-topic flag shows anywhere a ready proposal is reviewed.
+  useEffect(() => {
+    if (existingTopics) {
+      setKnownTopics(existingTopics);
+      return;
+    }
+    if (!prop.topic) return;
+    let stop = false;
+    fetchTopics()
+      .then((t) => !stop && setKnownTopics(t))
+      .catch(() => {
+        /* best-effort — no flag if topics can't be read */
+      });
+    return () => {
+      stop = true;
+    };
+  }, [existingTopics, prop.topic]);
 
   // Poll while the background research is still running.
   usePollJob(prop.status === "pending", async (cancelled) => {
@@ -71,6 +100,7 @@ export function ProposalCard({
       const res = await commitProposal(prop.proposal_id, scope);
       if (res.error) throw new Error(res.error);
       setState("committed");
+      onCommitted?.();
     } catch (e) {
       setError(String(e));
       setState("idle");
@@ -96,6 +126,15 @@ export function ProposalCard({
 
   const r = prop.record;
   const diff = prop.diff;
+  // #148 UI half: the commit MERGEs the proposal's topic, silently minting a new
+  // Topic node for any novel string. Flag it when it isn't an existing topic so
+  // the reviewer catches an invented one (e.g. request phrasing) before committing.
+  // Guard on a non-empty topic list: an empty one usually means the read failed,
+  // and flagging every proposal as a new topic would be worse than staying quiet.
+  const newTopic =
+    prop.topic && knownTopics && knownTopics.length > 0 && !knownTopics.includes(prop.topic)
+      ? prop.topic
+      : null;
   const focusKey = prop.focus_key ?? null;
   const focusLabel = prop.focus_label || "";
   const focusMode = !!focusKey;
@@ -181,6 +220,16 @@ export function ProposalCard({
           {prop.exists ? "updates existing" : "new company"}
         </span>
       </div>
+
+      {newTopic && (
+        <div className="proposal-newtopic">
+          ⚠ creates new topic: <strong>{newTopic}</strong>
+          <span className="muted small">
+            {" "}
+            — not an existing research domain; check it isn&rsquo;t stray request phrasing.
+          </span>
+        </div>
+      )}
 
       {/* Backlog stubs have no website: the job discovered one to research from. */}
       {prop.discovered_website && (

@@ -133,6 +133,8 @@ export interface Proposal {
   focus_label?: string;
   diff?: ProposalDiff;
   discovered_website?: string; // set when a backlog stub's official site was found
+  topic?: string | null; // research topic tag the commit would MERGE onto (#148/#153): the
+  // review card flags it when it isn't an existing graph topic, so an invented one is caught.
   error?: string;
 }
 
