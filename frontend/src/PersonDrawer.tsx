@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { fetchPerson, getPersonExpertiseJob, regeneratePersonExpertise } from "./api";
 import type { PersonProfile, PersonRole, PersonSignal } from "./types";
 import { signalKindLabel } from "./types";
+import { isHttpUrl } from "./urls";
 
 // The person page (#42), rendered as a drawer over the company drawer. Opened by
 // clicking a leader's name in CompanyDrawer. Shows identity + roles + their linked-
@@ -9,15 +10,6 @@ import { signalKindLabel } from "./types";
 // The summary and signal titles are crawled/derived — untrusted — so they render as
 // plain (auto-escaped) text and only link out when a URL is http(s).
 
-function isHttpUrl(url: string | null | undefined): url is string {
-  if (!url) return false;
-  try {
-    const u = new URL(url);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
 
 function Field({ label, value }: { label: string; value: ReactNode }) {
   if (value == null || value === "") return null;

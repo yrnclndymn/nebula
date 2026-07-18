@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { fetchRecentAcquisitions } from "./api";
 import type { Acquisition } from "./types";
 import { AcquisitionProposalsPanel } from "./AcquisitionProposals"; // #133 review card
+import { isHttpUrl } from "./urls";
 
 // The M&A page (issue #45, epic #26 M&A Intelligence): recent deals across the
 // tracked space, newest announced first, filterable by topic (either endpoint in
@@ -12,15 +13,6 @@ import { AcquisitionProposalsPanel } from "./AcquisitionProposals"; // #133 revi
 // text and a link only appears when the URL is http(s). An amount is shown ONLY
 // next to its `amount_source` citation — an uncited figure is never surfaced.
 
-function isHttpUrl(url: string | null | undefined): url is string {
-  if (!url) return false;
-  try {
-    const u = new URL(url);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
 
 // A parseable date renders localised; otherwise keep the raw string (or nothing).
 function whenLabel(raw: string | null | undefined): string | null {
