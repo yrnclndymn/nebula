@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 from neo4j import AsyncDriver
 
 from app.config import settings
-from app.graph.sanitize import sanitize_surrogates
+from app.graph.sanitize import deep_sanitize
 
 
 def domain_of(url: str) -> str:
@@ -24,24 +24,12 @@ def domain_of(url: str) -> str:
     return netloc.removeprefix("www.")
 
 
-def _deep_sanitize(value):
-    """Replace lone surrogates in every string within a JSON-like value (#130).
-
-    Legacy `:Page` entries written before the source fix (#131) can hold surrogate
-    escapes inside ``linksJson`` / ``imagesJson`` (a poisoned page whose first
-    surrogate sat past the 5000-char ``text`` cap stored fine — Neo4j rejects a raw
-    surrogate but ``json.dumps`` escapes it — and ``json.loads`` resurrects it on
-    read). Sanitizing on read makes the returned page UTF-8-encodable before it
-    reaches a Gemini prompt. ``sanitize_surrogates`` returns clean strings unchanged
-    (same object), so this is a ~free walk for the overwhelmingly common clean page.
-    """
-    if isinstance(value, str):
-        return sanitize_surrogates(value)
-    if isinstance(value, list):
-        return [_deep_sanitize(v) for v in value]
-    if isinstance(value, dict):
-        return {k: _deep_sanitize(v) for k, v in value.items()}
-    return value
+# Read-side rationale (#130): legacy `:Page` entries written before the source
+# fix (#131) can hold surrogate escapes inside linksJson/imagesJson (json.dumps
+# escapes what the driver would reject; json.loads resurrects it on read), so
+# reads scrub before the page can reach a Gemini prompt. The walk itself now
+# lives in app.graph.sanitize for the write side and tools to share.
+_deep_sanitize = deep_sanitize
 
 
 async def get_cached_page(
@@ -76,6 +64,13 @@ async def get_cached_page(
 
 
 async def store_page(driver: AsyncDriver, page: dict) -> None:
+    # Sanitize the whole page dict before writing: a lone surrogate anywhere in it
+    # — a link href/text, an image alt, a social URL, or the raw `text`/`url` params
+    # passed straight to the driver — makes the driver's UTF-8 encode raise and would
+    # kill the research job (#146). The read side already scrubs (#130); guard the
+    # write symmetrically so a poisoned crawl never reaches the encoder, and so no
+    # surrogate is stashed into linksJson/imagesJson for a later read to resurrect.
+    page = _deep_sanitize(page)
     async with driver.session() as session:
         await session.run(
             "MERGE (p:Page {url: $url}) "
@@ -110,6 +105,9 @@ async def get_cached_clients(
 
 
 async def store_clients(driver: AsyncDriver, domain: str, clients: list[str]) -> None:
+    # Same guard as store_page (#146 review): a client name mined from logo alt
+    # text can carry a lone surrogate, and the driver rejects it on encode.
+    clients = deep_sanitize(clients)
     async with driver.session() as session:
         await session.run(
             "MERGE (sc:SiteClients {domain: $domain}) "

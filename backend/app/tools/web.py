@@ -8,6 +8,7 @@ images (multimodal) when the filename/alt don't reveal them.
 """
 
 import asyncio
+import logging
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -24,6 +25,8 @@ from app.graph import cache
 from app.graph.driver import get_driver
 from app.tools.encoding import response_text, sanitize_surrogates
 from app.tools.social import find_social_links
+
+logger = logging.getLogger("nebula.tools.web")
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; NebulaResearchBot/0.1)"}
 _MAX_LINKS = 60
@@ -113,6 +116,12 @@ async def fetch_page(url: str) -> dict:
     Returns {url, text (~5000 chars), links:[{url,text}], images:[{src,alt}],
     social:{platform:url}} on success, or {url, error} on failure.
     """
+    # A crawled href can itself carry a lone surrogate. Scrub it once up front so
+    # the cache lookup, the MERGE key inside store_page, and the returned page all
+    # share one clean URL — sanitizing only at store time would make the write key
+    # diverge from the raw read key (a permanent cache miss for exactly the URLs
+    # this guard exists for), and the raw read param would hit the encoder first.
+    url = sanitize_surrogates(url)
     driver = get_driver()
     cached = await cache.get_cached_page(driver, url)
     if cached is not None:
@@ -122,8 +131,20 @@ async def fetch_page(url: str) -> dict:
     # (unlimited) when no budget is installed on the context.
     budget.charge_page()
     page = await asyncio.to_thread(_fetch_page_live, url)
+    # Deep-sanitize the WHOLE fetched dict, not just the aggregate text: link
+    # text, image alts, and social values are returned to the agent and hit the
+    # Gemini serializer's UTF-8 encode — the same crash class as the cache write
+    # (#146 review round 2). store_page guards itself too; this covers the
+    # returned object.
+    page = cache.deep_sanitize(page)
     if "error" not in page:
-        await cache.store_page(driver, page)
+        # The cache write is optional garnish (#84): a store failure — e.g. a lone
+        # surrogate the driver can't UTF-8-encode — must not propagate and kill the
+        # whole research job. Log and continue with the freshly fetched page (#146).
+        try:
+            await cache.store_page(driver, page)
+        except Exception as exc:  # noqa: BLE001 — cache is garnish, never fail the job
+            logger.warning("cache store_page failed for %s (%s); continuing uncached", url, exc)
     return page
 
 
@@ -293,6 +314,14 @@ def _is_noise(name: str, brand: str) -> bool:
     return any(term in low for term in _BADGE_TERMS)
 
 
+async def _store_clients_best_effort(domain: str, clients: list[str]) -> None:
+    """Cache write as garnish (#84/#146): log and continue on any store failure."""
+    try:
+        await cache.store_clients(get_driver(), domain, clients)
+    except Exception as exc:  # noqa: BLE001 — cache is garnish, never fail the job
+        logger.warning("cache store_clients failed for %s (%s); continuing uncached", domain, exc)
+
+
 async def find_clients(website: str) -> dict:
     """Discover a company's CLIENTS/CUSTOMERS by crawling its site deterministically:
     it finds client / "who we've helped" / case-study pages and their sub-pages,
@@ -368,7 +397,10 @@ async def find_clients(website: str) -> dict:
     clients = [
         n for n in _dedup_names(companies + alt_names + text_clients) if not _is_noise(n, brand)
     ]
-    await cache.store_clients(get_driver(), domain, clients)
+    # Mined names are returned to the agent (Gemini serializer) as well as cached;
+    # scrub once, and treat the cache write as garnish like fetch_page does (#146).
+    clients = cache.deep_sanitize(clients)
+    await _store_clients_best_effort(domain, clients)
     return {
         "clients": clients,
         "pages_crawled": crawled[:12],

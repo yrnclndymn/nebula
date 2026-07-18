@@ -1,9 +1,13 @@
 """Logo image MIME filtering — Gemini rejects non-raster types (SVG etc.),
 plus UTF-8-safe page decoding (#89)."""
 
+import asyncio
+import json
+
 import requests
 
-from app.tools.web import _fetch_page_live, _gemini_image_mime, web_search
+from app.tools import web as web_mod
+from app.tools.web import _fetch_page_live, _gemini_image_mime, fetch_page, web_search
 
 
 def test_accepts_supported_raster_types():
@@ -98,3 +102,109 @@ def test_fetch_page_survives_body_that_decodes_to_surrogates(monkeypatch):
     page = _fetch_page_live("https://acme.example/")
     page["text"].encode("utf-8")  # must not raise
     assert "closed" in page["text"]
+
+
+# --- #146: a cache-write failure is garnish and must not fail the research job ----
+
+
+def test_fetch_page_survives_store_page_failure(monkeypatch):
+    # The cache write is optional garnish (#84): if store_page raises — e.g. a lone
+    # surrogate the driver can't UTF-8-encode — fetch_page must log and return the
+    # freshly fetched page rather than propagate and kill the whole job (#146).
+    fetched = {"url": "https://acme.example/", "text": "Acme news", "links": [], "images": []}
+
+    async def _no_cache(_driver, _url, ttl_days=None):
+        return None
+
+    async def _boom(_driver, _page):
+        raise UnicodeEncodeError("utf-8", "x", 0, 1, "surrogates not allowed")
+
+    monkeypatch.setattr(web_mod, "get_driver", lambda: object())
+    monkeypatch.setattr(web_mod.cache, "get_cached_page", _no_cache)
+    monkeypatch.setattr(web_mod.cache, "store_page", _boom)
+    monkeypatch.setattr(web_mod, "_fetch_page_live", lambda url: fetched)
+
+    page = asyncio.run(fetch_page("https://acme.example/"))
+    assert page == fetched  # the job continues with the fetched page, uncached
+
+
+def test_fetch_page_sanitizes_url_before_cache_lookup(monkeypatch):
+    # A surrogate-bearing URL must be scrubbed BEFORE the cache read, so the read
+    # key, the store MERGE key, and the returned page all agree — sanitizing only
+    # inside store_page would leave the raw read key permanently missing the
+    # sanitized write key (PR #159 review), and crash the read param encode first.
+    dirty = "https://acme.example/\ud800deal"
+    seen: dict[str, str] = {}
+
+    async def _capture_lookup(_driver, url, ttl_days=None):
+        seen["lookup"] = url
+        return None
+
+    async def _capture_store(_driver, page):
+        seen["store"] = page["url"]
+
+    monkeypatch.setattr(web_mod, "get_driver", lambda: object())
+    monkeypatch.setattr(web_mod.cache, "get_cached_page", _capture_lookup)
+    monkeypatch.setattr(web_mod.cache, "store_page", _capture_store)
+    monkeypatch.setattr(
+        web_mod, "_fetch_page_live", lambda url: {"url": url, "text": "Acme", "links": []}
+    )
+
+    page = asyncio.run(fetch_page(dirty))
+    # One clean key everywhere: read, write, and returned page must agree...
+    assert seen["lookup"] == seen["store"] == page["url"]
+    # ...and it must be scrubbed (encodable, surrogate gone) — whatever the
+    # sanitizer's replacement policy is.
+    assert "\ud800" not in seen["lookup"]
+    seen["lookup"].encode("utf-8")  # must not raise
+
+
+def test_fetch_page_returns_deep_sanitized_page(monkeypatch):
+    # The RETURNED dict feeds the Gemini serializer's UTF-8 encode, so nested
+    # link text / image alts / social values must be scrubbed too — sanitizing
+    # only inside store_page left the returned object dirty (PR #159 review r2).
+    fetched = {
+        "url": "https://acme.example/",
+        "text": "Acme news",
+        "links": [{"url": "https://acme.example/a", "text": "deal \ud800 update"}],
+        "images": [{"src": "logo.png", "alt": "Globex \udb11 logo"}],
+        "social": {"linkedin": "https://linkedin.example/\ud800acme"},
+    }
+
+    async def _no_cache(_driver, _url, ttl_days=None):
+        return None
+
+    async def _no_store(_driver, _page):
+        return None
+
+    monkeypatch.setattr(web_mod, "get_driver", lambda: object())
+    monkeypatch.setattr(web_mod.cache, "get_cached_page", _no_cache)
+    monkeypatch.setattr(web_mod.cache, "store_page", _no_store)
+    monkeypatch.setattr(web_mod, "_fetch_page_live", lambda url: fetched)
+
+    page = asyncio.run(fetch_page("https://acme.example/"))
+    json.dumps(page).encode("utf-8")  # whole payload must serialize
+    assert "\ud800" not in page["links"][0]["text"]
+    assert "\udb11" not in page["images"][0]["alt"]
+    assert "\ud800" not in page["social"]["linkedin"]
+
+
+def test_store_clients_best_effort_is_garnish(monkeypatch):
+    # Mirrors the fetch_page guard: a failing clients-cache write logs and
+    # returns instead of killing the research job; a healthy one stores.
+    stored: dict = {}
+
+    async def _ok(_driver, domain, clients):
+        stored["domain"] = domain
+        stored["clients"] = clients
+
+    async def _boom(_driver, _domain, _clients):
+        raise UnicodeEncodeError("utf-8", "x", 0, 1, "surrogates not allowed")
+
+    monkeypatch.setattr(web_mod, "get_driver", lambda: object())
+    monkeypatch.setattr(web_mod.cache, "store_clients", _ok)
+    asyncio.run(web_mod._store_clients_best_effort("acme.example", ["Globex"]))
+    assert stored == {"domain": "acme.example", "clients": ["Globex"]}
+
+    monkeypatch.setattr(web_mod.cache, "store_clients", _boom)
+    asyncio.run(web_mod._store_clients_best_effort("acme.example", ["Globex"]))  # must not raise
