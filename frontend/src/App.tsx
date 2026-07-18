@@ -10,10 +10,9 @@ import {
 } from "./api";
 import type { CompanyRow, FieldDef } from "./types";
 import { ChatPanel } from "./ChatPanel";
-import { ClassifyPage } from "./ClientClassification";
 import { CompaniesPage } from "./CompaniesPage";
 import { DigestPage } from "./DigestPanel";
-import { ResolvePage } from "./EntityResolution";
+import { InboxPage } from "./ReviewInbox";
 import { MAPage } from "./MAPage";
 import { QueuePage } from "./QueuePanel";
 import { Sidebar } from "./Sidebar";
@@ -41,9 +40,8 @@ function TabbedFlow({ tabs }: { tabs: { to: string; label: string }[] }) {
 }
 
 const REVIEW_TABS = [
+  { to: "inbox", label: "📥 Inbox" },
   { to: "queue", label: "📋 Queue & activity" },
-  { to: "resolve", label: "🧩 Resolve stubs" },
-  { to: "classify", label: "🏷 Classify clients" },
 ];
 
 const NEWS_TABS = [
@@ -109,10 +107,9 @@ export default function App() {
               }
             />
             <Route path="/review" element={<TabbedFlow tabs={REVIEW_TABS} />}>
-              <Route index element={<Navigate to="queue" replace />} />
+              <Route index element={<Navigate to="inbox" replace />} />
+              <Route path="inbox" element={<InboxPage />} />
               <Route path="queue" element={<QueuePage />} />
-              <Route path="resolve" element={<ResolvePage />} />
-              <Route path="classify" element={<ClassifyPage />} />
             </Route>
             <Route path="/news" element={<TabbedFlow tabs={NEWS_TABS} />}>
               <Route index element={<Navigate to="whatsnew" replace />} />

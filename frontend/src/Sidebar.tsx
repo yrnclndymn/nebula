@@ -1,8 +1,9 @@
 import { NavLink } from "react-router-dom";
 import { AUTH_ENABLED, signOutUser } from "./firebase";
+import { usePendingReview } from "./usePendingReview";
 
-// Left navigation (#151): the three flows. The Review badge (pending count)
-// arrives with the inbox story (#153).
+// Left navigation (#151): the three flows. The Review flow carries a badge with
+// the count of items awaiting a commit decision (#153).
 const FLOWS = [
   { to: "/companies", label: "Companies", icon: "🔭" },
   { to: "/review", label: "Review", icon: "📥" },
@@ -16,6 +17,7 @@ export function Sidebar({
   chatOpen: boolean;
   onToggleChat: () => void;
 }) {
+  const pendingReview = usePendingReview();
   return (
     <nav className="sidebar">
       <h1 className="sidebar-brand">
@@ -28,6 +30,9 @@ export function Sidebar({
           className={({ isActive }) => (isActive ? "sidebar-link active" : "sidebar-link")}
         >
           <span className="sidebar-icon">{f.icon}</span> {f.label}
+          {f.to === "/review" && pendingReview > 0 && (
+            <span className="sidebar-badge">{pendingReview}</span>
+          )}
         </NavLink>
       ))}
       <div className="sidebar-spacer" />
