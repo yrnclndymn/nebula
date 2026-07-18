@@ -89,17 +89,16 @@ async def _upsert_tx(tx: AsyncManagedTransaction, record: CompanyRecord) -> None
     #    and falls back to name-keying (with the caller's variant reconciliation)
     #    otherwise. The two are split so each UNWIND has a single MERGE key.
     if record.leadership:
-        # Lazy import: canonicalisation lives in the people entity-domain
-        # (above graph), so the write path reaches UP for it inside the function
-        # — same pinned-exception pattern as the graph/jobs.py dispatch.
-        from app.agents.people.person_identity import canonical_linkedin
-
+        # ``Leader.linkedin`` is already canonical-or-None — its pydantic validator
+        # is the domain choke point (#183), so this write path trusts its input
+        # instead of canonicalising here (or reaching UP into ``people`` for the
+        # canonicaliser). A leader with a canonical URL keys on it; otherwise the
+        # :Person keys by name.
         keyed, by_name = [], []
         for leader in record.leadership:
-            canon = canonical_linkedin(leader.linkedin)
             entry = {"name": leader.name, "title": leader.title}
-            if canon:
-                keyed.append({**entry, "linkedin": canon})
+            if leader.linkedin:
+                keyed.append({**entry, "linkedin": leader.linkedin})
             else:
                 by_name.append(entry)
         if keyed:

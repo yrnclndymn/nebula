@@ -11,6 +11,8 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.graph.linkedin import canonical_linkedin
+
 # What kind of business a company is (distinct from ownership CompanyType).
 # The first three are *ecosystem* players — companies worth researching. "client"
 # marks an end-customer organisation (a bank/retailer/public-sector body pulled in
@@ -49,10 +51,21 @@ class Leader(BaseModel):
     name: str
     title: str | None = None
     # Canonical identity where known (story #39). When present the write path keys
-    # the :Person on this URL instead of the name; canonicalised before keying (see
-    # person_identity.canonical_linkedin). Populated only via the deterministic
-    # own-site / search-evidence discovery path — never a bare crawled link.
+    # the :Person on this URL instead of the name. Canonicalised HERE by the
+    # validator (#183) — the single choke point, so every producer (importer,
+    # enrichment agent) hands the write path a canonical-or-None value and a
+    # non-canonical URL can never reach the graph. Populated only via the
+    # deterministic own-site / search-evidence discovery path — never a bare
+    # crawled link.
     linkedin: str | None = None
+
+    @field_validator("linkedin")
+    @classmethod
+    def _canonicalise_linkedin(cls, v: str | None) -> str | None:
+        """Reduce to the canonical personal-profile key (or ``None`` for a
+        company/school page or non-profile URL, which then keys the :Person by
+        name). Idempotent, so re-validating an already-canonical value is a no-op."""
+        return canonical_linkedin(v)
 
 
 class Citation(BaseModel):
