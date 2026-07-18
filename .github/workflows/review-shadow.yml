@@ -50,6 +50,9 @@ jobs:
       (github.event.pull_request.draft == false &&
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
+    # Non-gating experiment on every PR: cap wall-clock so a hung bridge or
+    # unresponsive upstream can't burn CI minutes to the 6h default (review nit).
+    timeout-minutes: 20
     env:
       HAS_KEY: ${{ secrets.OPENROUTER_API_KEY != '' }}
       # The PR under review: the event's own PR, or the backtest input.
@@ -65,7 +68,10 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
-          pip install --quiet 'litellm[proxy]'
+          # Pinned to the version the bridge config was validated against —
+          # this job carries pull-requests:write + an OIDC token, so an
+          # unpinned install is a supply-chain surface (review finding).
+          pip install --quiet 'litellm[proxy]==1.92.0'
           # Key is substituted into the config directly: litellm's
           # `os.environ/VAR` reference silently failed to attach the key in
           # local validation (upstream saw "Missing Authentication header"),
@@ -90,7 +96,10 @@ jobs:
           done
           curl -sf http://localhost:4000/health/liveliness > /dev/null || {
             echo "::warning title=Shadow bridge failed to boot::LiteLLM proxy never became healthy; skipping shadow review"
-            tail -50 /tmp/litellm.log
+            # Actions masks registered secret values, but belt-and-braces: the
+            # config (with the key inlined) can be echoed into this log by
+            # litellm's startup — redact before printing (review finding).
+            tail -50 /tmp/litellm.log | sed "s/${OPENROUTER_API_KEY}/[redacted]/g"
             exit 1
           }
 
