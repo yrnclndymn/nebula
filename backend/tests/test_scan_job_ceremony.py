@@ -129,18 +129,24 @@ def test_get_ready_job_gates_on_existence_and_status(job_store):
 
 
 def test_classification_flow_end_to_end(job_store, monkeypatch):
-    candidates = [{"name": "Globex Bank __pytest__", "mentions": 2}]
-    classified: list[list[str]] = []
+    candidates = [{"name": "Globex Bank __pytest__", "inbound": 2}]
+    kinds_set: list[tuple[str, str]] = []
+    removed_names: list[str] = []
 
     async def fake_candidates(_driver):
         return candidates
 
-    async def fake_classify(_driver, names: list[str]) -> int:
-        classified.append(names)
-        return len(names)
+    async def fake_classify_kinds(_driver, kind_writes):
+        kinds_set.extend(kind_writes)
+        return [n for n, _ in kind_writes], []
+
+    async def fake_remove(_driver, names: list[str]):
+        removed_names.extend(names)
+        return list(names), []
 
     monkeypatch.setattr(er, "list_client_stub_candidates", fake_candidates)
-    monkeypatch.setattr(er, "classify_as_client", fake_classify)
+    monkeypatch.setattr(er, "remove_stub_companies", fake_remove)
+    monkeypatch.setattr(er, "classify_stub_kinds", fake_classify_kinds)
     monkeypatch.setattr(classification, "get_driver", lambda: None)
 
     async def scenario():
@@ -148,21 +154,25 @@ def test_classification_flow_end_to_end(job_store, monkeypatch):
         job_id = handle["job_id"]
         await classification.execute_classification_job(job_id)
         ready = await classification.get_classification(job_id)
-        first = await classification.commit_classification(job_id, ["Globex Bank __pytest__"])
-        second = await classification.commit_classification(job_id, ["Globex Bank __pytest__"])
+        decisions = [{"name": "Globex Bank __pytest__", "action": "client"}]
+        first = await classification.commit_classification(job_id, decisions)
+        second = await classification.commit_classification(job_id, decisions)
         return ready, first, second
 
     ready, first, second = asyncio.run(scenario())
     assert ready["status"] == "ready"
-    assert ready["candidates"] == candidates
-    assert first == {"classified": 1}
-    assert classified == [["Globex Bank __pytest__"]]  # only the approved names
+    # The scan pre-suggests a per-candidate action on each proposed stub.
+    assert ready["candidates"][0]["suggested"] == "client"
+    assert first == {"classified": 1, "removed": 0, "refused": []}
+    assert kinds_set == [("Globex Bank __pytest__", "client")]  # only the approved name
+    assert removed_names == []  # no 'remove' decisions → no delete
     assert "error" in second  # committed job no longer passes the ready-guard
 
 
 def test_commit_classification_requires_a_ready_job(job_store, monkeypatch):
     monkeypatch.setattr(classification, "get_driver", lambda: None)
-    out = asyncio.run(classification.commit_classification("nope", ["Acme __pytest__"]))
+    decisions = [{"name": "Acme __pytest__", "action": "client"}]
+    out = asyncio.run(classification.commit_classification("nope", decisions))
     assert out == {"error": "classification job not found or not ready"}
 
 
@@ -340,7 +350,7 @@ ACTION_ENDPOINTS = [
     (
         "post",
         "/classification/x1/commit",
-        {"names": []},
+        {"decisions": []},
         "app.api.routes",
         "commit_classification",
     ),

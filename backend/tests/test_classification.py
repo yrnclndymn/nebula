@@ -1,5 +1,6 @@
-"""Client-kind classification: the model decision, the PATCH validation, the
-client-stub heuristic query, and the commit mutation.
+"""Company classification: the model decision, the PATCH validation, the pure
+per-name decision validation, the client-stub heuristic query, and the
+kind/remove commit mutations.
 
 The pure/validation checks run anywhere; the graph checks skip without Neo4j
 (like the rest of the graph layer). Fictional fixture names only (Acme, Globex…).
@@ -10,6 +11,7 @@ import asyncio
 import pytest
 from fastapi.testclient import TestClient
 
+from app.agents.assistant import classification as cls
 from app.graph import entity_resolution as er
 from app.graph.driver import check_connectivity, close_driver, get_driver
 from app.graph.models import APPLIES_TO, KINDS
@@ -29,6 +31,49 @@ def test_client_is_not_a_custom_field_target():
     assert "client" not in APPLIES_TO
     for k in ("service_provider", "isv", "cloud_provider", "all"):
         assert k in APPLIES_TO
+
+
+# --- Per-name decision validation (pure) -------------------------------------
+
+
+def test_valid_actions_are_every_kind_plus_remove():
+    assert frozenset(KINDS) | {"remove"} == cls.VALID_ACTIONS
+    for k in KINDS:
+        assert k in cls.VALID_ACTIONS
+
+
+def test_suggested_action_flags_junk_for_removal_else_client():
+    # A junk-looking name (extraction noise) pre-suggests 'remove'.
+    assert cls.suggested_action("read more") == "remove"
+    assert cls.suggested_action("   ") == "remove"
+    # A plausible org name pre-suggests 'client' (the common end-customer case).
+    assert cls.suggested_action("Acme") == "client"
+    assert cls.suggested_action("Globex Bank") == "client"
+
+
+def test_partition_decisions_splits_kinds_removes_and_rejects_invalid():
+    kinds, removes, invalid = cls.partition_decisions(
+        [
+            {"name": "Acme", "action": "client"},
+            {"name": "Globex", "action": "cloud_provider"},
+            {"name": "Initech", "action": "remove"},
+            {"name": "Hooli", "action": "nonsense"},  # unknown action → invalid
+            {"name": "", "action": "client"},  # missing name → invalid
+            {"action": "client"},  # no name key → invalid
+            {"name": 123, "action": "client"},  # non-string name → invalid, not a crash
+            {"name": None, "action": "remove"},  # explicit null name → invalid
+        ]
+    )
+    assert kinds == [("Acme", "client"), ("Globex", "cloud_provider")]
+    assert removes == ["Initech"]
+    assert len(invalid) == 5
+
+
+def test_partition_decisions_trims_names_and_tolerates_empty():
+    kinds, removes, invalid = cls.partition_decisions([{"name": "  Acme  ", "action": "isv"}])
+    assert kinds == [("Acme", "isv")]
+    assert removes == [] and invalid == []
+    assert cls.partition_decisions([]) == ([], [], [])
 
 
 # --- kind PATCH validation (endpoint; no DB needed to reach validation) ------
@@ -117,10 +162,10 @@ def test_client_heuristic_proposes_only_inbound_client_stubs():
     assert cand["inbound"] == 1
 
 
-def test_classify_as_client_sets_kind_and_skips_promoted():
-    """Commit re-runs the FULL scan predicate: a node promoted since the scan
-    (website gained) or that gained a non-client edge (inbound partnership) is
-    skipped — only a still-pure client stub is classified."""
+def test_remove_stub_companies_deletes_stubs_and_refuses_researched():
+    """The stub-only guard: 'remove' HARD-deletes true stubs (no website, no topic)
+    but REFUSES researched companies (a website or a topic tag) even when the
+    reviewer approved them — a mistaken removal must never destroy real data."""
 
     async def scenario():
         try:
@@ -128,46 +173,96 @@ def test_classify_as_client_sets_kind_and_skips_promoted():
         except Exception:
             return "skip"
         d = get_driver()
-        mentioner = "Initech __clcommit__"
-        stub = "Acme __clcommit__"
-        promoted = "Globex __clcommit__"  # promoted (has website) since the scan
-        partnered = "Umbrella __clcommit__"  # gained an inbound partnership since the scan
-        names = [mentioner, stub, promoted, partnered]
+        stub = "Acme __rmtest__"  # bare stub → removable
+        has_web = "Globex __rmtest__"  # has a website → researched → refused
+        has_topic = "Initech __rmtest__"  # tagged to a topic → researched → refused
+        topic = "Widgets __rmtest__"
+        names = [stub, has_web, has_topic]
         async with d.session() as s:
             await s.run("MATCH (c:Company) WHERE c.name IN $n DETACH DELETE c", n=names)
+            await s.run("MATCH (t:Topic {name:$t}) DETACH DELETE t", t=topic)
             await s.run(
-                "MERGE (m:Company {name:$m}) "
                 "MERGE (a:Company {name:$a}) "
                 "MERGE (b:Company {name:$b}) SET b.website='https://b.example' "
-                "MERGE (p:Company {name:$p}) "
-                "MERGE (m)-[:HAS_CLIENT]->(a) "
-                "MERGE (m)-[:HAS_CLIENT]->(b) "
-                "MERGE (m)-[:HAS_CLIENT]->(p) "
-                "MERGE (m)-[:PARTNERS_WITH]->(p)",
-                m=mentioner,
+                "MERGE (c:Company {name:$c}) "
+                "MERGE (t:Topic {name:$t}) "
+                "MERGE (c)-[:TAGGED_AS]->(t)",
                 a=stub,
-                b=promoted,
-                p=partnered,
+                b=has_web,
+                c=has_topic,
+                t=topic,
             )
-        # Approve all three, but only the pure client stub may be classified.
-        classified = await er.classify_as_client(
-            d, [stub, promoted, partnered, "No Such Co __clcommit__"]
+        # Approve all three for removal (plus an unknown name); only the true stub
+        # may actually be deleted.
+        removed, refused = await er.remove_stub_companies(
+            d, [stub, has_web, has_topic, "No Such Co __rmtest__"]
         )
         async with d.session() as s:
-            r = await s.run(
-                "MATCH (c:Company) WHERE c.name IN $n RETURN c.name AS name, c.kind AS kind",
-                n=names,
-            )
-            kinds = {rec["name"]: rec["kind"] async for rec in r}
+            r = await s.run("MATCH (c:Company) WHERE c.name IN $n RETURN c.name AS name", n=names)
+            surviving = {rec["name"] async for rec in r}
             await s.run("MATCH (c:Company) WHERE c.name IN $n DETACH DELETE c", n=names)
+            await s.run("MATCH (t:Topic {name:$t}) DETACH DELETE t", t=topic)
         await close_driver()
-        return classified, kinds
+        return removed, refused, surviving
 
     out = asyncio.run(scenario())
     if out == "skip":
         pytest.skip("Neo4j not reachable — run `make db-up`")
-    classified, kinds = out
-    assert classified == 1  # only the true stub; promoted + partnered + unknown skipped
-    assert kinds["Acme __clcommit__"] == "client"
-    assert kinds["Globex __clcommit__"] is None  # promoted node was not mislabelled
-    assert kinds["Umbrella __clcommit__"] is None  # partnership gained since scan — skipped
+    removed, refused, surviving = out
+    assert removed == ["Acme __rmtest__"]  # only the true stub was deleted
+    assert set(refused) == {"Globex __rmtest__", "Initech __rmtest__"}  # researched refused
+    assert "Acme __rmtest__" not in surviving  # stub is gone
+    assert surviving == {"Globex __rmtest__", "Initech __rmtest__"}  # researched kept intact
+
+
+def test_classify_stub_kinds_refuses_promoted_stubs():
+    """The kind-write TOCTOU guard (PR #188 review): a candidate that gained a
+    kind, website, or topic while review sat open is REFUSED at commit — the
+    reviewer's decision was made about a stub that no longer exists as such, and
+    writing the stale kind would clobber real research. A still-true stub with an
+    inbound HAS_CLIENT edge classifies normally."""
+
+    async def scenario():
+        try:
+            await check_connectivity()
+        except Exception:
+            return "skip"
+        d = get_driver()
+        still_stub = "Acme __cktest__"  # unchanged since scan → classifies
+        promoted = "Globex __cktest__"  # gained kind+website during review → refused
+        client_of = "Hooli __cktest__"  # the company whose client list proposed them
+        names = [still_stub, promoted, client_of]
+        async with d.session() as s:
+            await s.run("MATCH (c:Company) WHERE c.name IN $n DETACH DELETE c", n=names)
+            await s.run(
+                "MERGE (h:Company {name:$h}) "
+                "MERGE (a:Company {name:$a}) "
+                "MERGE (g:Company {name:$g}) "
+                "SET g.kind='cloud_provider', g.website='https://g.example' "
+                "MERGE (h)-[:HAS_CLIENT]->(a) "
+                "MERGE (h)-[:HAS_CLIENT]->(g)",
+                h=client_of,
+                a=still_stub,
+                g=promoted,
+            )
+        classified, refused = await er.classify_stub_kinds(
+            d, [(still_stub, "client"), (promoted, "client")]
+        )
+        async with d.session() as s:
+            r = await s.run(
+                "MATCH (c:Company) WHERE c.name IN $n RETURN c.name AS name, c.kind AS kind",
+                n=[still_stub, promoted],
+            )
+            kinds = {rec["name"]: rec["kind"] async for rec in r}
+            await s.run("MATCH (c:Company) WHERE c.name IN $n DETACH DELETE c", n=names)
+        await close_driver()
+        return classified, refused, kinds
+
+    out = asyncio.run(scenario())
+    if out == "skip":
+        pytest.skip("Neo4j not reachable — run `make db-up`")
+    classified, refused, kinds = out
+    assert classified == ["Acme __cktest__"]  # the still-true stub was labelled
+    assert refused == ["Globex __cktest__"]  # the promoted one was refused
+    assert kinds["Acme __cktest__"] == "client"
+    assert kinds["Globex __cktest__"] == "cloud_provider"  # research NOT clobbered
