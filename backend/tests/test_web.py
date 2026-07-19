@@ -7,7 +7,15 @@ import json
 import requests
 
 from app.tools import web as web_mod
-from app.tools.web import _fetch_page_live, _gemini_image_mime, fetch_page, web_search
+from app.tools.web import (
+    _download_image,
+    _fetch_page_live,
+    _gemini_image_mime,
+    _looks_like_svg,
+    _rasterize_svg,
+    fetch_page,
+    web_search,
+)
 
 
 def test_accepts_supported_raster_types():
@@ -26,6 +34,128 @@ def test_skips_svg_and_other_unsupported_types():
 def test_skips_svg_mislabeled_as_raster():
     # A server that claims image/png but actually returns SVG/XML text.
     assert _gemini_image_mime("image/png", b"<?xml version='1.0'?><svg/>") is None
+
+
+# --- #9: SVG logos rasterized to PNG so vision can read them ---------------------
+
+_SVG_LOGO = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40">'
+    b'<rect width="120" height="40" fill="#0a3"/>'
+    b'<text x="8" y="26" fill="#fff" font-size="20">Acme</text></svg>'
+)
+
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def _img_resp(body: bytes, content_type: str) -> requests.Response:
+    resp = requests.Response()
+    resp._content = body
+    resp.status_code = 200
+    resp.headers["Content-Type"] = content_type
+    return resp
+
+
+def test_looks_like_svg_sniffs_content_and_type():
+    # Declared SVG content-type.
+    assert _looks_like_svg("image/svg+xml", _SVG_LOGO)
+    # Sniffed from bytes even when mislabeled as a raster type (the #9 case).
+    assert _looks_like_svg("image/png", _SVG_LOGO)
+    assert _looks_like_svg("", b"<?xml version='1.0'?>\n<svg><rect/></svg>")
+    # Genuine rasters and non-SVG markup are not SVG.
+    assert not _looks_like_svg("image/png", b"\x89PNG\r\n")
+    assert not _looks_like_svg("image/jpeg", b"\xff\xd8\xff")
+    assert not _looks_like_svg("text/html", b"<!doctype html><html><body>oops</body></html>")
+
+
+def test_rasterize_svg_produces_bounded_png():
+    png = _rasterize_svg(_SVG_LOGO)
+    assert png is not None and png[:8] == _PNG_MAGIC
+    # Bounded to the 512px cap on the longest side (aspect preserved).
+    import struct
+
+    w, h = struct.unpack(">II", png[16:24])
+    assert max(w, h) <= 512
+
+
+def test_rasterize_svg_bounds_hostile_dimensions():
+    # A malicious huge canvas must not blow up memory — it is fit-scaled to the cap.
+    hostile = (
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="100000" height="100000">'
+        b'<rect width="100000" height="100000"/></svg>'
+    )
+    png = _rasterize_svg(hostile)
+    assert png is not None and png[:8] == _PNG_MAGIC
+    import struct
+
+    w, h = struct.unpack(">II", png[16:24])
+    assert max(w, h) <= 512
+
+
+def test_rasterize_malformed_svg_returns_none():
+    # Untrusted crawl input: a parse/render failure returns None (caller skips),
+    # never crashes the crawl (#84).
+    assert _rasterize_svg(b"this is not svg at all") is None
+    assert _rasterize_svg(b"<svg><rect") is None
+    assert _rasterize_svg(b"") is None
+
+
+def test_rasterize_svg_ignores_external_references():
+    # SVG is untrusted: an external <image href> (network or local file) must NOT be
+    # fetched/read. resvg does no network I/O and no resources_dir is passed, so the
+    # ref is ignored and a valid PNG still renders.
+    svg = (
+        b'<svg xmlns="http://www.w3.org/2000/svg" '
+        b'xmlns:xlink="http://www.w3.org/1999/xlink" width="100" height="40">'
+        b'<image xlink:href="https://evil.example/leak.png" width="100" height="40"/>'
+        b'<rect width="100" height="40" fill="#123"/></svg>'
+    )
+    png = _rasterize_svg(svg)
+    assert png is not None and png[:8] == _PNG_MAGIC
+
+
+def test_rasterize_svg_rejects_external_entities():
+    # An XXE external-entity attack (SYSTEM entity pointing at a local file) is
+    # rejected by the parser → None (skip), so no file contents can be disclosed.
+    xxe = (
+        b'<?xml version="1.0"?>'
+        b'<!DOCTYPE svg [<!ENTITY xxe SYSTEM "file:///etc/hostname">]>'
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50">'
+        b"<text>&xxe;</text></svg>"
+    )
+    assert _rasterize_svg(xxe) is None
+
+
+def test_download_image_rasterizes_declared_svg(monkeypatch):
+    monkeypatch.setattr(
+        web_mod.requests, "get", lambda *a, **k: _img_resp(_SVG_LOGO, "image/svg+xml")
+    )
+    out = _download_image("https://acme.example/logo.svg")
+    assert out is not None
+    data, mime = out
+    # Rasterized to a Gemini-acceptable PNG that flows through the existing gate.
+    assert mime == "image/png" and data[:8] == _PNG_MAGIC
+    assert _gemini_image_mime(mime, data) == "image/png"
+
+
+def test_download_image_rasterizes_svg_mislabeled_as_raster(monkeypatch):
+    # The #9 mislabel case: server claims image/png but the bytes are SVG. Content
+    # sniff (not the header) must catch it and rasterize rather than skip.
+    monkeypatch.setattr(web_mod.requests, "get", lambda *a, **k: _img_resp(_SVG_LOGO, "image/png"))
+    out = _download_image("https://acme.example/logo.png")
+    assert out is not None
+    data, mime = out
+    assert mime == "image/png" and data[:8] == _PNG_MAGIC
+
+
+def test_download_image_skips_svg_when_conversion_fails(monkeypatch):
+    # Malformed SVG → conversion fails → fall back to the current skip (return None),
+    # never crash the crawl.
+    monkeypatch.setattr(
+        web_mod.requests,
+        "get",
+        lambda *a, **k: _img_resp(b"<svg garbage that will not parse", "image/svg+xml"),
+    )
+    assert _download_image("https://acme.example/broken.svg") is None
 
 
 # --- #89: UTF-8 page text survives fetch when the server omits a charset --------
