@@ -32,6 +32,9 @@ db-init:          ## Create Neo4j constraints + indexes (idempotent)
 import:           ## Import a sheet CSV. Usage: make import CSV=data/x.csv TOPIC="SAP ecosystem"
 	cd backend && uv run python -m app.importer.csv_import $(CSV) $(if $(TOPIC),--topic "$(TOPIC)",)
 
+seed-thesis:      ## Seed the maintainer's acquisition-thesis rules (idempotent, origin='user')
+	cd backend && uv run python -m app.graph.thesis
+
 normalize-linkedin: ## Canonicalise stored LinkedIn URLs (uk.->www., trailing slash). ARGS=--dry-run
 	cd backend && uv run python scripts/normalize_linkedin.py $(ARGS)
 
@@ -99,7 +102,7 @@ worktree:         ## Isolated worktree + branch for a parallel session. NAME=<sl
 	echo "  non-clashing dev ports:    make dev PORT=8081  |  make frontend-dev PORT=5174"; \
 	echo "  remove when merged:        git worktree remove $$dir && git branch -d $(NAME)"
 
-.PHONY: db-up db-ephemeral db-down install db-init import normalize-linkedin migrate-person-identity discover-leader-linkedin repair-mojibake enrich eval chat dev schedule-tick test lint frontend-install frontend-dev worktree
+.PHONY: db-up db-ephemeral db-down install db-init import seed-thesis normalize-linkedin migrate-person-identity discover-leader-linkedin repair-mojibake enrich eval chat dev schedule-tick test lint frontend-install frontend-dev worktree
 
 # --- Wave sidecar -------------------------------------------------------------
 # Live progress view of a running wave (#107). wave_status.py snapshots every

@@ -33,6 +33,10 @@ SCHEMA_STATEMENTS = [
     # nullable-safe (Neo4j ignores nulls) so name-only people are unconstrained.
     # Run `make migrate-person-identity` before this on already-dirty data.
     "CREATE CONSTRAINT person_linkedin IF NOT EXISTS FOR (p:Person) REQUIRE p.linkedin IS UNIQUE",
+    # ThesisRule.ruleKey is the flattened (acquirerKind, targetKind, qualifier)
+    # identity (see graph/thesis.py) — the UNIQUE constraint is what lets the seed
+    # + evidence-loop commit MERGE-dedupe a rule instead of spawning duplicates.
+    "CREATE CONSTRAINT thesisrule_key IF NOT EXISTS FOR (tr:ThesisRule) REQUIRE tr.ruleKey IS UNIQUE",
     "CREATE INDEX company_website IF NOT EXISTS FOR (c:Company) ON (c.website)",
     "CREATE INDEX company_hqcountry IF NOT EXISTS FOR (c:Company) ON (c.hqCountry)",
     "CREATE INDEX person_name IF NOT EXISTS FOR (p:Person) ON (p.name)",
