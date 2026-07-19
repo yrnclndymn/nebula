@@ -523,6 +523,388 @@ def test_no_kind_data_ranks_identically_with_thesis_rules():
     assert _reason(with_rules[0], "thesis-match") is None
 
 
+# --- Mutation hardening (#206): exact-kill the scoring-weight / threshold / detail-field
+# survivors that wave-014 left behind. Existing tests assert PRESENCE and ORDERING; these
+# pin the arithmetic (point values as behavioural contract), boundary-test the ratio /
+# tolerance / confidence edges, and assert every `why` detail field the SPA renders. Kept
+# DB-free so they kill regardless of whether a Neo4j is up.
+
+
+def test_dedup_deals_keeps_distinct_target_after_a_duplicate():
+    # `continue`-not-`break`: a repeat target must be SKIPPED, not end the scan — a
+    # distinct deal after it still counts. (kills the loop-`break` mutant.)
+    ranked = rank_acquirer_candidates(
+        [
+            _cand(
+                "Acme",
+                topic_deals=[
+                    {"target": "Foo", "source": "s1"},
+                    {"target": "Foo", "source": "s2"},
+                    {"target": "Bar", "source": "s3"},
+                ],
+            )
+        ]
+    )
+    detail = _reason(ranked[0], "acquired-in-topic")["detail"]
+    assert detail["count"] == 2
+    assert [d["target"] for d in detail["deals"]] == ["Foo", "Bar"]
+    assert ranked[0]["score"] == 2 * W_TOPIC_DEAL
+
+
+def test_zero_headcount_is_neutral_not_a_size_signal():
+    # `_pos_int`: a 0 headcount is missing data, not a real size — no size-plausible
+    # signal (kills the `> 0`→`>= 0` mutant that would read 0 as "smaller").
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", shared_clients=["C1"], acquirer_headcount=0)],
+        target_headcount=200,
+    )
+    assert _reason(ranked[0], "size-plausible") is None
+    assert ranked[0]["score"] == W_SHARED_CLIENT
+
+
+def test_headcount_of_one_is_a_valid_positive_size():
+    # `_pos_int`: a headcount of exactly 1 is a real (if tiny) size, not missing —
+    # a 3x-larger acquirer over a target of 1 still fires (kills the `> 0`→`> 1` mutant).
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", shared_clients=["C1"], acquirer_headcount=3)],
+        target_headcount=1,
+    )
+    reason = _reason(ranked[0], "size-plausible")
+    assert reason is not None and reason["detail"]["direction"] == "larger"
+    assert ranked[0]["score"] == W_SHARED_CLIENT + W_SIZE_PLAUSIBLE
+
+
+def test_size_plausible_fires_exactly_at_the_larger_ratio_boundary():
+    # ratio == SIZE_LARGER_RATIO must count as "larger" (>=, not >): 600 / 200 == 3.0.
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", shared_clients=["C1"], acquirer_headcount=600)],
+        target_headcount=200,
+    )
+    reason = _reason(ranked[0], "size-plausible")
+    assert reason is not None and reason["detail"]["direction"] == "larger"
+    assert reason["detail"]["ratio"] == SIZE_LARGER_RATIO
+    assert ranked[0]["score"] == W_SHARED_CLIENT + W_SIZE_PLAUSIBLE
+
+
+def test_equal_size_is_neutral_not_a_smaller_penalty():
+    # ratio == 1.0 (equal headcount) is neutral, NOT a reverse-takeover penalty
+    # (kills the `< 1`→`<= 1` mutant).
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", shared_clients=["C1"], acquirer_headcount=200)],
+        target_headcount=200,
+    )
+    assert _reason(ranked[0], "size-plausible") is None
+    assert ranked[0]["score"] == W_SHARED_CLIENT
+
+
+def test_size_plausible_ratio_rounds_to_one_decimal():
+    # The rendered ratio is rounded to ONE decimal: 1000 / 300 == 3.333… → 3.3, not
+    # 3 (round(x)/round(x, None)) and not 3.33 (round(x, 2)).
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", shared_clients=["C1"], acquirer_headcount=1000)],
+        target_headcount=300,
+    )
+    assert _reason(ranked[0], "size-plausible")["detail"]["ratio"] == 3.3
+
+
+def test_size_fit_lower_tolerance_admits_target_below_observed_low():
+    # A target just BELOW the historical low still fits (low / TOLERANCE, not low *
+    # TOLERANCE): past [100, 300], target 80 sits inside [66.7, 450].
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", shared_clients=["C1"], past_target_headcounts=[100, 300])],
+        target_headcount=80,
+    )
+    assert _reason(ranked[0], "size-fit") is not None
+    assert ranked[0]["score"] == W_SHARED_CLIENT + W_SIZE_FIT
+
+
+def test_size_fit_includes_target_exactly_at_lower_bound():
+    # target == low / TOLERANCE is INSIDE the band (<=, not <): past [150, 300],
+    # 150 / 1.5 == 100.0, target 100 fits.
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", shared_clients=["C1"], past_target_headcounts=[150, 300])],
+        target_headcount=100,
+    )
+    assert _reason(ranked[0], "size-fit") is not None
+    assert ranked[0]["score"] == W_SHARED_CLIENT + W_SIZE_FIT
+
+
+def test_size_fit_includes_target_exactly_at_upper_bound():
+    # target == high * TOLERANCE is INSIDE the band (<=, not <): past [100],
+    # 100 * 1.5 == 150.0, target 150 fits.
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", shared_clients=["C1"], past_target_headcounts=[100])],
+        target_headcount=150,
+    )
+    assert _reason(ranked[0], "size-fit") is not None
+    assert ranked[0]["score"] == W_SHARED_CLIENT + W_SIZE_FIT
+
+
+def test_size_fit_upper_tolerance_admits_target_above_observed_high():
+    # A target above the historical high still fits (high * TOLERANCE, not high /
+    # TOLERANCE): past [100, 300], target 250 sits inside [66.7, 450] but ABOVE
+    # high / 1.5 == 200 (kills the `*`→`/` upper-bound mutant).
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", shared_clients=["C1"], past_target_headcounts=[100, 300])],
+        target_headcount=250,
+    )
+    assert _reason(ranked[0], "size-fit") is not None
+    assert ranked[0]["score"] == W_SHARED_CLIENT + W_SIZE_FIT
+
+
+def test_size_fit_amounts_filter_drops_blank_strings():
+    # The cited-amounts filter is `isinstance(str) AND non-blank`: a whitespace-only
+    # amount is dropped (kills the `and`→`or` mutant that would keep it).
+    ranked = rank_acquirer_candidates(
+        [
+            _cand(
+                "Acme",
+                shared_clients=["C1"],
+                past_target_headcounts=[50, 200],
+                past_target_amounts=["   ", "$5M"],
+            )
+        ],
+        target_headcount=100,
+    )
+    assert _reason(ranked[0], "size-fit")["detail"]["amounts"] == ["$5M"]
+
+
+def test_both_size_signals_sum_rather_than_overwrite():
+    # When size-plausible AND size-fit both fire they ADD (kills the `+=`→`=` mutant
+    # in `_size_signals` that would keep only the last).
+    ranked = rank_acquirer_candidates(
+        [
+            _cand(
+                "Acme",
+                shared_clients=["C1"],
+                acquirer_headcount=6000,
+                past_target_headcounts=[100, 300],
+            )
+        ],
+        target_headcount=200,
+    )
+    row = ranked[0]
+    assert {_reason(row, "size-plausible") is not None, _reason(row, "size-fit") is not None} == {
+        True
+    }
+    assert row["score"] == W_SHARED_CLIENT + W_SIZE_PLAUSIBLE + W_SIZE_FIT
+
+
+def test_thesis_garbage_confidence_falls_back_to_prior_half():
+    # A non-numeric confidence falls back to the 0.5 seed prior (kills the fallback
+    # 0.5→1.5 mutant, which the [0, 1] clamp would otherwise hide as 1.0).
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", acquirer_kind="isv", shared_clients=["C1"])],
+        target_kind="isv",
+        thesis_rules=[_rule("isv", "isv", conf=None)],
+    )
+    reason = _reason(ranked[0], "thesis-match")
+    assert reason["detail"]["confidence"] == 0.5
+    assert ranked[0]["score"] == W_SHARED_CLIENT + _thesis_pts(0.5)
+
+
+def test_thesis_confidence_clamps_to_one():
+    # A confidence above 1 clamps to 1.0 (kills the upper-clamp 1.0→2.0 mutant).
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", acquirer_kind="isv", shared_clients=["C1"])],
+        target_kind="isv",
+        thesis_rules=[_rule("isv", "isv", conf=5.0)],
+    )
+    reason = _reason(ranked[0], "thesis-match")
+    assert reason["detail"]["confidence"] == 1.0
+    assert ranked[0]["score"] == W_SHARED_CLIENT + W_THESIS_MATCH
+
+
+def test_thesis_points_round_to_two_decimals():
+    # Thesis points round to TWO decimals: 3 * 0.111 == 0.333 → 0.33, not 0.333.
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", acquirer_kind="isv", shared_clients=["C1"])],
+        target_kind="isv",
+        thesis_rules=[_rule("isv", "isv", conf=0.111)],
+    )
+    assert ranked[0]["score"] == W_SHARED_CLIENT + 0.33
+
+
+def test_thesis_evidence_zero_renders_as_zero_not_one():
+    # A rule with no evidence renders evidence 0, not a phantom 1 (kills the
+    # `or 0`→`or 1` mutant).
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", acquirer_kind="isv", shared_clients=["C1"])],
+        target_kind="isv",
+        thesis_rules=[_rule("isv", "isv", conf=0.5, evidence=0)],
+    )
+    assert _reason(ranked[0], "thesis-match")["detail"]["evidence"] == 0
+
+
+def test_thesis_neutral_when_only_target_kind_missing_even_with_a_none_kind_rule():
+    # Target kind absent must short-circuit to neutral even if a rule's target kind is
+    # itself blank (would normalise to None and spuriously match) — pins the `or` in the
+    # missing-kind guard (kills the `or`→`and` guard mutants).
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", acquirer_kind="isv", shared_clients=["C1"])],
+        target_kind=None,
+        thesis_rules=[_rule("isv", "", conf=0.9)],
+    )
+    assert _reason(ranked[0], "thesis-match") is None
+    assert ranked[0]["score"] == W_SHARED_CLIENT
+
+
+def test_thesis_neutral_when_only_candidate_kind_missing_even_with_a_none_kind_rule():
+    # Symmetric guard for the acquirer side: candidate kind absent is neutral even if a
+    # rule's acquirer kind is blank.
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", acquirer_kind=None, shared_clients=["C1"])],
+        target_kind="isv",
+        thesis_rules=[_rule("", "isv", conf=0.9)],
+    )
+    assert _reason(ranked[0], "thesis-match") is None
+    assert ranked[0]["score"] == W_SHARED_CLIENT
+
+
+def test_thesis_scans_all_rules_past_an_acquirer_kind_mismatch():
+    # A non-matching acquirer-kind rule must be SKIPPED, not end the scan — a later
+    # matching rule still fires (kills the first `continue`→`break` mutant).
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", acquirer_kind="isv", shared_clients=["C1"])],
+        target_kind="isv",
+        thesis_rules=[_rule("cloud_provider", "isv", conf=0.7), _rule("isv", "isv", conf=0.7)],
+    )
+    assert _reason(ranked[0], "thesis-match") is not None
+    assert ranked[0]["score"] == W_SHARED_CLIENT + _thesis_pts(0.7)
+
+
+def test_thesis_scans_all_rules_past_a_target_kind_mismatch():
+    # Likewise past a target-kind mismatch (kills the second `continue`→`break` mutant).
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", acquirer_kind="isv", shared_clients=["C1"])],
+        target_kind="isv",
+        thesis_rules=[_rule("isv", "cloud_provider", conf=0.7), _rule("isv", "isv", conf=0.7)],
+    )
+    assert _reason(ranked[0], "thesis-match") is not None
+    assert ranked[0]["score"] == W_SHARED_CLIENT + _thesis_pts(0.7)
+
+
+def test_thesis_scans_all_rules_past_a_failed_qualifier():
+    # A rule whose qualifier does not hold is SKIPPED, not fatal — a later unqualified
+    # match still fires (kills the qualifier `continue`→`break` mutant).
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", acquirer_kind="isv", shared_clients=["C1"])],
+        target_kind="isv",
+        thesis_rules=[
+            _rule("isv", "isv", qualifier="regulated", conf=0.7),
+            _rule("isv", "isv", conf=0.7),
+        ],
+    )
+    assert _reason(ranked[0], "thesis-match") is not None
+    assert ranked[0]["score"] == W_SHARED_CLIENT + _thesis_pts(0.7)
+
+
+def test_thesis_multiple_matching_rules_accumulate():
+    # Two matching rules ADD their confidence-scaled points and each carries its own
+    # reason (kills the `+=`→`=` mutant that would keep only the last).
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", acquirer_kind="isv", shared_clients=["C1"])],
+        target_kind="isv",
+        thesis_rules=[_rule("isv", "isv", conf=0.6), _rule("isv", "isv", conf=0.4)],
+    )
+    row = ranked[0]
+    assert len([r for r in row["why"] if r["signal"] == "thesis-match"]) == 2
+    assert row["score"] == W_SHARED_CLIENT + _thesis_pts(0.6) + _thesis_pts(0.4)
+
+
+def test_relevance_gate_sums_topic_and_kind_signals():
+    # The relevance gate ADDS topic and kind ties (kills the `+`→`-` mutant that would
+    # let one topic deal cancel one kind deal to exactly 0 and drop the candidate).
+    ranked = rank_acquirer_candidates(
+        [
+            _cand(
+                "Acme",
+                topic_deals=[{"target": "Foo", "source": "s"}],
+                kind_deals=[{"target": "Bar", "source": "s"}],
+            )
+        ],
+        target_kind="isv",
+    )
+    assert len(ranked) == 1
+    assert ranked[0]["score"] == W_TOPIC_DEAL + W_KIND_DEAL
+
+
+def test_relevance_gate_sums_topic_and_client_signals():
+    # Likewise a topic tie and a shared-client tie both count toward relevance (kills
+    # the shared-clients `+`→`-` mutant).
+    ranked = rank_acquirer_candidates(
+        [
+            _cand(
+                "Acme",
+                topic_deals=[{"target": "Foo", "source": "s"}],
+                shared_clients=["C1"],
+            )
+        ]
+    )
+    assert len(ranked) == 1
+    assert ranked[0]["score"] == W_TOPIC_DEAL + W_SHARED_CLIENT
+
+
+def test_absent_acquisition_count_reports_zero():
+    # A relevant candidate with no acquisition history reports total_acquisitions 0,
+    # not a phantom 1 (kills the `or 0`→`or 1` mutant on the total).
+    ranked = rank_acquirer_candidates([_cand("Acme", shared_clients=["C1"])])
+    assert ranked[0]["total_acquisitions"] == 0
+
+
+def test_activity_bonus_counts_the_second_acquisition():
+    # Two acquisitions earn exactly one activity point (bonus counts deals BEYOND the
+    # first: total - 1), and the active-acquirer reason appears at total > 1. Kills
+    # both the `total - 1`→`total - 2` and `total > 1`→`total > 2` mutants.
+    ranked = rank_acquirer_candidates([_cand("Acme", shared_clients=["C1"], total_acquisitions=2)])
+    row = ranked[0]
+    assert row["score"] == W_SHARED_CLIENT + W_ACTIVITY
+    active = _reason(row, "active-acquirer")
+    assert active is not None and active["detail"]["total_acquisitions"] == 2
+
+
+def test_why_details_expose_every_field_the_ui_renders():
+    # Pin the exact detail keys/values the SPA reads for the kind / partner / client
+    # signals (kills the detail-dict key/value rename mutants).
+    ranked = rank_acquirer_candidates(
+        [
+            _cand(
+                "Acme",
+                kind_deals=[{"target": "Bar", "source": "s"}],
+                shared_partners=["P1", "P2"],
+                shared_clients=["C1"],
+                is_direct_partner=True,
+            )
+        ],
+        target_kind="isv",
+    )
+    reasons = {r["signal"]: r for r in ranked[0]["why"]}
+
+    kind_detail = reasons["acquired-same-kind"]["detail"]
+    assert kind_detail["deals"] == [{"target": "Bar", "source": "s"}]
+
+    # direct-partner carries an explicit (empty) `detail` key.
+    assert reasons["direct-partner"]["detail"] == {}
+
+    partner_detail = reasons["shared-partners"]["detail"]
+    assert partner_detail["count"] == 2
+    assert partner_detail["partners"] == ["P1", "P2"]
+
+    client_reason = reasons["shared-clients"]
+    assert client_reason["detail"]["count"] == 1
+    assert client_reason["detail"]["clients"] == ["C1"]
+
+
+def test_tiebreak_orders_case_insensitively():
+    # Equal scores break by name CASE-INSENSITIVELY (`.lower()`): "_Legacy" (a leading
+    # gap char) sorts before "Acme" under lower-casing but after it under upper-casing,
+    # so this distinguishes `.lower()` from the `.upper()` mutant.
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", shared_clients=["C1"]), _cand("_Legacy", shared_clients=["C2"])]
+    )
+    assert [r["acquirer"] for r in ranked] == ["_Legacy", "Acme"]
+
+
 # --- Route auth (PR #121 review; precedent: test_acquisition_endpoints_require_auth)
 
 

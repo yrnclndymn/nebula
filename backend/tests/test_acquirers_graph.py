@@ -156,14 +156,18 @@ def test_potential_acquirers_ranks_by_signal(event_loop):
             await _cleanup(session)
         await _seed(driver)
         ranked = await potential_acquirers(driver, TARGET)
+        # limit is threaded into the pure ranker: 3 candidates tie to the target, so a
+        # limit of 1 must return exactly one (guards the wrapper passing limit through).
+        limited = await potential_acquirers(driver, TARGET, limit=1)
         missing = await potential_acquirers(driver, "No Such Co __pytest44__")
         async with driver.session() as session:
             await _cleanup(session)
         await close_driver()
-        return ranked, missing
+        return ranked, limited, missing
 
-    ranked, missing = event_loop.run_until_complete(scenario())
+    ranked, limited, missing = event_loop.run_until_complete(scenario())
     assert missing is None  # unknown company -> None (route 404s)
+    assert len(limited) == 1  # limit threaded through to the ranker
 
     by_name = {r["acquirer"] for r in ranked}
     # ACTIVE / KINDLY / PARTNER all tie to the target; UNRELATED does not.
