@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from app.agents.assistant import classification, resolution
 from app.graph import entity_resolution as er
-from app.graph import jobs, queries
+from app.graph import jobs
 from app.main import app
 
 # --- in-memory job store ------------------------------------------------------
@@ -136,9 +136,9 @@ def test_classification_flow_end_to_end(job_store, monkeypatch):
     async def fake_candidates(_driver):
         return candidates
 
-    async def fake_set_kind(_driver, name: str, kind: str) -> bool:
-        kinds_set.append((name, kind))
-        return True
+    async def fake_classify_kinds(_driver, kind_writes):
+        kinds_set.extend(kind_writes)
+        return [n for n, _ in kind_writes], []
 
     async def fake_remove(_driver, names: list[str]):
         removed_names.extend(names)
@@ -146,7 +146,7 @@ def test_classification_flow_end_to_end(job_store, monkeypatch):
 
     monkeypatch.setattr(er, "list_client_stub_candidates", fake_candidates)
     monkeypatch.setattr(er, "remove_stub_companies", fake_remove)
-    monkeypatch.setattr(queries, "set_company_kind", fake_set_kind)
+    monkeypatch.setattr(er, "classify_stub_kinds", fake_classify_kinds)
     monkeypatch.setattr(classification, "get_driver", lambda: None)
 
     async def scenario():

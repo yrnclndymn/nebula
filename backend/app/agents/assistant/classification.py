@@ -14,14 +14,15 @@ per-candidate action; the user reviews and commits a batch of per-name
 
 Each decision is `{name, action}` where `action` is a company KIND (client, ISV,
 cloud/service provider — the reviewer relabels the stub) or `'remove'` (a HARD
-delete of a true stub, e.g. extraction junk). Kind writes reuse
-`queries.set_company_kind`; removals go through `entity_resolution.
-remove_stub_companies`, which REFUSES researched companies server-side so a
-mistaken 'remove' can never destroy real data. The heuristic only proposes.
+delete of a true stub, e.g. extraction junk). Both paths are TOCTOU-guarded at
+commit: kind writes go through `entity_resolution.classify_stub_kinds` (the full
+scan predicate re-checked, so a promoted stub is refused, not clobbered) and
+removals through `entity_resolution.remove_stub_companies` (researched companies
+refused). The heuristic only proposes.
 """
 
 from app.graph import entity_resolution as er
-from app.graph import jobs, queries
+from app.graph import jobs
 from app.graph.driver import get_driver
 from app.graph.models import KINDS
 
@@ -92,11 +93,13 @@ async def get_classification(job_id: str) -> dict | None:
 async def commit_classification(job_id: str, decisions: list[dict]) -> dict:
     """Apply the reviewer's per-name decisions. Called by the UI, not the agent.
 
-    Kind decisions relabel the named stub via `set_company_kind`; 'remove'
-    decisions hard-delete via `remove_stub_companies`, which refuses (skips)
-    researched companies — so a mistaken removal can never destroy real data.
-    A malformed batch (unknown action / missing name) is rejected wholesale
-    before any write. Returns counts plus any refused (researched) removals.
+    BOTH decision paths are TOCTOU-guarded at commit (PR #188 review): kind
+    writes go through `classify_stub_kinds`, which re-runs the FULL scan
+    predicate so a stub promoted while review sat open is refused rather than
+    having its researched kind clobbered; 'remove' decisions hard-delete via
+    `remove_stub_companies`, which refuses researched companies. A malformed
+    batch (unknown action / missing name) is rejected wholesale before any
+    write. Returns counts plus every refused name (both paths combined).
     """
     job = await jobs.get_ready_job(job_id)
     if job is None:
@@ -107,11 +110,12 @@ async def commit_classification(job_id: str, decisions: list[dict]) -> dict:
         return {"error": "invalid classification decisions"}
 
     driver = get_driver()
-    classified = 0
-    for name, kind in kind_writes:
-        if await queries.set_company_kind(driver, name, kind):
-            classified += 1
-    removed, refused = await er.remove_stub_companies(driver, remove_names)
+    classified, refused_kinds = await er.classify_stub_kinds(driver, kind_writes)
+    removed, refused_removals = await er.remove_stub_companies(driver, remove_names)
 
     await jobs.mark_committed(job_id, job)
-    return {"classified": classified, "removed": len(removed), "refused": refused}
+    return {
+        "classified": len(classified),
+        "removed": len(removed),
+        "refused": refused_kinds + refused_removals,
+    }

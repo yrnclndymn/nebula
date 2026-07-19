@@ -211,3 +211,56 @@ def test_remove_stub_companies_deletes_stubs_and_refuses_researched():
     assert set(refused) == {"Globex __rmtest__", "Initech __rmtest__"}  # researched refused
     assert "Acme __rmtest__" not in surviving  # stub is gone
     assert surviving == {"Globex __rmtest__", "Initech __rmtest__"}  # researched kept intact
+
+
+def test_classify_stub_kinds_refuses_promoted_stubs():
+    """The kind-write TOCTOU guard (PR #188 review): a candidate that gained a
+    kind, website, or topic while review sat open is REFUSED at commit — the
+    reviewer's decision was made about a stub that no longer exists as such, and
+    writing the stale kind would clobber real research. A still-true stub with an
+    inbound HAS_CLIENT edge classifies normally."""
+
+    async def scenario():
+        try:
+            await check_connectivity()
+        except Exception:
+            return "skip"
+        d = get_driver()
+        still_stub = "Acme __cktest__"  # unchanged since scan → classifies
+        promoted = "Globex __cktest__"  # gained kind+website during review → refused
+        client_of = "Hooli __cktest__"  # the company whose client list proposed them
+        names = [still_stub, promoted, client_of]
+        async with d.session() as s:
+            await s.run("MATCH (c:Company) WHERE c.name IN $n DETACH DELETE c", n=names)
+            await s.run(
+                "MERGE (h:Company {name:$h}) "
+                "MERGE (a:Company {name:$a}) "
+                "MERGE (g:Company {name:$g}) "
+                "SET g.kind='cloud_provider', g.website='https://g.example' "
+                "MERGE (h)-[:HAS_CLIENT]->(a) "
+                "MERGE (h)-[:HAS_CLIENT]->(g)",
+                h=client_of,
+                a=still_stub,
+                g=promoted,
+            )
+        classified, refused = await er.classify_stub_kinds(
+            d, [(still_stub, "client"), (promoted, "client")]
+        )
+        async with d.session() as s:
+            r = await s.run(
+                "MATCH (c:Company) WHERE c.name IN $n RETURN c.name AS name, c.kind AS kind",
+                n=[still_stub, promoted],
+            )
+            kinds = {rec["name"]: rec["kind"] async for rec in r}
+            await s.run("MATCH (c:Company) WHERE c.name IN $n DETACH DELETE c", n=names)
+        await close_driver()
+        return classified, refused, kinds
+
+    out = asyncio.run(scenario())
+    if out == "skip":
+        pytest.skip("Neo4j not reachable — run `make db-up`")
+    classified, refused, kinds = out
+    assert classified == ["Acme __cktest__"]  # the still-true stub was labelled
+    assert refused == ["Globex __cktest__"]  # the promoted one was refused
+    assert kinds["Acme __cktest__"] == "client"
+    assert kinds["Globex __cktest__"] == "cloud_provider"  # research NOT clobbered

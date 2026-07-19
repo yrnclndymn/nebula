@@ -426,6 +426,52 @@ async def remove_stub_companies(
     return list(record["removed"]), list(record["refused"])
 
 
+async def classify_stub_kinds(
+    driver: AsyncDriver, kind_writes: list[tuple[str, str]]
+) -> tuple[list[str], list[str]]:
+    """Set each approved kind, guarded by the FULL scan predicate at commit time.
+
+    The reviewer's decision was made about a STUB; if the node gained any signal
+    while review sat open (a kind, a website, a topic tag, a junk flag, an
+    outbound edge, or a non-HAS_CLIENT inbound edge), the premise of that
+    decision is stale — writing the stale kind would silently clobber real
+    research (PR #188 review; the guard `classify_as_client` carried before the
+    per-decision refactor). Such names are REFUSED rather than written; a fresh
+    scan re-proposes against current state.
+
+    Returns `(classified_names, refused_names)`. Unknown names match nothing and
+    appear in neither list.
+    """
+    if not kind_writes:
+        return [], []
+    pairs = [{"name": n, "kind": k} for n, k in kind_writes]
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            UNWIND $pairs AS pair
+            MATCH (c:Company {name: pair.name})
+              WHERE c.kind IS NULL
+              AND c.website IS NULL
+              AND NOT coalesce(c.junk, false)
+              AND NOT (c)-[:TAGGED_AS]->(:Topic)
+              AND EXISTS { (:Company)-[:HAS_CLIENT]->(c) }
+            OPTIONAL MATCH (c)-[out]->()
+            WITH c, pair, count(out) AS outDeg
+            OPTIONAL MATCH (c)<-[inc]-()
+            WITH c, pair, outDeg,
+                 sum(CASE WHEN type(inc) = 'HAS_CLIENT' THEN 0 ELSE 1 END) AS inOther
+            WHERE outDeg = 0 AND inOther = 0
+            SET c.kind = pair.kind, c.updatedAt = datetime()
+            RETURN collect(c.name) AS classified
+            """,
+            pairs=pairs,
+        )
+        record = await result.single()
+    classified = list(record["classified"]) if record else []
+    refused = [n for n, _ in kind_writes if n not in classified]
+    return classified, refused
+
+
 async def flag_junk(driver: AsyncDriver, names: list[str]) -> int:
     """Mark companies as junk so they drop out of the company/backlog lists.
 
