@@ -15,13 +15,12 @@ import requests
 import resvg_py
 from bs4 import BeautifulSoup
 from ddgs import DDGS
-from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
 from app import budget
 from app.config import settings
-from app.genai_retry import generate_with_retry
+from app import llm
 from app.graph import cache
 from app.graph.driver import get_driver
 from app.tools.encoding import response_text, sanitize_surrogates
@@ -226,6 +225,12 @@ async def identify_logos(image_urls: list[str]) -> dict:
     """Look at logo images and identify the company/brand in each. Use for client
     logos whose company name isn't clear from the filename or alt text. Pass the
     image src URLs (up to ~16 are used). Returns {"companies": [names]}."""
+    if llm.use_litellm():
+        # Logo vision needs Gemini image parts, which the litellm text surface
+        # can't carry (#8). Degrade to an empty batch so find_clients keeps its
+        # alt-text + text-mined names instead of losing the whole crawl.
+        logger.warning("identify_logos needs the gemini provider; skipping logo vision")
+        return {"companies": []}
     parts: list[types.Part] = [
         types.Part(
             text=(
@@ -247,8 +252,7 @@ async def identify_logos(image_urls: list[str]) -> dict:
     if len(parts) == 1:  # nothing downloaded
         return {"companies": []}
 
-    resp = await generate_with_retry(
-        genai.Client(),
+    resp = await llm.generate(
         model=settings.gemini_model,
         contents=[types.Content(role="user", parts=parts)],
         config=types.GenerateContentConfig(
@@ -335,8 +339,7 @@ async def _extract_clients_from_text(text: str) -> list[str]:
         "companies and public bodies this firm has worked for. Exclude the firm "
         "itself, technology vendors/partners, certifications, and generic terms.\n\n" + text
     )
-    resp = await generate_with_retry(
-        genai.Client(),
+    resp = await llm.generate(
         model=settings.gemini_model,
         contents=prompt,
         config=types.GenerateContentConfig(

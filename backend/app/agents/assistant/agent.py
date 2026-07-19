@@ -14,7 +14,7 @@ from app.agents.assistant.merge import propose_merge
 from app.agents.assistant.proposals import propose_enrichment
 from app.agents.assistant.schema_tools import add_field
 from app.agents.assistant.tidy_hq import tidy_hq
-from app.config import settings
+from app import llm
 from app.tools.graph_query_tools import get_company, run_cypher, search_companies
 
 _INSTRUCTION = """You are Nebula's research assistant. You help the user explore a
@@ -127,7 +127,7 @@ Memory:
 
 root_agent = Agent(
     name="research_assistant",
-    model=settings.agent_model,
+    model=llm.adk_model(),
     description="Conversational assistant over the Nebula research graph, with memory.",
     instruction=_INSTRUCTION,
     tools=[

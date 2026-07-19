@@ -20,6 +20,7 @@ dependencies = [
     "firebase-admin>=7.5.0",
     "defusedxml>=0.7.1",
     "resvg-py>=0.3.3",
+    "litellm>=1.93.0",
 ]
 
 [dependency-groups]
@@ -77,6 +78,7 @@ max-statements = 60
 #                                        signals (= capture). Migrates incrementally.
 #   tools                             research toolkit (uses the graph-backed cache)
 #   graph                             Neo4j read/write + committable record models
+#   llm                               provider seam (#8): gemini vs LiteLLM dispatch
 #   genai_retry                       quota/backoff wrapper (over budget + ratelimit)
 #   auth | budget | ratelimit         foundation helpers (each depends only on config)
 #   config                            settings — the base
@@ -98,6 +100,7 @@ layers = [
     "app.agents.discovery | app.agents.enrichment | app.agents.deals | app.agents.people | app.capture",
     "app.tools",
     "app.graph",
+    "app.llm",
     "app.genai_retry",
     "app.auth | app.budget | app.ratelimit",
     "app.config",

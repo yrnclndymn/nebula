@@ -16,11 +16,10 @@ import logging
 from collections import Counter
 from dataclasses import dataclass, field
 
-from google import genai
 from google.genai import types
 
 from app.config import settings
-from app.genai_retry import generate_with_retry
+from app import llm
 from app.graph import queries
 
 logger = logging.getLogger("nebula.discovery")
@@ -124,7 +123,7 @@ async def summarise_cohort(seed_name: str, rows: list[dict]) -> str:
     Built from the cohort's OWN stored `about` text (our graph data, not crawled
     input) so the summary is cited to the cohort. Returns "" if the model gives
     nothing back — the caller degrades to the structured facts. Charges the active
-    per-run budget + shared rate limiter via `generate_with_retry`.
+    per-run budget + shared rate limiter via `llm.generate`.
     """
     lines = []
     for r in rows:
@@ -137,8 +136,7 @@ async def summarise_cohort(seed_name: str, rows: list[dict]) -> str:
         "find MORE companies like them. Do not name the companies; describe the "
         "type.\n\n" + "\n".join(lines)
     )
-    resp = await generate_with_retry(
-        genai.Client(),
+    resp = await llm.generate(
         model=settings.gemini_model,
         contents=prompt,
         config=types.GenerateContentConfig(temperature=0),

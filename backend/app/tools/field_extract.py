@@ -9,12 +9,11 @@ the pages are cached after the first research.
 import asyncio
 
 import requests
-from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
 from app.config import settings
-from app.genai_retry import generate_with_retry
+from app import llm
 from app.tools.social import normalize_linkedin, pick_social_href, social_domains_for
 from app.tools.web import _HEADERS, fetch_page
 
@@ -85,8 +84,7 @@ async def extract_field(website: str, label: str, description: str, field_type: 
         "Also return the source_url (one of the pages below) you took it from.\n\n"
         + " ".join(texts)[:12000]
     )
-    resp = await generate_with_retry(
-        genai.Client(),
+    resp = await llm.generate(
         model=settings.gemini_model,
         contents=prompt,
         config=types.GenerateContentConfig(

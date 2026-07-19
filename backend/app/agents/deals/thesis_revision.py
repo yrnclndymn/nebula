@@ -31,13 +31,12 @@ import json
 import logging
 from urllib.parse import urlparse
 
-from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field, ValidationError
 
 from app.budget import budget_for, use_budget
 from app.config import settings
-from app.genai_retry import generate_with_retry
+from app import llm
 from app.graph import jobs
 from app.graph.driver import get_driver
 from app.graph.sanitize import sanitize_surrogates
@@ -358,8 +357,7 @@ async def propose_revisions(rules: list[dict], evidence: list[dict]) -> ThesisRe
     """
     if not evidence:
         return ThesisRevisionProposal()
-    resp = await generate_with_retry(
-        genai.Client(),
+    resp = await llm.generate(
         model=settings.gemini_model,
         contents=build_revision_prompt(rules, evidence),
         config=types.GenerateContentConfig(

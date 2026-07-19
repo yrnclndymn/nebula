@@ -9,7 +9,7 @@ discover it, and `enrich.py` runs it programmatically.
 
 from google.adk.agents import Agent
 
-from app.config import settings
+from app import llm
 from app.tools.graph_tools import save_company
 from app.tools.web import fetch_page, find_clients, web_search
 
@@ -62,7 +62,7 @@ Process:
 
 root_agent = Agent(
     name="enrichment_agent",
-    model=settings.agent_model,
+    model=llm.adk_model(),
     description="Researches a company from its name + website and saves structured facts to the Nebula graph.",
     instruction=_INSTRUCTION,
     tools=[fetch_page, web_search, find_clients, save_company],

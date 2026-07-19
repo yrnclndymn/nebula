@@ -21,7 +21,6 @@ import logging
 import uuid
 
 import requests
-from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
@@ -31,7 +30,7 @@ from app.capture.feeds import FeedItem, discover_feeds, parse_feed
 from app.capture.people import link_signal_people
 from app.capture.sections import classify_section, find_section_pages
 from app.config import settings
-from app.genai_retry import generate_with_retry
+from app import llm
 from app.graph import cache, jobs
 from app.graph.driver import get_driver
 from app.graph.models import SignalRecord, canonicalise_url
@@ -110,8 +109,7 @@ async def _extract_index_items(page_url: str, text: str, links: list[dict]) -> l
         "ignore navigation, footer, and unrelated links. Return an empty list if none.\n\n"
         f"LINKS:\n{link_lines}\n\nTEXT:\n{text[:12000]}"
     )
-    resp = await generate_with_retry(
-        genai.Client(),
+    resp = await llm.generate(
         model=settings.gemini_model,
         contents=prompt,
         config=types.GenerateContentConfig(

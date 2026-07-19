@@ -29,13 +29,12 @@ import uuid
 from collections import Counter
 from urllib.parse import urlparse
 
-from google import genai
 from google.genai import types
 from neo4j import AsyncDriver
 
 from app import budget
 from app.config import settings
-from app.genai_retry import generate_with_retry
+from app import llm
 from app.graph import jobs
 from app.graph.driver import get_driver
 
@@ -198,8 +197,7 @@ async def generate_expertise(context: dict) -> str:
     if not _has_material(context):
         return fallback
     try:
-        resp = await generate_with_retry(
-            genai.Client(),
+        resp = await llm.generate(
             model=settings.gemini_model,
             contents=build_expertise_prompt(context),
             config=types.GenerateContentConfig(temperature=0.2),

@@ -19,13 +19,12 @@ gather stops cleanly at its caps.
 import asyncio
 import logging
 
-from google import genai
 from google.genai import types
 
 from app import budget
 from app.agents.people.models import PersonResearch
 from app.config import settings
-from app.genai_retry import generate_with_retry
+from app import llm
 from app.tools.encoding import sanitize_surrogates
 from app.tools.web import fetch_page, web_search
 
@@ -110,8 +109,7 @@ async def research_person(
     # never pass through fetch_page); strip them or the Gemini prompt encode crashes (#127).
     evidence_text = sanitize_surrogates("\n\n".join(evidence)[:_EVIDENCE_CHARS])
     prompt = _PROMPT.format(name=name, company=company, evidence=evidence_text)
-    resp = await generate_with_retry(
-        genai.Client(),
+    resp = await llm.generate(
         model=settings.gemini_model,
         contents=prompt,
         config=types.GenerateContentConfig(

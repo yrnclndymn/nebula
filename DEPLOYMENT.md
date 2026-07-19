@@ -99,11 +99,26 @@ Cloud Tasks is free at this scale and keeps `min-instances=0`.
 
 - **Now:** Gemini model IDs are env vars (`GEMINI_MODEL`, `AGENT_MODEL`) — switch
   models without redeploying. Provider key in Secret Manager.
-- **Later (Phase E):** provider-switching via **LiteLLM** for the ADK agents
-  (`LiteLlm(model="anthropic/claude-…")`) plus a thin `llm()` wrapper for the direct
-  `google-genai` structured calls (extract / judge / tidy / field_extract / logos).
-  Then `LLM_PROVIDER` + `LLM_MODEL` env switches everything; each provider's key lives
-  in Secret Manager. Not a deploy blocker.
+- **Now (Phase E, #8 — done):** provider-switching via **LiteLLM**. `app/llm.py` is
+  the single seam: ADK agents call `llm.adk_model()` (a plain Gemini model string by
+  default, `LiteLlm(model=…)` for any other provider), and the direct `google-genai`
+  structured calls (extract / judge / tidy / field_extract / logos) go through
+  `llm.generate()` (native genai for gemini, `litellm.acompletion` otherwise).
+  Switch with two env vars, no code edits:
+  - `LLM_PROVIDER` — `gemini` (default; unchanged native path) or a LiteLLM provider
+    family, e.g. `anthropic`, `openai`, `azure`.
+  - `LLM_MODEL` — pass-through model id used verbatim (e.g. `anthropic/claude-…`,
+    `gpt-…`); REQUIRED for any non-gemini provider (rejected at startup otherwise);
+    with both unset the `GEMINI_MODEL` / `AGENT_MODEL` defaults apply.
+  The chosen provider's API key must be in the env — **each key wired into Secret
+  Manager at deploy time** (ops task; not done here): `GEMINI_API_KEY` /
+  `GOOGLE_API_KEY` for gemini, `ANTHROPIC_API_KEY` for anthropic, `OPENAI_API_KEY` for
+  openai, etc. On a non-gemini provider no Gemini key is needed: the importer and
+  tidy paths construct their `genai.Client` only on the gemini branch. Caveats: the
+  litellm structured-output path (JSON-schema `response_format`) is implemented but
+  unverified without a live non-gemini key; logo vision (multimodal) is gemini-only —
+  on other providers `identify_logos` skips the vision batch with a warning (alt-text
+  and text-mined client names still flow).
 
 ## Phased rollout
 
@@ -172,9 +187,10 @@ teammate@example.com`, plus the Phase B job vars. Cloud Run's default SA is
 - Local `backend/.env` → Aura creds + `GEMINI_API_KEY`. Run `.mcp.json` as today; it
   now reads/writes prod data. Nothing exposed.
 
-### Phase E — switchable LLM provider (later)
-- LiteLLM for ADK agents + `llm()` wrapper for direct calls; `LLM_PROVIDER`/`LLM_MODEL`
-  env; keys in Secret Manager.
+### Phase E — switchable LLM provider (#8 — done)
+- LiteLLM for ADK agents + the `app/llm.py` wrapper for direct calls; `LLM_PROVIDER` /
+  `LLM_MODEL` env (see "Switchable LLM" above). Default `gemini` keeps today's native
+  path unchanged. Remaining ops task: wire each provider's API key into Secret Manager.
 
 ## Cost
 

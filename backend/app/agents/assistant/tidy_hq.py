@@ -13,7 +13,7 @@ from google.genai import types
 from pydantic import BaseModel
 
 from app.config import settings
-from app.genai_retry import generate_with_retry
+from app import llm
 from app.graph import queries
 from app.graph.driver import get_driver
 
@@ -64,9 +64,9 @@ Items (JSON):
 {items}"""
 
 
-async def _parse_batch(client: genai.Client, batch: list[dict]) -> list[_HQ]:
-    resp = await generate_with_retry(
-        client,
+async def _parse_batch(client: genai.Client | None, batch: list[dict]) -> list[_HQ]:
+    resp = await llm.generate(
+        client=client,
         model=settings.gemini_model,
         contents=_PROMPT.format(items=json.dumps(batch)),
         config=types.GenerateContentConfig(
@@ -82,7 +82,10 @@ async def _parse_batch(client: genai.Client, batch: list[dict]) -> list[_HQ]:
 async def _run_tidy() -> None:
     driver = get_driver()
     companies = await queries.companies_with_hq(driver)
-    client = genai.Client()
+    # Only the gemini path reuses one genai.Client; on a non-gemini provider
+    # constructing it would demand a Gemini key this run never uses (#8) — and
+    # this task is fire-and-forget, so that crash would be an invisible no-op.
+    client = genai.Client() if llm.is_gemini() else None
     for start in range(0, len(companies), 20):
         batch = [{"name": c["name"], "hq": c["hq"]} for c in companies[start : start + 20]]
         try:

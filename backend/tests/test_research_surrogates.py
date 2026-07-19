@@ -47,14 +47,13 @@ def _install_capture(monkeypatch, module, parsed):
     async def fake_fetch(url):
         return {"url": url, "text": f"Globex was acquired {_SURROGATE} by Acme", "social": {}}
 
-    async def fake_generate(client, *, model, contents, config):
+    async def fake_generate(*, model, contents, config, client=None):
         captured["prompt"] = contents
         return _FakeResp(parsed)
 
     monkeypatch.setattr(module, "web_search", fake_search)
     monkeypatch.setattr(module, "fetch_page", fake_fetch)
-    monkeypatch.setattr(module.genai, "Client", lambda *a, **k: object())
-    monkeypatch.setattr(module, "generate_with_retry", fake_generate)
+    monkeypatch.setattr(module.llm, "generate", fake_generate)
     return captured
 
 
