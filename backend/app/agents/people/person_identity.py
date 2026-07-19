@@ -6,14 +6,20 @@ namesakes collapse two people into one. Where a person's LinkedIn profile is
 known it is a far stronger identity, so a Person is re-keyed on its *canonical*
 LinkedIn URL and the name becomes display-only.
 
-This module holds the pure pieces plus the merge migration:
+This module holds the name-matching evidence + the merge migration. The identity
+key itself and its graph mutation moved DOWN to the graph layer (#183) and are
+re-exported here so this module's public surface is unchanged:
 
-- :func:`canonical_linkedin` reduces any LinkedIn *personal-profile* URL to one
-  stable key — scheme, www/country/mobile subdomain, trailing slash, query,
-  fragment and slug case are all normalised away — so trailing-slash / case /
-  ``m.linkedin`` variants can never mint two identities for one person. Company
-  and school pages, and non-LinkedIn URLs, return ``None``: they are not a
-  person's identity and must never be rewritten into a fake profile.
+- :func:`canonical_linkedin` (now ``app.graph.linkedin``) reduces any LinkedIn
+  *personal-profile* URL to one stable key — scheme, www/country/mobile subdomain,
+  trailing slash, query, fragment and slug case are all normalised away — so
+  trailing-slash / case / ``m.linkedin`` variants can never mint two identities for
+  one person. It moved below the domain so the committable record models can
+  canonicalise their ``linkedin`` field in a validator (the single choke point)
+  without importing UP into ``people``.
+- :func:`attach_linkedin` (now ``app.graph.person_enrichment``) is the reviewable
+  commit that attaches a discovered URL to an existing name-only person; pure
+  Cypher, so it belongs in the graph layer next to the write path that calls it.
 - :func:`linkedin_slug_matches_name` / :func:`extract_person_linkedins` are the
   deterministic evidence used by the discovery step (``scripts/``) so a crawled
   or searched URL is only ever attached to a person on a strong, checkable match
@@ -32,37 +38,28 @@ merges them first.
 
 import asyncio
 import re
-from urllib.parse import urlparse
 
-from neo4j import AsyncDriver, AsyncManagedTransaction
+from neo4j import AsyncDriver
 
-from app.tools.social import normalize_linkedin
+# `canonical_linkedin` (pure key) and `attach_linkedin` (its graph mutation, with
+# the `_merge_group_tx` helper) now live in the graph layer (#183): the record
+# models canonicalise in a validator, so the key belongs below the domain, and the
+# attach is pure Cypher. They are re-exported here so the discovery domain
+# (`person_discovery`) and the migration CLI below keep their existing import from
+# this module — and the deleted upward-import pins stay deleted.
+from app.graph.linkedin import canonical_linkedin
+from app.graph.person_enrichment import _merge_group_tx, attach_linkedin
+
+__all__ = [
+    "attach_linkedin",
+    "canonical_linkedin",
+    "extract_person_linkedins",
+    "linkedin_slug_matches_name",
+    "migrate_person_identity",
+]
 
 _HREF_RE = re.compile(r'href=["\']([^"\'#\s]+)["\']', re.I)
 _SLUG_TOKEN_RE = re.compile(r"[^a-z0-9]+")
-
-
-def canonical_linkedin(url: str | None) -> str | None:
-    """Reduce a LinkedIn *personal-profile* URL to its canonical identity key.
-
-    Returns ``https://www.linkedin.com/in/<slug>`` (slug lower-cased) for a
-    personal profile, or ``None`` for empty input, a company/school page, a bare
-    LinkedIn host, or any non-LinkedIn URL. Pure and idempotent.
-    """
-    if not url or not url.strip():
-        return None
-    # normalize_linkedin already handles scheme, www/country/mobile subdomain,
-    # query, fragment and trailing slash; it returns a non-LinkedIn URL unchanged.
-    normalized = normalize_linkedin(url.strip())
-    parsed = urlparse(normalized)
-    if parsed.netloc.lower() != "www.linkedin.com":
-        return None  # normalize left it untouched -> not a LinkedIn URL
-    # Only a personal profile (/in/<slug>) identifies a person.
-    parts = [p for p in parsed.path.split("/") if p]
-    if len(parts) < 2 or parts[0].lower() != "in":
-        return None
-    slug = parts[1].lower()  # LinkedIn slugs are case-insensitive
-    return f"https://www.linkedin.com/in/{slug}" if slug else None
 
 
 def _slug_of(url_or_slug: str) -> str:
@@ -170,54 +167,6 @@ def _plan_merges(rows: list[dict]) -> tuple[list[dict], list[dict]]:
     return canonicalise, merges
 
 
-async def _merge_group_tx(tx: AsyncManagedTransaction, merge: dict) -> None:
-    """Fold every absorbed node into the survivor, then set the canonical URL.
-
-    Re-points each absorbed node's LEADS edges (carrying the title through), fills
-    the survivor's name if it was empty, DETACH DELETEs the absorbed node, and only
-    THEN writes the canonical linkedin onto the survivor — deleting the duplicates
-    first is what keeps the write clear of the uniqueness constraint.
-    """
-    absorbed_eids = [a["eid"] for a in merge["absorbed"]]
-    # Re-point LEADS from the absorbed nodes onto the survivor (keep any title).
-    await tx.run(
-        """
-        MATCH (survivor:Person) WHERE elementId(survivor) = $survivor
-        MATCH (dup:Person)-[r:LEADS]->(c:Company)
-        WHERE elementId(dup) IN $absorbed
-        MERGE (survivor)-[nr:LEADS]->(c)
-        SET nr.title = coalesce(nr.title, r.title)
-        DELETE r
-        """,
-        survivor=merge["survivor_eid"],
-        absorbed=absorbed_eids,
-    )
-    # Fill the survivor's display name from an absorbed node if it lacks one.
-    await tx.run(
-        """
-        MATCH (survivor:Person) WHERE elementId(survivor) = $survivor
-        OPTIONAL MATCH (dup:Person)
-          WHERE elementId(dup) IN $absorbed AND dup.name IS NOT NULL AND dup.name <> ''
-        WITH survivor, collect(dup.name)[0] AS dupName
-        SET survivor.name = coalesce(survivor.name, dupName)
-        """,
-        survivor=merge["survivor_eid"],
-        absorbed=absorbed_eids,
-    )
-    # Remove the now-stripped duplicates.
-    await tx.run(
-        "MATCH (dup:Person) WHERE elementId(dup) IN $absorbed DETACH DELETE dup",
-        absorbed=absorbed_eids,
-    )
-    # Finally write the canonical URL onto the sole surviving node.
-    await tx.run(
-        "MATCH (survivor:Person) WHERE elementId(survivor) = $survivor "
-        "SET survivor.linkedin = $canonical",
-        survivor=merge["survivor_eid"],
-        canonical=merge["canonical"],
-    )
-
-
 async def migrate_person_identity(driver: AsyncDriver, *, dry_run: bool = True) -> dict:
     """Canonicalise stored Person LinkedIn URLs and merge same-URL duplicates.
 
@@ -245,75 +194,6 @@ async def migrate_person_identity(driver: AsyncDriver, *, dry_run: bool = True) 
         "canonicalised": canonicalise,
         "merges": merges,
     }
-
-
-async def attach_linkedin(
-    driver: AsyncDriver, name: str, url: str, *, company: str, dry_run: bool = True
-) -> dict:
-    """Attach a discovered canonical LinkedIn URL to the name-only Person(s) called
-    ``name`` who lead ``company``. The reviewable commit for enrichment-discovered
-    URLs on EXISTING people (story #39) — never called silently from a write path.
-
-    The evidence behind a discovered URL is specific to ONE company (its team page,
-    its slug-gated search), so candidates are scoped to that company's leaders —
-    a genuine namesake leading an unrelated company is never touched (#87 review).
-    Only nodes that currently have no ``linkedin`` are considered, so a person
-    already keyed on a profile is never overwritten. If a node already holds the
-    canonical URL, the scoped name-only node(s) merge into it (dedup); otherwise
-    the URL is set on one node and same-company name-siblings (true duplicates)
-    fold into it. Returns the action taken.
-    """
-    canon = canonical_linkedin(url)
-    if canon is None:
-        return {"name": name, "action": "skipped", "reason": "not a personal-profile URL"}
-
-    async with driver.session() as session:
-        result = await session.run(
-            """
-            MATCH (p:Person {name: $name})-[:LEADS]->(:Company {name: $company})
-            WHERE p.linkedin IS NULL
-            WITH DISTINCT p
-            OPTIONAL MATCH (p)-[r:LEADS]->()
-            RETURN elementId(p) AS eid, count(r) AS leads
-            """,
-            name=name,
-            company=company,
-        )
-        candidates = [dict(rec) async for rec in result]
-        if not candidates:
-            return {
-                "name": name,
-                "action": "skipped",
-                "reason": f"no name-only Person leading {company!r} to attach",
-            }
-
-        # An existing node may already own this canonical URL (e.g. a prior run).
-        result = await session.run(
-            "MATCH (p:Person {linkedin: $canon}) RETURN elementId(p) AS eid LIMIT 1", canon=canon
-        )
-        holder = await result.single()
-
-        if holder is not None:
-            survivor_eid, survivor_name = holder["eid"], None
-            absorbed = [{"eid": c["eid"], "name": name} for c in candidates]
-        else:
-            keep = sorted(candidates, key=lambda c: (-c["leads"], c["eid"]))[0]
-            survivor_eid, survivor_name = keep["eid"], name
-            absorbed = [
-                {"eid": c["eid"], "name": name} for c in candidates if c["eid"] != keep["eid"]
-            ]
-
-        action = "merged" if (holder is not None or absorbed) else "set"
-        if not dry_run:
-            merge = {
-                "canonical": canon,
-                "survivor_eid": survivor_eid,
-                "survivor_name": survivor_name,
-                "absorbed": absorbed,
-            }
-            await session.execute_write(_merge_group_tx, merge)
-
-    return {"name": name, "canonical": canon, "action": action, "dry_run": dry_run}
 
 
 def _print_report(report: dict) -> None:

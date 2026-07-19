@@ -5,8 +5,14 @@ functions there are shared, hot, and owned by other work — this module adds
 person-specific functions without touching them. It reuses the person-identity
 primitives from #39: identity keys on the canonical LinkedIn URL, and attaching a
 newly discovered URL to an existing name-only person goes through
-:func:`app.agents.people.person_identity.attach_linkedin` (company-scoped, so a namesake
-leading an unrelated company is never rewritten — the #87 lesson).
+:func:`attach_linkedin` (company-scoped, so a namesake leading an unrelated
+company is never rewritten — the #87 lesson).
+
+:func:`attach_linkedin` (and its ``_merge_group_tx`` helper) live HERE, in the
+graph layer, not in ``app.agents.people`` (#183): they are pure Cypher graph
+mutations, so keeping them below the domain lets the person write path call them
+directly instead of reaching UP into ``people`` (a pinned import now deleted).
+``person_identity`` re-exports them for the discovery domain + the migration CLI.
 
 Writes are gated: nothing here runs except from the explicit commit step of a
 reviewed ``person_proposal`` job. The write is idempotent (all MERGE), so
@@ -20,6 +26,7 @@ company MERGE'd as a stub when unknown.
 
 from neo4j import AsyncDriver, AsyncManagedTransaction
 
+from app.graph.linkedin import canonical_linkedin
 from app.graph.person_models import PersonRecord
 
 
@@ -140,6 +147,123 @@ async def _write_person_tx(tx: AsyncManagedTransaction, eid: str, record: Person
         )
 
 
+async def _merge_group_tx(tx: AsyncManagedTransaction, merge: dict) -> None:
+    """Fold every absorbed node into the survivor, then set the canonical URL.
+
+    Re-points each absorbed node's LEADS edges (carrying the title through), fills
+    the survivor's name if it was empty, DETACH DELETEs the absorbed node, and only
+    THEN writes the canonical linkedin onto the survivor — deleting the duplicates
+    first is what keeps the write clear of the uniqueness constraint.
+    """
+    absorbed_eids = [a["eid"] for a in merge["absorbed"]]
+    # Re-point LEADS from the absorbed nodes onto the survivor (keep any title).
+    await tx.run(
+        """
+        MATCH (survivor:Person) WHERE elementId(survivor) = $survivor
+        MATCH (dup:Person)-[r:LEADS]->(c:Company)
+        WHERE elementId(dup) IN $absorbed
+        MERGE (survivor)-[nr:LEADS]->(c)
+        SET nr.title = coalesce(nr.title, r.title)
+        DELETE r
+        """,
+        survivor=merge["survivor_eid"],
+        absorbed=absorbed_eids,
+    )
+    # Fill the survivor's display name from an absorbed node if it lacks one.
+    await tx.run(
+        """
+        MATCH (survivor:Person) WHERE elementId(survivor) = $survivor
+        OPTIONAL MATCH (dup:Person)
+          WHERE elementId(dup) IN $absorbed AND dup.name IS NOT NULL AND dup.name <> ''
+        WITH survivor, collect(dup.name)[0] AS dupName
+        SET survivor.name = coalesce(survivor.name, dupName)
+        """,
+        survivor=merge["survivor_eid"],
+        absorbed=absorbed_eids,
+    )
+    # Remove the now-stripped duplicates.
+    await tx.run(
+        "MATCH (dup:Person) WHERE elementId(dup) IN $absorbed DETACH DELETE dup",
+        absorbed=absorbed_eids,
+    )
+    # Finally write the canonical URL onto the sole surviving node.
+    await tx.run(
+        "MATCH (survivor:Person) WHERE elementId(survivor) = $survivor "
+        "SET survivor.linkedin = $canonical",
+        survivor=merge["survivor_eid"],
+        canonical=merge["canonical"],
+    )
+
+
+async def attach_linkedin(
+    driver: AsyncDriver, name: str, url: str, *, company: str, dry_run: bool = True
+) -> dict:
+    """Attach a discovered canonical LinkedIn URL to the name-only Person(s) called
+    ``name`` who lead ``company``. The reviewable commit for enrichment-discovered
+    URLs on EXISTING people (story #39) — never called silently from a write path.
+
+    The evidence behind a discovered URL is specific to ONE company (its team page,
+    its slug-gated search), so candidates are scoped to that company's leaders —
+    a genuine namesake leading an unrelated company is never touched (#87 review).
+    Only nodes that currently have no ``linkedin`` are considered, so a person
+    already keyed on a profile is never overwritten. If a node already holds the
+    canonical URL, the scoped name-only node(s) merge into it (dedup); otherwise
+    the URL is set on one node and same-company name-siblings (true duplicates)
+    fold into it. Returns the action taken.
+    """
+    canon = canonical_linkedin(url)
+    if canon is None:
+        return {"name": name, "action": "skipped", "reason": "not a personal-profile URL"}
+
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (p:Person {name: $name})-[:LEADS]->(:Company {name: $company})
+            WHERE p.linkedin IS NULL
+            WITH DISTINCT p
+            OPTIONAL MATCH (p)-[r:LEADS]->()
+            RETURN elementId(p) AS eid, count(r) AS leads
+            """,
+            name=name,
+            company=company,
+        )
+        candidates = [dict(rec) async for rec in result]
+        if not candidates:
+            return {
+                "name": name,
+                "action": "skipped",
+                "reason": f"no name-only Person leading {company!r} to attach",
+            }
+
+        # An existing node may already own this canonical URL (e.g. a prior run).
+        result = await session.run(
+            "MATCH (p:Person {linkedin: $canon}) RETURN elementId(p) AS eid LIMIT 1", canon=canon
+        )
+        holder = await result.single()
+
+        if holder is not None:
+            survivor_eid, survivor_name = holder["eid"], None
+            absorbed = [{"eid": c["eid"], "name": name} for c in candidates]
+        else:
+            keep = sorted(candidates, key=lambda c: (-c["leads"], c["eid"]))[0]
+            survivor_eid, survivor_name = keep["eid"], name
+            absorbed = [
+                {"eid": c["eid"], "name": name} for c in candidates if c["eid"] != keep["eid"]
+            ]
+
+        action = "merged" if (holder is not None or absorbed) else "set"
+        if not dry_run:
+            merge = {
+                "canonical": canon,
+                "survivor_eid": survivor_eid,
+                "survivor_name": survivor_name,
+                "absorbed": absorbed,
+            }
+            await session.execute_write(_merge_group_tx, merge)
+
+    return {"name": name, "canonical": canon, "action": action, "dry_run": dry_run}
+
+
 async def upsert_person(driver: AsyncDriver, record: PersonRecord) -> dict:
     """Write a reviewed :class:`PersonRecord` to the graph. Called ONLY by the
     commit step of a ``person_proposal`` job — never from a research/write path
@@ -151,12 +275,10 @@ async def upsert_person(driver: AsyncDriver, record: PersonRecord) -> dict:
     canonical URL if set, else the name-only leader of the scoping company) and the
     reviewed facts + provenance are applied. Idempotent. Returns the action taken.
     """
-    # Lazy import: identity canonicalisation + attach live in the people
-    # entity-domain (above graph); this write path reaches UP for them inside the
-    # function — the same pinned-exception pattern as the graph/jobs.py dispatch.
-    from app.agents.people.person_identity import attach_linkedin, canonical_linkedin
-
-    canon = canonical_linkedin(record.linkedin)
+    # ``PersonRecord.linkedin`` is already canonical — its pydantic validator is the
+    # domain choke point (#183), so the write path trusts its input instead of
+    # re-canonicalising (or reaching up into ``people`` for the canonicaliser).
+    canon = record.linkedin
     # Establish/dedup identity on the canonical URL first (reuses #39's reviewable
     # attach; only ever touches a name-only leader of THIS company).
     if canon:

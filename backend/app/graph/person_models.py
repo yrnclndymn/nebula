@@ -17,7 +17,9 @@ e.g. "people who once worked at Acme" — and lets an unknown employer MERGE as 
 :Company stub, exactly like partners/clients do.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.graph.linkedin import canonical_linkedin
 
 
 class PersonCitation(BaseModel):
@@ -64,6 +66,15 @@ class PersonRecord(BaseModel):
     talks: list[str] = Field(default_factory=list)
     prior_roles: list[PriorRole] = Field(default_factory=list)
     citations: list[PersonCitation] = Field(default_factory=list)
+
+    @field_validator("linkedin")
+    @classmethod
+    def _canonicalise_linkedin(cls, v: str | None) -> str | None:
+        """Canonicalise the identity URL at the domain boundary (#183): this is the
+        single choke point, so ``upsert_person`` receives a canonical-or-None value
+        and never has to re-canonicalise (or reach up into ``people`` for it). A
+        company/school page or non-profile URL reduces to ``None``. Idempotent."""
+        return canonical_linkedin(v)
 
     def has_facts(self) -> bool:
         """Whether anything survived provenance filtering and is worth committing."""

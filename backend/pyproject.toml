@@ -120,17 +120,14 @@ ignore_imports = [
     # agents area, imported inside the function (no load-time cycle). Resolves when
     # discovery folds into the `companies` domain and the shared propose step moves.
     "app.agents.discovery.discovery -> app.agents.assistant.proposals",
-    # Person identity + discovery now live in the `people` entity-domain (#179).
-    # Canonicalisation (`canonical_linkedin`) is pure but leans on `normalize_linkedin`
-    # in tools, which stays there — so the two GRAPH write paths that key a Person on
-    # its canonical LinkedIn URL reach UP into `people` for it. Both imports are LAZY
-    # (inside the write function, no load-time cycle), the same pinned pattern as the
-    # jobs dispatch above; `capture.people` is a domain sibling doing the same canonical
-    # key on a captured mention. These are consumer reaches into the domain, not domain
-    # logic squatting in the storage layer.
-    "app.graph.repository -> app.agents.people.person_identity",
-    "app.graph.person_enrichment -> app.agents.people.person_identity",
-    "app.capture.people -> app.agents.people.person_identity",
+    # NOTE (#183): the three write-path pins that used to sit here — graph.repository,
+    # graph.person_enrichment and capture.people reaching UP into
+    # `agents.people.person_identity` for `canonical_linkedin`/`attach_linkedin` — are
+    # DELETED, not moved. The pure identity key now lives in `app.graph.linkedin` and
+    # the record models canonicalise it in a pydantic validator (the single choke
+    # point), so the write paths receive pre-canonicalised URLs; `attach_linkedin`
+    # (pure Cypher) moved to `app.graph.person_enrichment`. `person_identity`
+    # re-exports both for the discovery domain, so no import direction is reversed.
 ]
 
 [tool.uv]
