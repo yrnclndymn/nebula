@@ -257,16 +257,24 @@ def test_digest_collects_deltas_stores_and_lists(monkeypatch):
                 acme=acme,
             )
             # A newly-researched company (tagged to a topic, updated this week).
+            # Date it a day into the past — like the signals above — so it sits
+            # strictly inside the trailing window `[start, end)`. The window's
+            # exclusive `end` is the digest run's live `now` on the PYTHON clock,
+            # while `datetime()` here is the NEO4J server clock; when the server
+            # runs a touch ahead (common in Docker), a bare `datetime()` == "now"
+            # lands at/after `end` and the company silently drops out of
+            # newlyResearched (#201 flap).
             await session.run(
-                "MERGE (c:Company {name: $globex}) SET c.updatedAt = datetime() "
+                "MERGE (c:Company {name: $globex}) SET c.updatedAt = datetime() - duration({days: 1}) "
                 "MERGE (t:Topic {name: $topic}) MERGE (c)-[:TAGGED_AS]->(t)",
                 globex=globex,
                 topic=f"{PREFIX}topic",
             )
-            # A notable completed job this week (carries an outcome).
+            # A notable completed job this week (carries an outcome). Same past
+            # offset as above, for the same clock-skew reason (#201).
             await session.run(
                 "CREATE (:Job {id: $id, type: 'signal_capture', status: 'done', "
-                "dataJson: $data, createdAt: datetime()})",
+                "dataJson: $data, createdAt: datetime() - duration({days: 1})})",
                 id=f"{PREFIX}job",
                 data=json.dumps({"outcome": "found 2 items about A"}),
             )
