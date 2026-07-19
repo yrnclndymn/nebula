@@ -57,7 +57,10 @@ def partition_decisions(
     remove_names: list[str] = []
     invalid: list[dict] = []
     for d in decisions or []:
-        name = (d.get("name") or "").strip() if isinstance(d, dict) else ""
+        # A non-string name (e.g. a number in a hand-crafted payload) must land in
+        # `invalid`, not crash the endpoint on .strip() (PR #188 review r2).
+        raw_name = d.get("name") if isinstance(d, dict) else None
+        name = raw_name.strip() if isinstance(raw_name, str) else ""
         action = d.get("action") if isinstance(d, dict) else None
         if not name or action not in VALID_ACTIONS:
             invalid.append(d)

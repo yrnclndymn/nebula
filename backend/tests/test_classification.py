@@ -60,11 +60,13 @@ def test_partition_decisions_splits_kinds_removes_and_rejects_invalid():
             {"name": "Hooli", "action": "nonsense"},  # unknown action → invalid
             {"name": "", "action": "client"},  # missing name → invalid
             {"action": "client"},  # no name key → invalid
+            {"name": 123, "action": "client"},  # non-string name → invalid, not a crash
+            {"name": None, "action": "remove"},  # explicit null name → invalid
         ]
     )
     assert kinds == [("Acme", "client"), ("Globex", "cloud_provider")]
     assert removes == ["Initech"]
-    assert len(invalid) == 3
+    assert len(invalid) == 5
 
 
 def test_partition_decisions_trims_names_and_tolerates_empty():
