@@ -123,7 +123,13 @@ jobs:
                considered and REJECTED for that file, with the reason you
                rejected it. If you cannot name a considered-and-rejected concern
                for a file, you have not read it carefully enough — read it again.
-            4. Post each finding as an inline comment.
+               POST each finding as an inline comment IMMEDIATELY, before moving
+               to the next file — never save findings up for the end. A finding
+               posted is preserved even if you later run out of turns; a finding
+               held back is lost. Depth is worthless if it is never delivered.
+            4. When file-by-file review is done, stop verifying: do NOT spend
+               remaining turns re-deriving or exhaustively re-checking what you
+               already concluded — write the summary.
             5. Post the summary comment EXACTLY ONCE. NEVER pass the summary as
                an inline --body argument (multi-line bodies break shell
                quoting). Instead: first Write the summary to
@@ -183,11 +189,13 @@ jobs:
           # calls, plus the two comment tools to post findings and a Write scoped
           # to the single summary file (unscoped Write on prompt-injectable input
           # is an escalation — PR #171 review). Still no merge/push/approve/edit.
-          # max-turns is generous because a multi-file review reads several files
-          # and posts several inline comments; 30 and 40 both proved too tight.
+          # max-turns raised 60→90 after PR #199/#181: the model exhausted 60
+          # turns on deep verification with all posting back-loaded, yielding
+          # total silence. The prompt now posts per-file (delivery-first); the
+          # higher cap is headroom, not a target.
           claude_args: |
             --model claude-sonnet-5
-            --max-turns 60
+            --max-turns 90
             --allowedTools "Read,Grep,Glob,Write(/tmp/review-summary.md),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*)"
 
       # Observability (#185, ported from the shadow harness): the transcript and
