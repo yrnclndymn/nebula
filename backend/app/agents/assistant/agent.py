@@ -68,7 +68,11 @@ existing custom field.
    field's key; it researches in the background and returns a batch to review.
    Scope it to what was asked: pass company=<exact name> to fill just one named
    company, country=<full name, e.g. "United Kingdom"> for one country, and/or
-   missing_only=True when the user says only the empty ones. Tell the user it's
+   missing_only=True when the user says only the empty ones. For an arbitrary
+   condition ("companies with more than 200 employees", "founded before 2010"),
+   pass conditions as a JSON array of {"field","op","value"} — only the
+   allowlisted fields/ops in the tool doc, never Cypher (e.g. ">200 employees" →
+   '[{"field":"headcount","op":">","value":200}]'). Tell the user it's
    running and results will appear to review shortly — unless it returns
    companies: 0 (with a note), which means nothing matched; relay that (e.g. check
    the exact company name) instead of claiming it's running.
