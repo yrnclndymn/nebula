@@ -180,20 +180,21 @@ prints file + line + a *redacted* snippet (the matched name is never echoed).
 
 ## Sidecar
 
-A live progress view of the running wave (#107). Start it at launch (step 2),
+A progress view of the running wave (#107). Start it at launch (step 2),
 right after the workers spin up, so the invisible states — silent review,
 conflicted-PR-blocks-checks, checks-pending — surface without the orchestrator
-narrating. Two commands, from the repo root:
+narrating. One command, from the repo root:
 
 ```bash
-make wave-watch                              # snapshot every 15s → scripts/wave-status.json
-(cd scripts && python3 -m http.server 8777)  # then open localhost:8777/wave_status.html
+make wave-watch    # serve localhost:8777/wave_status.html; snapshot on open/Refresh
 ```
 
-`scripts/wave_status.py` snapshots every `feat/*` branch (local worktrees + open
-PRs + PRs merged within `--since-hours`) into one JSON; `wave_status.html` polls
-it every 10s. Membership is branch-pattern driven — no registry to maintain, no
-per-story wiring. Anomalies render distinctly (dashed badges, not just red/green).
+`scripts/wave_serve.py` serves the view and runs `scripts/wave_status.py` ON
+DEMAND — only when the page is opened or its Refresh button pressed (debounced;
+never a background loop, which burned GitHub GraphQL quota with nobody
+watching). Each snapshot covers every `feat/*` branch (local worktrees + open
+PRs + PRs merged within `--since-hours`) in one JSON. Membership is
+branch-pattern driven — no registry to maintain, no per-story wiring. Anomalies render distinctly (dashed badges, not just red/green).
 The JSON schema is stable and documented at the top of `wave_status.py`; later,
 workers' `make sensors` summaries and the orchestrator's integration gate can
 read the same artifact. A one-shot snapshot is `make wave-status`.
@@ -210,8 +211,8 @@ layer footprint, guarded-path touches (auth / job dispatch / repository /
 proposal-commit), metric deltas vs main, and a `low`/`medium`/`high` risk badge
 (high = 3+ code layers or any guarded path). `scripts/code_health.html` polls
 both JSONs: stat tiles + one-measure-per-panel trend lines with commit tooltips,
-and the in-flight story table with layer chips + risk badges. Serve it alongside
-the wave view: `(cd scripts && python3 -m http.server)`.
+and the in-flight story table with layer chips + risk badges. `make wave-watch`
+serves it alongside the wave view (same directory).
 
 ## Per-wave mutation pass
 

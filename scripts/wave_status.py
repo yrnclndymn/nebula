@@ -5,10 +5,11 @@ A "wave" is a set of roadmap stories built in parallel, one per `feat/<n>-<slug>
 branch (see the `wave` skill + CLAUDE.md "Parallel story work"). This script is
 pure tooling: stdlib only, no backend deps, no new services. It shells out to
 `git` and `gh` (both already required for wave work) and writes a single JSON
-file that the companion `wave_status.html` view polls.
+file that the companion `wave_status.html` view reads.
 
-Run it once (`make wave-status`) or on a loop (`make wave-watch`); the view is a
-static page served from this directory (`python3 -m http.server`).
+Run it once (`make wave-status`), or let `wave_serve.py` (`make wave-watch`) run
+it on demand when the view is opened or refreshed — never on a background loop,
+which burned GitHub GraphQL quota with nobody watching.
 
 --------------------------------------------------------------------------------
 JSON SCHEMA (v1) — STABLE. Agents consume this; add fields, don't repurpose.

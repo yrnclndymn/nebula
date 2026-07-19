@@ -109,12 +109,17 @@
     .empty { color: var(--muted); padding: 2rem 0; text-align: center; }
     .legend { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: .6rem;
               color: var(--muted); font-size: .72rem; }
+    .refresh { font: inherit; font-size: .74rem; padding: .25rem .7rem;
+               border-radius: 6px; border: 1px solid var(--muted);
+               background: transparent; color: inherit; cursor: pointer; }
+    .refresh:disabled { opacity: .5; cursor: wait; }
   </style>
 </head>
 <body>
   <header>
     <h1>Wave status</h1>
     <span class="meta"><span id="livedot" class="dot"></span><span id="status">loading…</span></span>
+    <button id="refreshBtn" class="refresh" type="button">↻ Refresh</button>
     <span class="meta" id="repo"></span>
     <span class="meta" id="counts"></span>
   </header>
@@ -141,8 +146,6 @@
 
   <script>
     "use strict";
-    const POLL_MS = 10000;
-    const STALE_MS = 45000; // json older than this => flag the snapshot loop is down
     const $ = (id) => document.getElementById(id);
 
     function esc(s) {
@@ -242,7 +245,8 @@
       }
     }
 
-    async function poll() {
+    async function load() {
+      // Read + render whatever snapshot exists; no regeneration here.
       try {
         const res = await fetch("wave-status.json?_=" + Date.now(), { cache: "no-store" });
         if (!res.ok) throw new Error("HTTP " + res.status);
@@ -250,25 +254,43 @@
         render(data);
         const gen = new Date(data.generated_at);
         const ageMs = Date.now() - gen.getTime();
-        const stale = ageMs > STALE_MS;
-        $("livedot").className = "dot" + (stale ? " stale" : "");
+        $("livedot").className = "dot";
         $("status").textContent =
           `snapshot ${gen.toLocaleTimeString()} (${Math.round(ageMs / 1000)}s ago)`;
-        $("banner").innerHTML = stale
-          ? '<div class="banner">Snapshot is stale — is the loop running? <code>make wave-watch</code></div>'
-          : (data.gh_available ? "" :
-             '<div class="banner">gh unavailable — PR / check / review data is null.</div>');
+        $("banner").innerHTML = data.gh_available ? "" :
+          '<div class="banner">gh unavailable — PR / check / review data is null.</div>';
       } catch (e) {
         $("livedot").className = "dot stale";
         $("status").textContent = "waiting for wave-status.json…";
         $("banner").innerHTML =
           '<div class="banner">Can\'t read wave-status.json (' + esc(e.message) +
-          '). Run <code>make wave-status</code> and serve this dir with <code>python3 -m http.server</code>.</div>';
+          '). Serve this page with <code>make wave-watch</code> and hit Refresh.</div>';
       }
     }
 
-    poll();
-    setInterval(poll, POLL_MS);
+    async function refresh() {
+      // Ask the server for a fresh snapshot, then re-read the JSON. Snapshots run
+      // ONLY here (page open + Refresh button) — there is no background polling.
+      // Falls back to a plain load when /snapshot is absent (static file server).
+      const btn = $("refreshBtn");
+      btn.disabled = true;
+      $("status").textContent = "snapshotting…";
+      let failBanner = "";
+      try {
+        const res = await fetch("snapshot?_=" + Date.now(), { cache: "no-store" });
+        if (res.ok) {
+          const out = await res.json();
+          if (!out.ok) failBanner =
+            '<div class="banner">Snapshot failed: ' + esc(out.detail) + "</div>";
+        }
+      } catch (e) { /* static server: just show the existing file */ }
+      await load();
+      if (failBanner) $("banner").innerHTML = failBanner;
+      btn.disabled = false;
+    }
+
+    $("refreshBtn").addEventListener("click", refresh);
+    refresh();
   </script>
 </body>
 </html>
