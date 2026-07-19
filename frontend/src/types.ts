@@ -509,6 +509,7 @@ export interface AcquirerDeal {
 export interface AcquirerWhy {
   // acquired-in-topic | acquired-same-kind | direct-partner | shared-partners
   //  | shared-clients | active-acquirer | size-plausible | size-fit  (#165)
+  //  | thesis-match  (#194)
   signal: string;
   detail: {
     count?: number;
@@ -528,6 +529,15 @@ export interface AcquirerWhy {
     high?: number;
     n?: number;
     amounts?: string[];
+    // #194 thesis-match — the matched acquisition-thesis rule's provenance: its
+    // human-readable statement, confidence, SUPPORTED_BY evidence count, the
+    // candidate/target kinds it matched on, and the qualifier (when any).
+    statement?: string | null;
+    confidence?: number;
+    evidence?: number;
+    acquirer_kind?: string | null;
+    target_kind?: string | null;
+    qualifier?: string;
   };
 }
 
