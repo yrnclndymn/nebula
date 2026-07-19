@@ -148,7 +148,11 @@ async def list_acquisition_proposals(company: str | None = None, *, limit: int =
                 "new_count": len(job.get("diff") or []),
                 "outcome": job.get("outcome"),
                 "error": job.get("error"),
-                "committed": bool(job.get("committed")),
+                # Always False here: committed jobs are filtered out by the guard
+                # above (`continue`), so every returned row is uncommitted. Kept as
+                # an explicit field because the frontend `AcquisitionProposalRow`
+                # type declares it required.
+                "committed": False,
                 "created_at": summary.get("createdAt"),
             }
         )
