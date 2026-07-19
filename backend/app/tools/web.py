@@ -12,6 +12,7 @@ import logging
 from urllib.parse import urljoin, urlparse
 
 import requests
+import resvg_py
 from bs4 import BeautifulSoup
 from ddgs import DDGS
 from google import genai
@@ -166,16 +167,59 @@ def _gemini_image_mime(content_type: str, data: bytes) -> str | None:
     return mime
 
 
+# Client-logo walls are frequently SVG (#9). Gemini rejects SVG, so we rasterize to
+# PNG first. The longest side is capped so a hostile width/height can't blow up memory.
+_SVG_MAX_PX = 512
+
+
+def _looks_like_svg(content_type: str, data: bytes) -> bool:
+    """True if this looks like SVG — by declared type OR by sniffing the bytes.
+
+    The sniff (not just the content-type) is what catches SVGs a server mislabels
+    as a raster image (#9): logo bytes are XML markup with an `<svg` root somewhere
+    in the head.
+    """
+    if content_type.split(";")[0].strip().lower() == "image/svg+xml":
+        return True
+    head = data[:1024].lstrip().lstrip(b"\xef\xbb\xbf").lstrip()  # skip BOM/whitespace
+    return head[:1] == b"<" and b"<svg" in head.lower()
+
+
+def _rasterize_svg(data: bytes) -> bytes | None:
+    """Rasterize untrusted SVG bytes to a bounded PNG for vision, or None on failure.
+
+    SVG is untrusted crawl input, so the render is sandboxed: resvg (Rust) performs
+    no network I/O, external `<image href>` references are ignored (no `resources_dir`
+    is passed), and external XML entities (XXE) are rejected by the parser. Output is
+    fit-scaled so its longest side is `_SVG_MAX_PX`, bounding memory for a hostile
+    canvas. Any parse/render failure returns None so the caller falls back to skipping
+    the image — a conversion problem must never crash the crawl (#84).
+    """
+    try:
+        svg = data.decode("utf-8", "replace")
+        png = resvg_py.svg_to_bytes(svg_string=svg, width=_SVG_MAX_PX, height=_SVG_MAX_PX)
+        return bytes(png)
+    except Exception:  # noqa: BLE001 — untrusted SVG; any failure falls back to skip
+        return None
+
+
 def _download_image(image_url: str) -> tuple[bytes, str] | None:
     try:
         resp = requests.get(image_url, timeout=12, headers=_HEADERS)
         resp.raise_for_status()
     except Exception:  # noqa: BLE001
         return None
-    mime = _gemini_image_mime(resp.headers.get("content-type", ""), resp.content)
+    content_type = resp.headers.get("content-type", "")
+    data = resp.content
+    # SVG (declared or sniffed under a raster content-type) — rasterize to a PNG the
+    # Gemini gate accepts; a conversion failure falls back to the skip below (#9/#84).
+    if _looks_like_svg(content_type, data):
+        png = _rasterize_svg(data)
+        return (png, "image/png") if png is not None else None
+    mime = _gemini_image_mime(content_type, data)
     if mime is None:
         return None
-    return resp.content, mime
+    return data, mime
 
 
 async def identify_logos(image_urls: list[str]) -> dict:

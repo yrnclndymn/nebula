@@ -19,6 +19,7 @@ dependencies = [
     "google-cloud-tasks>=2.23.0",
     "firebase-admin>=7.5.0",
     "defusedxml>=0.7.1",
+    "resvg-py>=0.3.3",
 ]
 
 [dependency-groups]
