@@ -86,6 +86,14 @@ class Settings(BaseSettings):
     signal_refresh_batch: int = 25
     signal_refresh_stagger_seconds: float = 8.0
 
+    # Thesis-revision cadence (#211): the scheduled `thesis_revision` job re-weighs
+    # the acquisition thesis against newly observed ACQUIRED deals, with no manual
+    # trigger. Weekly by default; the schedule's due-gate additionally SKIPS a run
+    # when no deal has appeared since the last committed revision, so quiet weeks
+    # cost nothing (see app/graph/schedules.py). The scan only PROPOSES — the
+    # review/commit ceremony is untouched, so ambient operation adds no write risk.
+    thesis_revision_cadence_days: float = 7.0
+
     # Gemini quota resilience (issue #65). The free tier caps requests/min on the
     # shared key; these keep chat + research jobs from starving each other and 429ing.
     # - gemini_rpm: process-wide requests/min ceiling ALL Gemini callers pace

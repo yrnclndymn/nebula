@@ -116,6 +116,11 @@ ignore_imports = [
     "app.graph.jobs -> app.agents.deals.thesis_revision",
     "app.graph.jobs -> app.capture.job",
     "app.graph.jobs -> app.capture.news",
+    # graph/schedules.py's thesis_revision registry entry (#211) mirrors jobs.py's
+    # dispatch: it lazily imports the above-graph runner inside the schedule's `run`
+    # so the ambient tick and the manual trigger share one runner. Import is inside
+    # the function — no load-time cycle.
+    "app.graph.schedules -> app.agents.deals.thesis_revision",
     # discovery's runner lazily calls the assistant proposal builder to turn a
     # discovered company into a review proposal — a cross-package reach within the
     # agents area, imported inside the function (no load-time cycle). Resolves when
