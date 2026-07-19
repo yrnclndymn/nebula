@@ -33,8 +33,24 @@ from app.tools.web import fetch_page, web_search
 
 logger = logging.getLogger("nebula.proposals")
 
+# The house research domain. Kept as a module constant so the topic guard (#148)
+# can recognise "the model left the default alone" without confirmation.
+DEFAULT_TOPIC = "AI-native engineering"
+
 # Proposals started during the current chat turn (read by the /chat endpoint).
 turn_proposals: ContextVar[list | None] = ContextVar("nebula_turn_proposals", default=None)
+
+
+async def _is_known_topic(topic: str) -> bool:
+    """Is `topic` already a `:Topic` node in the graph? Fails OPEN — if the topics
+    read errors, return True so a lookup glitch never blocks legitimate enrichment
+    (the guard exists to stop accidental new topics, not to gate on DB health)."""
+    try:
+        existing = await queries.list_topics(get_driver())
+    except Exception:  # noqa: BLE001 — fail open: a read glitch must not block enrichment
+        logger.warning("could not read topics to validate %r; allowing", topic, exc_info=True)
+        return True
+    return topic in existing
 
 
 def _supersedes_error(new_focus_key: str | None, old_focus_key: str | None) -> bool:
@@ -80,9 +96,10 @@ async def _supersede_errored_proposals(name: str, new_focus_key: str | None) -> 
 async def propose_enrichment(
     name: str,
     website: str,
-    topic: str = "AI-native engineering",
+    topic: str = DEFAULT_TOPIC,
     focus: str = "",
     enqueue_delay: float = 0.0,
+    confirm_new_topic: bool = False,
 ) -> dict:
     """Start researching a company in the BACKGROUND to prepare a proposed graph
     update for the user to review. Returns immediately and does NOT save anything.
@@ -91,6 +108,15 @@ async def propose_enrichment(
     shortly to review and commit — don't wait for it, and never claim you saved
     anything. If you don't have the website, ask first.
 
+    topic: the company's research DOMAIN — which tracked space it belongs to, NOT
+    what the user asked you to do. Pick from the graph's EXISTING topics (read them
+    with run_cypher, e.g. `MATCH (t:Topic) RETURN t.name`); when unsure, KEEP the
+    default. NEVER coin a topic from the user's request phrasing — "update the ISV
+    classification", "add funding info" describe the task, not a domain, and belong
+    in `focus` or nowhere. A topic that is neither the default nor an existing one
+    is returned for confirmation (no job created): confirm with the user that it's
+    genuinely a NEW domain, then call again with confirm_new_topic=True to proceed.
+
     focus: the SINGLE field the user asked about, if they named one — e.g.
     "headcount", "hq", "funding", "linkedin", "year founded", "revenue", "about".
     Leave it "" for a general "research/update <Company>" with no specific field.
@@ -98,7 +124,28 @@ async def propose_enrichment(
 
     enqueue_delay: seconds to defer the job start (issue #65) so a batch of
     proposals staggers instead of firing all at once and exhausting Gemini quota.
-    Chat proposals leave it 0 (start now)."""
+    Chat proposals leave it 0 (start now).
+
+    confirm_new_topic: set True ONLY after the user has explicitly agreed to create
+    a brand-new research topic. It bypasses the new-topic confirmation guard, so
+    never set it pre-emptively to skip the check."""
+    # New topics are legitimate (the graph is meant to grow) but must never appear
+    # as a side effect of request phrasing (#148). A topic that is neither the
+    # default nor an existing graph Topic is bounced back for explicit confirmation
+    # before any job is created. Fails open on a topics-read error.
+    if topic != DEFAULT_TOPIC and not confirm_new_topic and not await _is_known_topic(topic):
+        return {
+            "status": "needs_confirmation",
+            "needs_topic_confirmation": True,
+            "topic": topic,
+            "message": (
+                f'"{topic}" is not an existing research topic. New topics are fine, '
+                "but confirm with the user that this should be a NEW research domain "
+                "(not their request phrasing mistaken for a topic) before proceeding. "
+                "If they confirm, call propose_enrichment again with "
+                "confirm_new_topic=True; otherwise use an existing topic or the default."
+            ),
+        }
     proposal_id = uuid.uuid4().hex[:8]
     focus_key = resolve_focus(focus)
     await jobs.create_job(

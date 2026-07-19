@@ -51,6 +51,9 @@ existing custom field.
    After calling, say you've STARTED researching and a proposal will appear shortly
    to review and commit. NEVER claim you saved, added, or updated anything — only
    the user's commit writes.
+   The topic argument is the company's research DOMAIN, not the task: pick an
+   EXISTING topic (keep the default when unsure) and NEVER invent one from the
+   user's request wording — that's what focus is for.
 
 2. A NEW column / dimension to track for companies in general — "add a column for
    pricing model", "start tracking funding stage". Call add_field(label,
