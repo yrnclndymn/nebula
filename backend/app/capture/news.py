@@ -65,7 +65,6 @@ import uuid
 from dataclasses import dataclass
 
 from ddgs import DDGS
-from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
@@ -73,7 +72,7 @@ from app import budget
 from app.capture.dates import normalise_date
 from app.capture.people import link_signal_people
 from app.config import settings
-from app.genai_retry import generate_with_retry
+from app import llm
 from app.graph import cache, jobs
 from app.graph.driver import get_driver
 from app.graph.models import SignalRecord, canonicalise_url
@@ -322,8 +321,7 @@ async def llm_filter_subjects(name: str, hits: list[NewsHit]) -> list[NewsHit]:
         f"ITEMS:\n{listing}"
     )
     try:
-        resp = await generate_with_retry(
-            genai.Client(),
+        resp = await llm.generate(
             model=settings.gemini_model,
             contents=prompt,
             config=types.GenerateContentConfig(

@@ -28,13 +28,12 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from google import genai
 from google.genai import types
 from neo4j import AsyncDriver
 
 from app import budget
 from app.config import settings
-from app.genai_retry import generate_with_retry
+from app import llm
 from app.graph import jobs
 from app.graph.driver import get_driver
 
@@ -221,8 +220,7 @@ async def summarise_deltas(payload: dict) -> str:
     if not has_deltas(payload):
         return fallback
     try:
-        resp = await generate_with_retry(
-            genai.Client(),
+        resp = await llm.generate(
             model=settings.gemini_model,
             contents=summary_prompt(payload),
             config=types.GenerateContentConfig(temperature=0.2),

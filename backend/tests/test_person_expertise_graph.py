@@ -123,7 +123,7 @@ def test_expertise_job_writes_cited_summary(event_loop, monkeypatch):
     async def _boom(*args, **kwargs):
         raise RuntimeError("no LLM in tests")
 
-    monkeypatch.setattr(person_expertise, "generate_with_retry", _boom)
+    monkeypatch.setattr(person_expertise.llm, "generate", _boom)
 
     async def scenario():
         driver = get_driver()

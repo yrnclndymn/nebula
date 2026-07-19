@@ -163,7 +163,7 @@ def test_llm_filter_fails_safe_on_error(monkeypatch):
     async def boom(*args, **kwargs):
         raise RuntimeError("simulated 429")
 
-    monkeypatch.setattr(news, "generate_with_retry", boom)
+    monkeypatch.setattr(news.llm, "generate", boom)
     assert asyncio.run(news.llm_filter_subjects("Acme", hits)) == hits
 
 

@@ -13,7 +13,7 @@ from google.genai import types
 from pydantic import BaseModel
 
 from app.config import settings
-from app.genai_retry import generate_with_retry
+from app import llm
 from app.graph import queries
 from app.graph.driver import get_driver
 
@@ -65,8 +65,8 @@ Items (JSON):
 
 
 async def _parse_batch(client: genai.Client, batch: list[dict]) -> list[_HQ]:
-    resp = await generate_with_retry(
-        client,
+    resp = await llm.generate(
+        client=client,
         model=settings.gemini_model,
         contents=_PROMPT.format(items=json.dumps(batch)),
         config=types.GenerateContentConfig(

@@ -179,7 +179,7 @@ def test_summarise_deltas_falls_back_to_rendering_on_llm_error(monkeypatch):
     async def boom(*args, **kwargs):
         raise RuntimeError("model down")
 
-    monkeypatch.setattr(digest, "generate_with_retry", boom)
+    monkeypatch.setattr(digest.llm, "generate", boom)
     out = asyncio.run(digest.summarise_deltas(payload))
     assert out == digest.render_summary(payload)
 
@@ -206,8 +206,7 @@ def test_summarise_deltas_uses_model_text_on_success(monkeypatch):
     async def fake(*args, **kwargs):
         return _Resp()
 
-    monkeypatch.setattr(digest.genai, "Client", lambda: object())
-    monkeypatch.setattr(digest, "generate_with_retry", fake)
+    monkeypatch.setattr(digest.llm, "generate", fake)
     out = asyncio.run(digest.summarise_deltas(payload))
     assert out == "One company had news this week."
 

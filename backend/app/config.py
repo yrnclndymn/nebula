@@ -34,6 +34,21 @@ class Settings(BaseSettings):
     # and handles this tool loop fine. Override with AGENT_MODEL.
     agent_model: str = "gemini-3.1-flash-lite"
 
+    # Provider seam (#8, DEPLOYMENT.md Phase E). The default "gemini" keeps the
+    # native google-genai path unchanged (ADK plain model strings + genai_retry).
+    # Set LLM_PROVIDER to a LiteLLM provider family (e.g. "anthropic", "openai",
+    # "azure") to route ADK agents through LiteLlm and direct structured calls
+    # through litellm.acompletion instead — no code edits needed. LLM_MODEL is a
+    # pass-through model id used verbatim by BOTH surfaces when set (e.g.
+    # "anthropic/claude-...", "gpt-..."); when empty the gemini_model / agent_model
+    # defaults above apply, so an unset LLM_MODEL preserves today's behaviour. The
+    # provider's own API key must be present in the env (each key wired into Secret
+    # Manager at deploy time): GEMINI_API_KEY / GOOGLE_API_KEY for gemini,
+    # ANTHROPIC_API_KEY for anthropic, OPENAI_API_KEY for openai, etc. — the single
+    # decision point that reads these lives in app/llm.py.
+    llm_provider: str = "gemini"
+    llm_model: str = ""
+
     # Third-party news search (#35): after the pure entity-match filter, optionally
     # run a single batched Gemini call to prune name-collision false positives. It
     # fails safe (keeps the pure shortlist on any error/quota), so the job never

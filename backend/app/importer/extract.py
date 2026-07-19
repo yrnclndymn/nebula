@@ -15,6 +15,7 @@ from google import genai
 from google.genai import errors, types
 from pydantic import BaseModel, Field
 
+from app import llm
 from app.config import settings
 from app.graph.company_types import canonical_company_types
 from app.graph.models import Leader
@@ -95,6 +96,16 @@ async def extract_fields(
         response_schema=ExtractedFields,
         temperature=0,
     )
+
+    # Provider seam (#8): a non-gemini provider routes through LiteLLM. The native
+    # google-genai retry loop below is kept byte-for-byte for the default (gemini).
+    if llm.use_litellm():
+        resp = await llm.generate(model=settings.gemini_model, contents=contents, config=config)
+        parsed = resp.parsed
+        if isinstance(parsed, ExtractedFields):
+            parsed.company_types = canonical_company_types(parsed.company_types)
+            return parsed
+        return ExtractedFields()
 
     # Retry transient 429/5xx with exponential backoff; Gemini's shared models
     # throw 503 "high demand" often enough to sink a batch otherwise.
