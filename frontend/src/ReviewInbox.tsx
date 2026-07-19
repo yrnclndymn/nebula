@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { dismissJob, fetchTopics, getBackfill, getProposal, listJobs } from "./api";
 import { AcquisitionProposalsPanel } from "./AcquisitionProposals";
 import { BackfillCard, BackfillModal } from "./BackfillReview";
@@ -7,6 +7,7 @@ import { ResolveBatch } from "./EntityResolution";
 import { Page } from "./Page";
 import { PersonProposalCard } from "./PersonProposalCard";
 import { ProposalCard } from "./ProposalCard";
+import { ReviseThesisBatch } from "./ThesisRevisionReview";
 import { dedupeProposalsByScope } from "./proposalDedupe";
 import type { Backfill, JobSummary, Proposal } from "./types";
 import { usePollJob } from "./usePollJob";
@@ -22,7 +23,21 @@ interface BackfillRef {
   total: number;
 }
 
-type ScanKind = "resolve" | "classify";
+type ScanKind = "resolve" | "classify" | "revise-thesis";
+
+// Per-scan chrome: the panel heading + which batch component renders. Keeps the
+// button row + panel body declarative as scan actions are added (#196).
+const SCAN_META: Record<ScanKind, { heading: string; render: () => ReactNode }> = {
+  resolve: { heading: "Resolve stub companies", render: () => <ResolveBatch key="resolve" /> },
+  classify: {
+    heading: "Classify client companies",
+    render: () => <ClassifyBatch key="classify" />,
+  },
+  "revise-thesis": {
+    heading: "Revise thesis from evidence",
+    render: () => <ReviseThesisBatch key="revise-thesis" />,
+  },
+};
 
 // The Review inbox (#153): one badged surface for every pending commit. It
 // COMPOSES the existing review cards client-side from existing read endpoints —
@@ -155,12 +170,18 @@ export function InboxPage() {
         >
           🏷 Classify clients
         </button>
+        <button
+          className={activeScan === "revise-thesis" ? "inbox-scan active" : "inbox-scan"}
+          onClick={() => setActiveScan((s) => (s === "revise-thesis" ? null : "revise-thesis"))}
+        >
+          📐 Revise thesis from evidence
+        </button>
       </div>
 
       {activeScan && (
         <div className="inbox-scan-panel">
           <div className="proposal-head">
-            <strong>{activeScan === "resolve" ? "Resolve stub companies" : "Classify client companies"}</strong>
+            <strong>{SCAN_META[activeScan].heading}</strong>
             <button
               className="discard small"
               style={{ marginLeft: "auto" }}
@@ -169,7 +190,7 @@ export function InboxPage() {
               Close
             </button>
           </div>
-          {activeScan === "resolve" ? <ResolveBatch key="resolve" /> : <ClassifyBatch key="classify" />}
+          {SCAN_META[activeScan].render()}
         </div>
       )}
 

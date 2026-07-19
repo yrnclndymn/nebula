@@ -683,3 +683,47 @@ export interface PersonProposal {
   outcome?: string;
   error?: string;
 }
+
+// --- Thesis evidence loop (#196): propose rule revisions from observed deals ---
+
+// The deal backing a proposed change: acquirer/target names + the cited Source URL
+// (guarded to http(s) before it renders as a link) + the deal's own thesis text.
+export interface ThesisChangeEvidence {
+  acquirer: string | null;
+  target: string | null;
+  source: string;
+  thesis: string | null;
+}
+
+// One proposed revision the reviewer approves or skips: a confidence nudge on an
+// existing rule (support/weaken) or a new/refined rule, always with its evidence.
+export interface ThesisChange {
+  change_id: string;
+  change_kind: "support" | "weaken" | "new" | "refine";
+  rule_key: string;
+  acquirer_kind: string;
+  target_kind: string;
+  qualifier: string;
+  statement: string;
+  old_confidence: number | null; // null for a brand-new rule (no prior)
+  new_confidence: number;
+  rationale: string;
+  evidence: ThesisChangeEvidence[];
+}
+
+export interface ThesisRevision {
+  job_id: string;
+  status: "pending" | "ready" | "error";
+  changes: ThesisChange[];
+  rule_count: number;
+  deal_count: number;
+  outcome?: string;
+  error?: string;
+}
+
+export type ThesisRevisionAction = "approve" | "skip";
+
+export interface ThesisRevisionDecision {
+  change_id: string;
+  action: ThesisRevisionAction;
+}

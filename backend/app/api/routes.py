@@ -10,6 +10,11 @@ from app.agents.assistant.classification import (
     get_classification,
     enqueue_classification,
 )
+from app.agents.deals.thesis_revision import (
+    commit_thesis_revision,
+    enqueue_thesis_revision,
+    get_thesis_revision,
+)
 from app.agents.assistant.proposals import commit_proposal, get_proposal, propose_enrichment
 from app.agents.assistant.resolution import (
     commit_resolution,
@@ -342,6 +347,34 @@ class ClassificationCommitRequest(BaseModel):
 async def classification_commit(job_id: str, req: ClassificationCommitRequest) -> dict:
     """Apply the reviewer's per-name classification decisions (set kind / remove)."""
     return _ok_or_404(await commit_classification(job_id, req.decisions))
+
+
+@router.post("/thesis/revision/scan")
+async def thesis_revision_scan() -> dict:
+    """Start a background scan proposing acquisition-thesis revisions from observed
+    deals (#196). Returns a job id to poll; nothing is written until the reviewer
+    commits an approved subset of the proposed changes."""
+    return await enqueue_thesis_revision()
+
+
+@router.get("/thesis/revision/{job_id}")
+async def thesis_revision_status(job_id: str) -> dict:
+    """Poll a thesis-revision scan; proposed rule changes + their evidence fill in
+    when ready."""
+    return _found_or_404(await get_thesis_revision(job_id), "thesis revision job")
+
+
+class ThesisRevisionCommitRequest(BaseModel):
+    # Per-change decisions {"change_id", "action"}, action ∈ {"approve", "skip"}.
+    # Human-in-the-loop commit step: an approved change writes its reviewer-origin
+    # rule with the supporting deals' Source URLs; nothing else touches the thesis.
+    decisions: list[dict]
+
+
+@router.post("/thesis/revision/{job_id}/commit")
+async def thesis_revision_commit(job_id: str, req: ThesisRevisionCommitRequest) -> dict:
+    """Apply the reviewer's approved thesis-revision changes (the only write path)."""
+    return _ok_or_404(await commit_thesis_revision(job_id, req.decisions))
 
 
 class RefreshRequest(BaseModel):

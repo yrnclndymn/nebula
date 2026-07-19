@@ -250,6 +250,10 @@ async def execute_job(job_id: str) -> None:  # noqa: C901 — flat dispatch tabl
         from app.agents.deals.proposals import execute_acquisition_proposal_job
 
         await execute_acquisition_proposal_job(job_id)
+    elif job["type"] == "thesis_revision":
+        from app.agents.deals.thesis_revision import execute_thesis_revision_job
+
+        await execute_thesis_revision_job(job_id)
     elif job["type"] == "person_expertise":
         # Derived expertise summary (#42) — a same-layer graph module; lazy import
         # keeps it out of jobs.py's import graph (person_expertise imports jobs).
