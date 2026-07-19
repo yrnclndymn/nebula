@@ -6,6 +6,7 @@ and updates the job progressively; the user reviews and commits selected rows,
 which writes the value + a provenance citation.
 """
 
+import json
 import uuid
 from contextvars import ContextVar
 
@@ -16,6 +17,126 @@ from app.tools.field_extract import extract_field
 
 turn_backfills: ContextVar[list | None] = ContextVar("nebula_turn_backfills", default=None)
 
+# --- Structured scope filter -------------------------------------------------
+# A back-fill's scope decides which companies get the field filled. Beyond the
+# fixed kind / country / missing / one-company scoping, the user can express an
+# arbitrary condition — but only as a STRUCTURED filter over an allowlist, never
+# free-text Cypher. Untrusted (model / crawled) input is allowed to steer reads,
+# but a back-fill proposal leads to a WRITE, so the scope must be deterministic,
+# parameterized, and auditable on the review card. This mirrors how /companies
+# builds its filters: validated field + operator, parameterized value.
+
+# Allowlisted Company scalar properties a scope may filter on, with their type.
+# "number" values are coerced to numbers; anything else is treated as a string.
+_SCOPE_FIELDS: dict[str, str] = {
+    "headcount": "number",
+    "estimatedRevenue": "number",
+    "yearFounded": "number",
+    "hqCountry": "string",
+    "hqCity": "string",
+    "hqState": "string",
+    "kind": "string",
+    "priority": "string",
+    "funding": "string",
+    "origin": "string",
+}
+
+# Allowlisted operators → the Cypher token they map to. The model never supplies
+# a raw Cypher operator; it names one of these keys and we substitute the token.
+_SCOPE_OPS: dict[str, str] = {
+    "=": "=",
+    "!=": "<>",
+    "<": "<",
+    "<=": "<=",
+    ">": ">",
+    ">=": ">=",
+    "contains": "CONTAINS",
+    "is_null": "IS NULL",
+    "is_not_null": "IS NOT NULL",
+}
+_NULL_OPS = {"is_null", "is_not_null"}
+
+
+def _normalize_condition(cond) -> dict:
+    """Validate one ``{field, op, value}`` against the allowlists and coerce it."""
+    if not isinstance(cond, dict):
+        raise ValueError(f"scope condition must be an object, got {cond!r}")
+    field = cond.get("field")
+    op = cond.get("op")
+    if field not in _SCOPE_FIELDS:
+        raise ValueError(
+            f"unknown scope field {field!r}; allowed: {', '.join(sorted(_SCOPE_FIELDS))}"
+        )
+    if op not in _SCOPE_OPS:
+        raise ValueError(f"unknown scope operator {op!r}; allowed: {', '.join(sorted(_SCOPE_OPS))}")
+    if op in _NULL_OPS:
+        return {"field": field, "op": op, "value": None}
+    value = cond.get("value")
+    if value is None:
+        raise ValueError(f"scope condition on {field!r} with op {op!r} requires a value")
+    if _SCOPE_FIELDS[field] == "number":
+        try:
+            num = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"scope field {field!r} needs a numeric value, got {value!r}"
+            ) from None
+        value = int(num) if num.is_integer() else num
+    return {"field": field, "op": op, "value": value}
+
+
+def parse_scope(raw: str | list | None) -> list[dict]:
+    """Validate a structured scope filter, returning normalized conditions.
+
+    `raw` is a JSON array string (as the assistant tool passes it) or an already
+    decoded list of ``{"field", "op", "value"}`` dicts. Each condition is checked
+    against the field/operator allowlists and numeric values are coerced, so a
+    hostile field or operator (or Cypher smuggled into either) is rejected with a
+    ``ValueError`` before it can reach the graph. Null-check operators drop the
+    value. Returns ``[]`` for empty input.
+    """
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"scope must be a JSON array of conditions: {exc}") from exc
+    else:
+        data = raw
+    if not isinstance(data, list):
+        raise ValueError("scope must be a JSON array of {field, op, value} conditions")
+    return [_normalize_condition(cond) for cond in data]
+
+
+def scope_to_cypher(conditions: list[dict], prefix: str = "scope") -> tuple[str, dict]:
+    """Translate normalized scope conditions into a parameterized Cypher fragment.
+
+    Returns ``(clause, params)`` where `clause` is a ``AND``-joined boolean over
+    ``c`` (no leading ``AND``; the caller composes it) and every value AND field
+    name is a bound parameter — the field goes through dynamic property access
+    ``c[$key]`` so even an allowlisted-but-untrusted string can't reshape the
+    query. Pass already-validated conditions (see :func:`parse_scope`).
+    """
+    clauses: list[str] = []
+    params: dict = {}
+    for i, cond in enumerate(conditions):
+        fkey = f"{prefix}_f{i}"
+        params[fkey] = cond["field"]
+        prop = f"c[${fkey}]"
+        op = cond["op"]
+        token = _SCOPE_OPS[op]
+        if op in _NULL_OPS:
+            clauses.append(f"{prop} {token}")
+            continue
+        vkey = f"{prefix}_v{i}"
+        params[vkey] = cond["value"]
+        if op == "contains":
+            clauses.append(f"toLower(toString({prop})) CONTAINS toLower(${vkey})")
+        else:
+            clauses.append(f"{prop} {token} ${vkey}")
+    return " AND ".join(clauses), params
+
 
 async def _applicable_companies(
     driver,
@@ -23,6 +144,7 @@ async def _applicable_companies(
     country: str | None,
     missing_key: str | None = None,
     company: str | None = None,
+    scope: list[dict] | None = None,
 ) -> list[dict]:
     kind_clause = "" if applies_to_kind == "all" else "AND c.kind = $kind"
     country_clause = "AND c.hqCountry = $country" if country else ""
@@ -30,21 +152,31 @@ async def _applicable_companies(
     company_clause = "AND c.name = $company" if company else ""
     # Only companies that don't already have the field set (its property is the key).
     missing_clause = "AND c[$missingKey] IS NULL" if missing_key else ""
+    # Arbitrary structured condition (validated field/operator, parameterized) —
+    # composes on top of the fixed scoping above.
+    scope_frag, scope_params = scope_to_cypher(scope or [])
+    scope_clause = f"AND ({scope_frag})" if scope_frag else ""
     async with driver.session() as session:
         result = await session.run(
             f"MATCH (c:Company)-[:TAGGED_AS]->(:Topic) "
-            f"WHERE c.website IS NOT NULL {kind_clause} {country_clause} {company_clause} {missing_clause} "
+            f"WHERE c.website IS NOT NULL {kind_clause} {country_clause} {company_clause} "
+            f"{missing_clause} {scope_clause} "
             f"RETURN DISTINCT c.name AS name, c.website AS website ORDER BY name",
             kind=applies_to_kind,
             country=country,
             company=company,
             missingKey=missing_key,
+            **scope_params,
         )
         return [dict(record) async for record in result]
 
 
 async def enqueue_backfill(
-    field_name: str, country: str = "", missing_only: bool = False, company: str = ""
+    field_name: str,
+    country: str = "",
+    missing_only: bool = False,
+    company: str = "",
+    conditions: str = "",
 ) -> dict:
     """Research a custom field for companies of its kind and prepare a batch for the
     user to review and commit. Returns immediately; runs in the background. Use when
@@ -54,8 +186,25 @@ async def enqueue_backfill(
     company when the user named a specific company; pass country (full name, e.g.
     'United Kingdom') to limit to companies HQ'd there; set missing_only=True when
     the user wants only the companies that DON'T already have a value (e.g. 'fill it
-    in where it's missing'). With no scope it researches every applicable company."""
+    in where it's missing').
+
+    For an arbitrary condition — 'companies with more than 200 employees',
+    'founded before 2010', 'HQ'd in Germany' — pass conditions as a JSON array of
+    {"field","op","value"} objects; every listed condition must hold (AND). Do NOT
+    write Cypher: the ONLY valid fields are headcount, estimatedRevenue,
+    yearFounded, hqCountry, hqCity, hqState, kind, priority, funding, origin, and
+    the ONLY valid ops are =, !=, <, <=, >, >=, contains, is_null, is_not_null
+    (is_null / is_not_null take no value). Example: '>200 employees' →
+    conditions='[{"field":"headcount","op":">","value":200}]'. Anything outside
+    those allowlists is rejected. conditions composes with country / missing_only.
+    With no scope it researches every applicable company."""
     driver = get_driver()
+    # Validate the structured scope up front (pure, no DB) so a hostile field or
+    # operator is rejected before anything is enqueued.
+    try:
+        scope = parse_scope(conditions)
+    except ValueError as exc:
+        return {"error": f"invalid scope: {exc}"}
     field_defs = {f["name"]: f for f in await queries.list_field_defs(driver)}
     field_def = field_defs.get(field_name)
     if field_def is None:
@@ -63,7 +212,12 @@ async def enqueue_backfill(
 
     missing_key = field_name if missing_only else None
     companies = await _applicable_companies(
-        driver, field_def["appliesToKind"], country or None, missing_key, company or None
+        driver,
+        field_def["appliesToKind"],
+        country or None,
+        missing_key,
+        company or None,
+        scope,
     )
     # Scoping to one named company makes a zero match common (typo, wrong kind, no
     # website/topic). Surface that instead of enqueuing an empty job the user is
@@ -83,6 +237,9 @@ async def enqueue_backfill(
             "country": country or "",
             "company": company or "",
             "missing_only": missing_only,
+            # The structured condition that produced this batch, kept verbatim so
+            # the reviewer sees exactly which scope selected these companies.
+            "scope": scope,
             "total": len(companies),
             "done": 0,
             "rows": [],
@@ -97,6 +254,7 @@ async def enqueue_backfill(
                 "job_id": job_id,
                 "field": field_def["label"],
                 "total": len(companies),
+                "scope": scope,
                 "status": "pending",
             }
         )
@@ -122,6 +280,7 @@ async def execute_backfill_job(job_id: str) -> None:
         job.get("country") or None,
         missing_key,
         job.get("company") or None,
+        job.get("scope") or None,
     )
     # Per-run budget: defaults for "backfill" from settings, overridable by the
     # job's payload ("budget" dict). None = unlimited (backwards compatible). The
