@@ -723,17 +723,6 @@ td.muted {
   gap: 0.5rem;
   margin-bottom: 0.5rem;
 }
-.proposal-facts {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.15rem 0.75rem;
-  color: var(--text);
-}
-.pf-k {
-  color: var(--muted);
-  font-size: 11px;
-  text-transform: uppercase;
-}
 .proposal-sources {
   margin-top: 0.5rem;
 }
@@ -1215,13 +1204,6 @@ td.muted {
   font-size: 12px;
   margin-left: auto;
 }
-.activity-entry {
-  position: relative;
-}
-.activity-entry .activity-dismiss {
-  margin: 0.25rem 0 0.5rem;
-}
-
 /* Own-site signal capture button (drawer) */
 .capture-signals {
   margin-top: 0.75rem;
