@@ -148,6 +148,47 @@ def test_deep_sanitize_walks_all_shapes():
     assert _SURROGATE not in clean["text"] and _SURROGATE not in clean["links"][0]["text"]
 
 
+def test_store_page_defaults_missing_fields():
+    """A page dict missing the optional fields must still write valid JSON/text —
+    `text` defaults to "" and links/images/social to their empty JSON containers,
+    NOT `null`. Pins the `.get(key, default)` fallbacks on the write path (a dropped
+    default serialises `json.dumps(None)` -> "null", which reads back as a non-list
+    and breaks the read-side json.loads shape)."""
+    driver = _FakeDriver()
+    asyncio.run(cache.store_page(driver, {"url": "https://x.example/bare"}))
+
+    assert driver.captured["url"] == "https://x.example/bare"
+    assert driver.captured["text"] == ""  # not None
+    # Empty JSON containers, never the string "null".
+    assert driver.captured["links"] == "[]"
+    assert driver.captured["images"] == "[]"
+    assert driver.captured["social"] == "{}"
+
+
+def test_store_page_threads_each_field_from_its_own_key():
+    """Every content field is read from its OWN page key and serialised to its own
+    column: url/text passed raw, links/images/social JSON-encoded from `page['links']`
+    etc. Pins the source-key wiring without a DB (a mutant reading the wrong key would
+    silently drop that field to its empty default)."""
+    import json
+
+    driver = _FakeDriver()
+    page = {
+        "url": "https://acme.example/home",
+        "text": "Acme home page",
+        "links": [{"url": "https://acme.example/about", "text": "About"}],
+        "images": [{"src": "https://acme.example/logo.png", "alt": "Acme"}],
+        "social": {"linkedin": "https://linkedin.example/acme"},
+    }
+    asyncio.run(cache.store_page(driver, page))
+
+    assert driver.captured["url"] == "https://acme.example/home"
+    assert driver.captured["text"] == "Acme home page"
+    assert json.loads(driver.captured["links"]) == page["links"]
+    assert json.loads(driver.captured["images"]) == page["images"]
+    assert json.loads(driver.captured["social"]) == page["social"]
+
+
 def test_store_clients_sanitizes_names():
     """A client name mined from logo alt text can carry a lone surrogate; the
     write must scrub it before the driver's UTF-8 encode (PR #159 review r2 —
@@ -192,3 +233,83 @@ def test_cached_page_read_sanitizes_legacy_poison_roundtrip():
     _assert_utf8_encodable(out)
     assert _SURROGATE not in out["links"][0]["text"]
     assert out["links"][0]["url"] == "https://x.example/a"
+
+
+# --- Read/write round-trip field fidelity + eviction (needs Neo4j) ---------------
+# Skip gracefully without a DB — CI's Neo4j service is the arbiter. Pins the exact
+# field/key mapping get_cached_page rebuilds from the stored columns and the
+# domain-scoped eviction store_page/store_clients rely on for `POST /cache/refresh`.
+
+_ROUND_URL = "https://__pytest_cache_roundtrip__.example.com/page"
+
+
+def test_cached_page_roundtrips_every_field():
+    """Store a page with all four content fields populated, read it back, and
+    confirm each column maps to the right output key with its value intact — the
+    read rebuild (`{"url", "text", "links", "images", "social"}`) is exact, and the
+    `social` fallback keeps a real object rather than collapsing it to `{}`."""
+    from app.graph.driver import check_connectivity, close_driver, get_driver
+
+    stored = {
+        "url": _ROUND_URL,
+        "text": "Acme partners with Globex",
+        "links": [{"url": "https://x.example/a", "text": "About us"}],
+        "images": [{"src": "https://x.example/logo.png", "alt": "Acme logo"}],
+        "social": {"linkedin": "https://linkedin.example/acme"},
+    }
+
+    async def scenario():
+        try:
+            await check_connectivity()
+        except Exception:
+            return "skip"
+        driver = get_driver()
+        await cache.store_page(driver, stored)
+        page = await cache.get_cached_page(driver, _ROUND_URL)
+        await cache.clear_domain(driver, cache.domain_of(_ROUND_URL))
+        await close_driver()
+        return page
+
+    out = asyncio.run(scenario())
+    if out == "skip":
+        pytest.skip("Neo4j not reachable — run `make db-up`")
+    assert out == stored  # every key present, every value round-tripped intact
+
+
+def test_clear_domain_evicts_pages_and_client_list():
+    """`POST /cache/refresh` calls clear_domain to force a fresh crawl: it must drop
+    BOTH the cached :Page(s) and the :SiteClients list for the domain (the latter
+    keyed on the domain param, matched by its exact `:SiteClients` label). After it,
+    a re-read misses on both."""
+    from app.graph.driver import check_connectivity, close_driver, get_driver
+
+    domain = "__pytest_clear__.example.com"
+    page_url = f"https://{domain}/home"
+
+    async def scenario():
+        try:
+            await check_connectivity()
+        except Exception:
+            return "skip"
+        driver = get_driver()
+        await cache.store_page(driver, {"url": page_url, "text": "hi", "links": [], "images": []})
+        await cache.store_clients(driver, domain, ["Globex", "Initech"])
+        # Sanity: both are cached before the clear.
+        assert await cache.get_cached_page(driver, page_url) is not None
+        assert await cache.get_cached_clients(driver, domain) == ["Globex", "Initech"]
+
+        result = await cache.clear_domain(driver, domain)
+
+        page_after = await cache.get_cached_page(driver, page_url)
+        clients_after = await cache.get_cached_clients(driver, domain)
+        await close_driver()
+        return result, page_after, clients_after
+
+    out = asyncio.run(scenario())
+    if out == "skip":
+        pytest.skip("Neo4j not reachable — run `make db-up`")
+    result, page_after, clients_after = out
+    assert result["domain"] == domain  # the report echoes which domain was cleared
+    assert result["pages_cleared"] >= 1
+    assert page_after is None  # the :Page was dropped
+    assert clients_after is None  # the :SiteClients list was dropped too
