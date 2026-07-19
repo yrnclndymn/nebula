@@ -84,6 +84,7 @@ def test_seed_is_idempotent_and_reads_back_with_evidence_counts(event_loop):
         assert r["origin"] == "user"
         assert r["statement"].strip()
         assert r["evidence_count"] == 0  # freshly seeded, no observed deals yet
+        assert r["sources"] == []  # #195: no cited provenance until the evidence loop
 
 
 def test_supported_by_evidence_raises_count_idempotently(event_loop):
@@ -112,3 +113,4 @@ def test_supported_by_evidence_raises_count_idempotently(event_loop):
 
     got = event_loop.run_until_complete(scenario())
     assert got["evidence_count"] == 1
+    assert got["sources"] == [EV_SRC]  # #195: the cited Source URL rides along

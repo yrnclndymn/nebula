@@ -743,3 +743,21 @@ async def set_field(name: str, req: FieldEditRequest) -> dict:
     if not await field_edit.apply_field_edit(get_driver(), name, edit):
         raise HTTPException(status_code=404, detail=f"No company named {name!r}")
     return {"name": name, "field": edit.field, "value": edit.value, "source_url": edit.source_url}
+
+
+# --- Acquisition thesis surface (#195, epic #192) --------------------------------
+# READ-ONLY over the ThesisRule nodes seeded by #193 (`make seed-thesis`). Each rule
+# carries its statement/kinds/qualifier/confidence/origin/updatedAt plus its evidence
+# count and the cited Source URLs (SUPPORTED_BY provenance) — the "why" behind the
+# ranking signal (#194). Revisions arrive via the evidence loop (#196); this endpoint
+# never writes. Imported inside the handler to keep this an append-only block.
+
+
+@router.get("/thesis")
+async def thesis_rules() -> list[dict]:
+    """The acquisition-thesis model (#195): every ThesisRule with its statement,
+    kinds, qualifier, confidence, origin, last-updated, evidence count, and cited
+    Source URLs — most-confident first. Read-only; seeded by `make seed-thesis`."""
+    from app.graph import thesis
+
+    return await thesis.get_thesis_rules(get_driver())
