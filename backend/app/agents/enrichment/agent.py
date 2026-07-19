@@ -21,16 +21,21 @@ Process:
 1. First call fetch_page on the company's OWN website for the basics (what they do,
    HQ, leadership, founding). When you fetch the company's own site, its `social`
    field holds the company's profile URLs — use that social.linkedin as the LinkedIn
-   value: it's the canonical link the company publishes. Only fall back to web_search
-   for LinkedIn if the company's own site exposes none. (Ignore the `social` field on
-   pages that AREN'T the company's own site — e.g. search results or news articles —
-   those links may belong to someone else.)
+   value: it's the canonical link the company publishes. CITE it to the own-site page
+   you fetched it from (see step 4): the LinkedIn is only saved as the canonical field
+   when its citation source is on the company's own website domain — this is enforced
+   deterministically, not taken on trust. A LinkedIn found only via web_search or on an
+   off-site page is kept as a candidate for the user to review, not saved as canonical,
+   so always prefer the own-site social.linkedin. (Ignore the `social` field on pages
+   that AREN'T the company's own site — e.g. search results or news articles — those
+   links may belong to someone else.)
 2. Use web_search for anything still missing: HQ location, headcount, year
    founded, funding/investors, notable partnerships, leadership (names + titles),
    and whether it is a B-Corp / ESOP / employee-owned / co-operative / non-profit.
    fetch_page on the most promising results to confirm. For LinkedIn, prefer the
    company site's social.linkedin (step 1) over a URL from search — search often
-   returns a country-subdomain variant like uk.linkedin.com.
+   returns a country-subdomain variant like uk.linkedin.com, and a search-only
+   LinkedIn is not saved as the canonical field (only surfaced as a review candidate).
 
 2b. To find CLIENTS / customers, call find_clients(website) ONCE. It crawls the
    company's client / "who we've helped" / case-study pages and their sub-pages and

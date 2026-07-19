@@ -9,6 +9,7 @@ enrichment and a sheet import land identically in the graph.
 
 from contextvars import ContextVar
 
+from app.graph.cache import domain_of
 from app.graph.company_types import canonical_company_types
 from app.graph.driver import get_driver
 from app.graph.models import Citation, CompanyRecord, Leader
@@ -51,6 +52,38 @@ def _drop_uncited(values: dict, citations: list[Citation]) -> tuple[dict, list[s
             kept[field] = None
             dropped.append(field)
     return kept, dropped
+
+
+def _is_linkedin_citation(c: Citation) -> bool:
+    return "linkedin" in c.field.strip().lower()
+
+
+def _linkedin_has_own_site_provenance(website: str, citations: list[Citation]) -> bool:
+    """Is the LinkedIn deterministically attributable to the company's OWN site?
+
+    True only when some LinkedIn citation's source URL sits on the company's own
+    website domain — the enrichment mirror of the back-fill's own-site social scrape.
+    Crawled/searched content is untrusted, so a LinkedIn cited only to a search result
+    or partner page (or cited nowhere) is NOT its own-site link and stays out of the
+    canonical field.
+    """
+    if not website:
+        return False
+    site = domain_of(website)
+    if not site:
+        return False
+    return any(
+        _is_linkedin_citation(c) and c.source and domain_of(c.source) == site for c in citations
+    )
+
+
+def _linkedin_candidate_citation(linkedin: str, citations: list[Citation]) -> list[Citation]:
+    """Surface a non-own-site LinkedIn as a review candidate rather than dropping it:
+    keep whatever citation the agent gave for it, else add a citation-only entry so the
+    reviewer still sees the candidate (as a CITES edge) without it becoming canonical."""
+    if any(_is_linkedin_citation(c) for c in citations):
+        return citations
+    return [*citations, Citation(field="linkedin", value=linkedin, source=linkedin)]
 
 
 def _parse_citations(citations: list[str]) -> list[Citation]:
@@ -97,13 +130,32 @@ async def save_company(  # noqa: PLR0913 — ADK builds the tool schema from the
     leadership entry as "Name | Title" (title may be empty). company_types should
     only be ownership/structure labels like "B-Corp", "ESOP", "employee-owned".
 
+    linkedin: the company's LinkedIn URL. It is saved as the company's canonical
+    LinkedIn ONLY when you cite it to a page on the company's OWN website domain (the
+    social link the company itself publishes) — pass a citation
+    "linkedin | <url> | <own-site page url> | <date>". A LinkedIn cited only to a
+    search result or off-site page (untrusted content) is not saved as the canonical
+    field; it is kept as a candidate for the user to review. Absent LinkedIn: pass "".
+
     citations: provenance for the facts you save — one entry per checkable fact,
     formatted "field | value | source_url | source_date". `field` matches a saved
     field (e.g. funding, headcount, year_founded, hq_location, linkedin); `source_url` is the
     page you got it from; `source_date` is when the info is from (e.g. "2025-09" or
-    "as of 2024"). REQUIRED for every financial figure and headcount you save.
+    "as of 2024"). REQUIRED for every financial figure and headcount you save, and for
+    a LinkedIn to be saved as the canonical field (cite it to the company's own site).
     """
     parsed_citations = _parse_citations(citations)
+    # Guardrail (#21): the LinkedIn becomes the canonical field ONLY with deterministic
+    # own-site provenance — a citation whose source is on the company's own domain, the
+    # enrichment mirror of the back-fill's own-site social scrape. A LinkedIn from
+    # crawled/searched content (untrusted input) is not silently dropped but demoted to
+    # a citation-only candidate the reviewer confirms — it must never steer the write.
+    linkedin_norm = normalize_linkedin(linkedin) if linkedin else None
+    linkedin_own_site = bool(linkedin_norm) and _linkedin_has_own_site_provenance(
+        website, parsed_citations
+    )
+    if linkedin_norm and not linkedin_own_site:
+        parsed_citations = _linkedin_candidate_citation(linkedin_norm, parsed_citations)
     # Guardrail: financials/headcount are dropped unless a citation backs them.
     guarded, dropped = _drop_uncited(
         {
@@ -117,7 +169,7 @@ async def save_company(  # noqa: PLR0913 — ADK builds the tool schema from the
         name=name,
         about=about or None,
         website=website or None,
-        linkedin=normalize_linkedin(linkedin) if linkedin else None,
+        linkedin=linkedin_norm if linkedin_own_site else None,
         hq_location=hq_location or None,
         headcount=guarded["headcount"],
         estimated_revenue=guarded["estimated_revenue"],
@@ -140,6 +192,7 @@ async def save_company(  # noqa: PLR0913 — ADK builds the tool schema from the
         "leaders": len(record.leadership),
         "citations": len(record.citations),
         "dropped_uncited": dropped,
+        "linkedin_candidate_only": bool(linkedin_norm) and not linkedin_own_site,
         "company_types": record.company_types,
     }
 
