@@ -14,6 +14,8 @@ import type {
   ResolutionDecision,
   Signal,
   SignalCapture,
+  ThesisRevision,
+  ThesisRevisionDecision,
 } from "./types";
 
 // Backend base URL. Override in production via VITE_API_BASE (e.g. "/api").
@@ -88,6 +90,20 @@ export const getClassification = (jobId: string) =>
 export const commitClassification = (jobId: string, decisions: ClassificationDecision[]) =>
   postJson<{ classified?: number; removed?: number; refused?: string[]; error?: string }>(
     `/classification/${jobId}/commit`,
+    { decisions },
+  );
+
+// Thesis evidence loop (#196): scan proposes rule revisions from observed deals,
+// the reviewer commits an approved subset. Mirrors the classification trio.
+export const scanThesisRevision = () =>
+  postJson<{ job_id: string; status: string }>("/thesis/revision/scan", {});
+
+export const getThesisRevision = (jobId: string) =>
+  getJson<ThesisRevision>(`/thesis/revision/${jobId}`);
+
+export const commitThesisRevision = (jobId: string, decisions: ThesisRevisionDecision[]) =>
+  postJson<{ applied?: number; rules?: string[]; error?: string }>(
+    `/thesis/revision/${jobId}/commit`,
     { decisions },
   );
 

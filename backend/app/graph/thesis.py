@@ -242,6 +242,56 @@ async def get_thesis_rules(driver: AsyncDriver) -> list[dict]:
         return [dict(rec) async for rec in result]
 
 
+async def last_committed_revision_at(driver: AsyncDriver) -> str | None:
+    """The createdAt (ISO string) of the most recently COMMITTED ``thesis_revision``
+    job, or None if the evidence loop (#196) has never committed a revision.
+
+    Read-only. Lets the evidence loop gather only the deals observed SINCE the last
+    revision (``gather_acquisition_evidence(since=...)``) instead of re-weighing every
+    deal each run; None means "no prior revision — consider all deals".
+    """
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (j:Job {type: 'thesis_revision', status: 'committed'})
+            RETURN toString(max(j.createdAt)) AS since
+            """
+        )
+        record = await result.single()
+    return record["since"] if record else None
+
+
+async def gather_acquisition_evidence(driver: AsyncDriver, since: str | None = None) -> list[dict]:
+    """Observed ACQUIRED deals as thesis evidence: both endpoints' kinds + headcounts,
+    the deal-level cited ``thesis`` text and ``source``, newest announced first (#196).
+
+    Read-only. Each row gets a synthetic ``deal_id`` (``d0``, ``d1``, …) so the LLM
+    can reference specific deals without ever seeing a company name in a way that
+    could steer a write. When ``since`` is given (the last committed revision's
+    timestamp), only deals written at/after it are returned — else all deals. Undated
+    deals sort last via the coalesce guard (Cypher treats null as the largest value).
+    """
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (acq:Company)-[r:ACQUIRED]->(tgt:Company)
+            WHERE $since IS NULL OR r.updatedAt >= datetime($since)
+            RETURN acq.name AS acquirer, acq.kind AS acquirer_kind,
+                   acq.headcount AS acquirer_headcount,
+                   tgt.name AS target, tgt.kind AS target_kind,
+                   tgt.headcount AS target_headcount,
+                   r.thesis AS thesis, r.source AS source,
+                   r.announcedAt AS announced_at
+            ORDER BY coalesce(r.announcedAt, '') DESC
+            """,
+            since=since,
+        )
+        rows = [dict(rec) async for rec in result]
+    for i, row in enumerate(rows):
+        row["deal_id"] = f"d{i}"
+    return rows
+
+
 async def _main() -> None:
     from app.graph.driver import close_driver, get_driver
     from app.graph.schema import apply_schema

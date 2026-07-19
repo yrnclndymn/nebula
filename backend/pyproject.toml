@@ -113,6 +113,7 @@ ignore_imports = [
     "app.graph.jobs -> app.agents.discovery.discovery",
     "app.graph.jobs -> app.agents.people.proposals",
     "app.graph.jobs -> app.agents.deals.proposals",
+    "app.graph.jobs -> app.agents.deals.thesis_revision",
     "app.graph.jobs -> app.capture.job",
     "app.graph.jobs -> app.capture.news",
     # discovery's runner lazily calls the assistant proposal builder to turn a
