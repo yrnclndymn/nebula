@@ -21,6 +21,8 @@ a database and the ranking explainable in the UI.
 
 from neo4j import AsyncDriver
 
+from app.graph.thesis import get_thesis_rules
+
 # --- Scoring weights (documented; the ranking is fully explainable) -------------
 # A candidate acquirer earns points per signal, strongest first:
 #   * acquired a company in the TARGET's topic — the clearest "buys in this exact
@@ -63,6 +65,21 @@ SIZE_LARGER_RATIO = 3.0
 # outside the observed band (or a single-deal history) still counts as a "fit".
 SIZE_FIT_TOLERANCE = 1.5
 
+# --- Thesis-match weight (#194, epic #192) --------------------------------------
+# The stored acquisition thesis (:ThesisRule) is a top-level model of who acquires
+# whom in the space. When a candidate's KIND acquires the target's KIND per an active
+# rule, it earns points scaled by that rule's confidence and a `thesis-match` why-entry
+# citing the rule's statement + evidence count — never a bare score. Like the #165 size
+# signals, this REWEIGHTS a candidate that already cleared the relevance gate; it never
+# gates one in, and missing kind data (either side) is strictly neutral.
+W_THESIS_MATCH = 3
+# Qualified rules only fire when their condition is confirmed. The maintainer's sole
+# qualified seed rule is "domain-focused" (larger services companies acquiring ISVs);
+# we operationalize the checkable half — the acquirer being meaningfully LARGER than
+# the target — via #165's size-plausibility helper. A qualifier we don't model (or one
+# whose size data is missing) does NOT fire, so a rule never contributes unearned points.
+THESIS_LARGER_QUALIFIERS = frozenset({"domain-focused"})
+
 # Default / maximum candidates returned for a target company.
 ACQUIRERS_DEFAULT = 5
 ACQUIRERS_MAX = 20
@@ -104,6 +121,29 @@ def _pos_int(value) -> int | None:
     except (TypeError, ValueError):
         return None
     return n if n > 0 else None
+
+
+def _norm_kind(value) -> str | None:
+    """Canonical kind token (trimmed, lower, spaces→underscores), or None when absent.
+
+    Mirrors ``app.graph.thesis._normalise_kind`` so a candidate's ``a.kind`` and a
+    rule's stored ``acquirerKind``/``targetKind`` compare on the same footing; a
+    missing/blank/non-string kind is None, which the thesis matcher treats as neutral.
+    """
+    if not isinstance(value, str):
+        return None
+    normalised = "_".join(value.strip().lower().split())
+    return normalised or None
+
+
+def _confidence(value) -> float:
+    """A rule confidence clamped to ``[0, 1]``; garbage/absent falls back to the seed
+    prior 0.5 so a malformed rule still scales sanely rather than zeroing out."""
+    try:
+        c = float(value)
+    except (TypeError, ValueError):
+        return 0.5
+    return min(max(c, 0.0), 1.0)
 
 
 def _size_plausibility(acq_headcount, target_headcount) -> tuple[int, dict] | None:
@@ -167,8 +207,69 @@ def _size_signals(cand: dict, target_headcount) -> tuple[int, list[dict]]:
     return points, whys
 
 
+def _qualifier_holds(qualifier: str, cand: dict, target_headcount) -> bool:
+    """Whether a rule's qualifier condition holds for this candidate.
+
+    Unqualified rules always hold. A ``domain-focused`` rule composes with #165's
+    size-plausibility — it holds only when the acquirer is meaningfully LARGER than the
+    target (the 'larger services companies' half of the thesis we can actually check).
+    A qualifier we don't model, or one whose size data is missing, does NOT hold, so the
+    rule stays neutral rather than firing unearned."""
+    if not qualifier:
+        return True
+    if qualifier in THESIS_LARGER_QUALIFIERS:
+        result = _size_plausibility(cand.get("acquirer_headcount"), target_headcount)
+        return result is not None and result[1]["detail"]["direction"] == "larger"
+    return False
+
+
+def _thesis_signals(
+    cand: dict, target_kind, target_headcount, thesis_rules: list[dict] | None
+) -> tuple[float, list[dict]]:
+    """Thesis-match scoring for one candidate against the active :ThesisRules.
+
+    The candidate's own kind → the target's kind, matched against each rule's
+    ``(acquirerKind, targetKind)``. A matched rule adds points scaled by its confidence
+    and a ``thesis-match`` why-entry citing its statement + evidence count; qualified
+    rules fire only when :func:`_qualifier_holds`. Missing candidate/target kind — or no
+    rules — is strictly neutral (returns integer ``0`` points and no reasons), so a
+    candidate with no kind data ranks byte-identically to the pre-#194 ranking.
+    Extracted from :func:`_score_candidate` so its branch complexity stays under the cap.
+    """
+    acq_kind = _norm_kind(cand.get("acquirer_kind"))
+    tgt_kind = _norm_kind(target_kind)
+    if acq_kind is None or tgt_kind is None or not thesis_rules:
+        return 0, []
+    points: float = 0
+    whys: list[dict] = []
+    for rule in thesis_rules:
+        if _norm_kind(rule.get("acquirer_kind")) != acq_kind:
+            continue
+        if _norm_kind(rule.get("target_kind")) != tgt_kind:
+            continue
+        qualifier = (rule.get("qualifier") or "").strip()
+        if not _qualifier_holds(qualifier, cand, target_headcount):
+            continue
+        confidence = _confidence(rule.get("confidence"))
+        points += round(W_THESIS_MATCH * confidence, 2)
+        detail: dict = {
+            "statement": rule.get("statement"),
+            "confidence": confidence,
+            "evidence": int(rule.get("evidence_count") or 0),
+            "acquirer_kind": acq_kind,
+            "target_kind": tgt_kind,
+        }
+        if qualifier:
+            detail["qualifier"] = qualifier
+        whys.append({"signal": "thesis-match", "detail": detail})
+    return points, whys
+
+
 def _score_candidate(
-    cand: dict, target_kind: str | None, target_headcount: int | None = None
+    cand: dict,
+    target_kind: str | None,
+    target_headcount: int | None = None,
+    thesis_rules: list[dict] | None = None,
 ) -> dict | None:
     """Score one candidate's raw facts, returning ``{acquirer, score, why, …}`` or
     None when nothing relevant to the target connects them (pure activity, with no
@@ -193,6 +294,7 @@ def _score_candidate(
     # Size awareness only reweights a candidate that already cleared the relevance
     # gate above — it never gates one in, and absent size data contributes nothing.
     size_points, size_whys = _size_signals(cand, target_headcount)
+    thesis_points, thesis_whys = _thesis_signals(cand, target_kind, target_headcount, thesis_rules)
     activity_bonus = W_ACTIVITY * min(max(total - 1, 0), ACTIVITY_CAP)
     score = (
         W_TOPIC_DEAL * len(topic_deals)
@@ -202,6 +304,7 @@ def _score_candidate(
         + W_SHARED_CLIENT * len(shared_clients)
         + activity_bonus
         + size_points
+        + thesis_points
     )
 
     why: list[dict] = []
@@ -238,6 +341,7 @@ def _score_candidate(
     if total > 1:
         why.append({"signal": "active-acquirer", "detail": {"total_acquisitions": total}})
     why.extend(size_whys)
+    why.extend(thesis_whys)
 
     return {
         "acquirer": cand["acquirer"],
@@ -252,6 +356,7 @@ def rank_acquirer_candidates(
     *,
     target_kind: str | None = None,
     target_headcount: int | None = None,
+    thesis_rules: list[dict] | None = None,
     limit: int = ACQUIRERS_DEFAULT,
 ) -> list[dict]:
     """Pure ranking: turn raw per-candidate facts into an ordered candidate list.
@@ -259,17 +364,22 @@ def rank_acquirer_candidates(
     Each input dict carries the raw signals gathered by the Cypher
     (``topic_deals``/``kind_deals`` as ``[{target, source}]`` lists,
     ``shared_partners``/``shared_clients`` as name lists, ``is_direct_partner``,
-    ``total_acquisitions``, plus the #165 size facts ``acquirer_headcount`` /
-    ``past_target_headcounts`` / ``past_target_amounts``). ``target_headcount`` is the
-    open company's own headcount; size signals fire only when both sides exist, so a
-    None here (or absent candidate size data) leaves the pre-#165 ranking untouched.
-    Candidates with no relevant tie to the target are dropped; the rest are ordered by
-    score desc then acquirer name (deterministic for stable rendering) and capped.
+    ``total_acquisitions``, the #165 size facts ``acquirer_headcount`` /
+    ``past_target_headcounts`` / ``past_target_amounts``, and the candidate's own
+    ``acquirer_kind`` for the #194 thesis match). ``target_headcount`` is the open
+    company's own headcount; size signals fire only when both sides exist, so a None
+    here (or absent candidate size data) leaves the pre-#165 ranking untouched.
+    ``thesis_rules`` is the active :class:`ThesisRule` set (fetched ONCE per ranking,
+    not per candidate); a match on candidate-kind→target-kind adds a confidence-scaled
+    ``thesis-match`` reason, and missing kind data (either side) or no rules is strictly
+    neutral. Candidates with no relevant tie to the target are dropped; the rest are
+    ordered by score desc then acquirer name (deterministic for stable rendering) and
+    capped.
     """
     ranked = [
         scored
         for cand in candidates
-        if (scored := _score_candidate(cand, target_kind, target_headcount))
+        if (scored := _score_candidate(cand, target_kind, target_headcount, thesis_rules))
     ]
     ranked.sort(key=lambda r: (-r["score"], r["acquirer"].lower()))
     return ranked[:limit]
@@ -302,18 +412,19 @@ _CANDIDATES_CYPHER = """
         | c.name ] AS shared_clients,
       EXISTS { (a)-[:PARTNERS_WITH]-(t) } AS is_direct_partner,
       COUNT { (a)-[:ACQUIRED]->(:Company) } AS total_acquisitions,
+      a.kind AS acquirer_kind,
       a.headcount AS acquirer_headcount,
       [ (a)-[:ACQUIRED]->(x:Company) WHERE x.headcount IS NOT NULL
         | x.headcount ] AS past_target_headcounts,
       [ (a)-[r:ACQUIRED]->(:Company) WHERE r.amount IS NOT NULL
         | r.amount ] AS past_target_amounts
     WITH a.name AS acquirer, topic_deals, kind_deals, shared_partners, shared_clients,
-         is_direct_partner, total_acquisitions, acquirer_headcount,
+         is_direct_partner, total_acquisitions, acquirer_kind, acquirer_headcount,
          past_target_headcounts, past_target_amounts
     WHERE size(topic_deals) > 0 OR size(kind_deals) > 0 OR size(shared_partners) > 0
        OR size(shared_clients) > 0 OR is_direct_partner
     RETURN acquirer, topic_deals, kind_deals, shared_partners, shared_clients,
-           is_direct_partner, total_acquisitions, acquirer_headcount,
+           is_direct_partner, total_acquisitions, acquirer_kind, acquirer_headcount,
            past_target_headcounts, past_target_amounts
 """
 
@@ -325,11 +436,12 @@ async def potential_acquirers(
 
     Gathers each candidate's raw signals — acquisitions of companies in the
     target's topic / of the target's kind, shared partners/clients, an existing
-    partnership, overall acquisition activity, and (for #165) the acquirer's own
-    headcount plus its past targets' headcounts and cited deal amounts — then ranks
-    them with the pure :func:`rank_acquirer_candidates`. Returns None if ``name`` is
-    not a company
-    (so the route can 404); an empty list means no acquirer has any tie to it.
+    partnership, overall acquisition activity, (for #165) the acquirer's own
+    headcount plus its past targets' headcounts and cited deal amounts, and (for #194)
+    the acquirer's own kind — then ranks them with the pure
+    :func:`rank_acquirer_candidates`. The active thesis rules are fetched ONCE here (not
+    per candidate) and threaded into the pure ranker. Returns None if ``name`` is not a
+    company (so the route can 404); an empty list means no acquirer has any tie to it.
     """
     async with driver.session() as session:
         exists = await session.run(
@@ -343,8 +455,15 @@ async def potential_acquirers(
         target_headcount = record["headcount"]
         result = await session.run(_CANDIDATES_CYPHER, name=name)
         rows = [rec.data() async for rec in result]
+    # Fetch the active thesis rules ONCE per ranking (not per candidate), after the
+    # target is confirmed so a 404 costs no extra query.
+    thesis_rules = await get_thesis_rules(driver)
     return rank_acquirer_candidates(
-        rows, target_kind=target_kind, target_headcount=target_headcount, limit=limit
+        rows,
+        target_kind=target_kind,
+        target_headcount=target_headcount,
+        thesis_rules=thesis_rules,
+        limit=limit,
     )
 
 

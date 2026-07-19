@@ -17,6 +17,7 @@ from app.graph.acquirers import (
     W_SIZE_FIT,
     W_SIZE_PLAUSIBLE,
     W_SIZE_SMALLER,
+    W_THESIS_MATCH,
     W_TOPIC_DEAL,
     rank_acquirer_candidates,
 )
@@ -25,6 +26,7 @@ from app.graph.acquirers import (
 def _cand(name, **kw):
     base = {
         "acquirer": name,
+        "acquirer_kind": None,
         "topic_deals": [],
         "kind_deals": [],
         "shared_partners": [],
@@ -37,6 +39,21 @@ def _cand(name, **kw):
     }
     base.update(kw)
     return base
+
+
+def _rule(acquirer_kind, target_kind, *, qualifier="", statement="stmt", conf=0.7, evidence=0):
+    """A get_thesis_rules-shaped row (see app/graph/thesis.get_thesis_rules)."""
+    return {
+        "rule_key": f"{acquirer_kind}>{target_kind}|{qualifier}",
+        "acquirer_kind": acquirer_kind,
+        "target_kind": target_kind,
+        "qualifier": qualifier,
+        "statement": statement,
+        "confidence": conf,
+        "origin": "user",
+        "updated_at": None,
+        "evidence_count": evidence,
+    }
 
 
 def test_topic_deal_scores_and_carries_why_with_source():
@@ -290,6 +307,220 @@ def test_no_size_data_ranks_exactly_as_before():
     # And no size signal leaked into the why.
     assert _reason(with_size[0], "size-plausible") is None
     assert _reason(with_size[0], "size-fit") is None
+
+
+# --- Thesis-match signal (#194, epic #192): candidate KIND -> target KIND matched
+# against the active ThesisRules, fetched once per ranking and threaded in as a
+# parameter. Weight scales by rule confidence; qualified rules compose with #165's
+# size helpers; missing kind data is strictly neutral (regression-guarded below).
+
+
+def _thesis_pts(conf):
+    return round(W_THESIS_MATCH * conf, 2)
+
+
+def test_thesis_match_scores_and_cites_statement_and_evidence():
+    rules = [
+        _rule(
+            "service_provider",
+            "service_provider",
+            statement="Services buy services.",
+            conf=0.7,
+            evidence=6,
+        )
+    ]
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", acquirer_kind="service_provider", shared_clients=["C1"])],
+        target_kind="service_provider",
+        thesis_rules=rules,
+    )
+    row = ranked[0]
+    assert row["score"] == W_SHARED_CLIENT + _thesis_pts(0.7)
+    reason = _reason(row, "thesis-match")
+    assert reason is not None
+    assert reason["detail"]["statement"] == "Services buy services."
+    assert reason["detail"]["confidence"] == 0.7
+    assert reason["detail"]["evidence"] == 6
+    assert reason["detail"]["acquirer_kind"] == "service_provider"
+    assert reason["detail"]["target_kind"] == "service_provider"
+    # An unqualified rule carries no qualifier key.
+    assert "qualifier" not in reason["detail"]
+
+
+def test_thesis_points_scale_with_confidence():
+    low = rank_acquirer_candidates(
+        [_cand("Low", acquirer_kind="cloud_provider", shared_clients=["C1"])],
+        target_kind="service_provider",
+        thesis_rules=[_rule("cloud_provider", "service_provider", conf=0.3)],
+    )[0]
+    high = rank_acquirer_candidates(
+        [_cand("High", acquirer_kind="cloud_provider", shared_clients=["C1"])],
+        target_kind="service_provider",
+        thesis_rules=[_rule("cloud_provider", "service_provider", conf=0.9)],
+    )[0]
+    assert high["score"] > low["score"]
+    assert high["score"] == W_SHARED_CLIENT + _thesis_pts(0.9)
+
+
+def test_thesis_no_match_when_kinds_differ():
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", acquirer_kind="isv", shared_clients=["C1"])],
+        target_kind="service_provider",
+        thesis_rules=[_rule("service_provider", "service_provider")],
+    )
+    assert _reason(ranked[0], "thesis-match") is None
+    assert ranked[0]["score"] == W_SHARED_CLIENT
+
+
+def test_thesis_neutral_when_candidate_kind_missing():
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", acquirer_kind=None, shared_clients=["C1"])],
+        target_kind="service_provider",
+        thesis_rules=[_rule("service_provider", "service_provider")],
+    )
+    assert _reason(ranked[0], "thesis-match") is None
+    assert ranked[0]["score"] == W_SHARED_CLIENT
+
+
+def test_thesis_neutral_when_target_kind_missing():
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", acquirer_kind="service_provider", shared_clients=["C1"])],
+        target_kind=None,
+        thesis_rules=[_rule("service_provider", "service_provider")],
+    )
+    assert _reason(ranked[0], "thesis-match") is None
+    assert ranked[0]["score"] == W_SHARED_CLIENT
+
+
+def test_thesis_qualifier_normalised_across_cosmetic_variants():
+    # Kinds arrive already normalised from the DB, but a differently-cased target kind
+    # (e.g. from an older write) still matches — the matcher normalises both sides.
+    ranked = rank_acquirer_candidates(
+        [_cand("Acme", acquirer_kind="Service Provider", shared_clients=["C1"])],
+        target_kind="Service_Provider",
+        thesis_rules=[_rule("service_provider", "service_provider", conf=0.7)],
+    )
+    assert _reason(ranked[0], "thesis-match") is not None
+    assert ranked[0]["score"] == W_SHARED_CLIENT + _thesis_pts(0.7)
+
+
+# --- The domain-focused ISV rule composes with #165's size-plausibility: it fires
+# only when the acquirer is meaningfully LARGER than the target.
+
+_ISV_RULE = _rule(
+    "service_provider",
+    "isv",
+    qualifier="domain-focused",
+    statement="Larger SPs buy ISVs.",
+    conf=0.5,
+)
+
+
+def test_thesis_qualified_rule_fires_only_when_acquirer_larger():
+    ranked = rank_acquirer_candidates(
+        [
+            _cand(
+                "Big",
+                acquirer_kind="service_provider",
+                shared_clients=["C1"],
+                acquirer_headcount=6000,
+            )
+        ],
+        target_kind="isv",
+        target_headcount=200,
+        thesis_rules=[_ISV_RULE],
+    )
+    row = ranked[0]
+    reason = _reason(row, "thesis-match")
+    assert reason is not None
+    assert reason["detail"]["qualifier"] == "domain-focused"
+    # Both the thesis match AND the #165 size-plausible bonus fire off the same size fact.
+    assert row["score"] == W_SHARED_CLIENT + W_SIZE_PLAUSIBLE + _thesis_pts(0.5)
+
+
+def test_thesis_qualified_rule_neutral_when_acquirer_not_larger():
+    # Similar size (under the larger-ratio threshold) -> qualified rule does not fire.
+    ranked = rank_acquirer_candidates(
+        [
+            _cand(
+                "Peer",
+                acquirer_kind="service_provider",
+                shared_clients=["C1"],
+                acquirer_headcount=220,
+            )
+        ],
+        target_kind="isv",
+        target_headcount=200,
+        thesis_rules=[_ISV_RULE],
+    )
+    row = ranked[0]
+    assert _reason(row, "thesis-match") is None
+    assert row["score"] == W_SHARED_CLIENT
+
+
+def test_thesis_qualified_rule_neutral_without_size_data():
+    # No headcount either side -> the 'larger' condition is unconfirmable -> neutral.
+    ranked = rank_acquirer_candidates(
+        [_cand("Unknown", acquirer_kind="service_provider", shared_clients=["C1"])],
+        target_kind="isv",
+        target_headcount=None,
+        thesis_rules=[_ISV_RULE],
+    )
+    assert _reason(ranked[0], "thesis-match") is None
+    assert ranked[0]["score"] == W_SHARED_CLIENT
+
+
+def test_thesis_unknown_qualifier_stays_neutral():
+    # A qualifier the matcher can't operationalize does not fire unearned points.
+    ranked = rank_acquirer_candidates(
+        [
+            _cand(
+                "Acme",
+                acquirer_kind="service_provider",
+                shared_clients=["C1"],
+                acquirer_headcount=6000,
+            )
+        ],
+        target_kind="service_provider",
+        target_headcount=200,
+        thesis_rules=[_rule("service_provider", "service_provider", qualifier="regulated")],
+    )
+    assert _reason(ranked[0], "thesis-match") is None
+
+
+def test_thesis_never_rescues_a_non_candidate():
+    # A perfect kind match but zero relationship tie stays out of the ranking: the
+    # thesis reweights candidates, it never gates them in (the #165 discipline).
+    ranked = rank_acquirer_candidates(
+        [_cand("KindOnly", acquirer_kind="service_provider", total_acquisitions=5)],
+        target_kind="service_provider",
+        thesis_rules=[_rule("service_provider", "service_provider")],
+    )
+    assert ranked == []
+
+
+def test_no_kind_data_ranks_identically_with_thesis_rules():
+    # REGRESSION GUARD (#194, mirroring #165): a rich-relationship candidate with no
+    # acquirer_kind must score, reason, and order BYTE-IDENTICALLY whether or not
+    # thesis rules are supplied.
+    rich = _cand(
+        "Rich",
+        acquirer_kind=None,
+        topic_deals=[{"target": "Foo", "source": "s"}],
+        shared_partners=["P1"],
+        is_direct_partner=True,
+        total_acquisitions=4,
+    )
+    rules = [
+        _rule("service_provider", "service_provider", conf=0.7, evidence=6),
+        _rule("cloud_provider", "service_provider", conf=0.75),
+    ]
+    baseline = rank_acquirer_candidates([dict(rich)], target_kind="service_provider")
+    with_rules = rank_acquirer_candidates(
+        [dict(rich)], target_kind="service_provider", thesis_rules=rules
+    )
+    assert baseline == with_rules
+    assert _reason(with_rules[0], "thesis-match") is None
 
 
 # --- Route auth (PR #121 review; precedent: test_acquisition_endpoints_require_auth)

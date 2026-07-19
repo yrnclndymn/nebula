@@ -21,8 +21,23 @@ from app.graph.driver import check_connectivity, close_driver, get_driver
 from app.graph.models import CompanyRecord
 from app.graph.repository import upsert_company
 from app.graph.schema import apply_schema
+from app.graph.thesis import ThesisRule, upsert_thesis_rule
 
 TOPIC = "__pytest44_topic__"
+
+# A test-only thesis rule (#194): unqualified service_provider -> isv so its ruleKey
+# ("service_provider>isv") never collides with the seed's *qualified* domain-focused
+# variant, keeping cleanup from clobbering a real seeded rule. Exercises the gatherer's
+# new acquirer_kind column + the once-per-ranking get_thesis_rules threading; the
+# qualifier composition itself is covered exhaustively in the DB-free test_acquirers.py.
+THESIS_STMT = "__pytest194__ services acquire ISVs."
+THESIS_RULE = ThesisRule(
+    acquirer_kind="service_provider",
+    target_kind="isv",
+    statement=THESIS_STMT,
+    confidence=0.6,
+    origin="user",
+)
 SRC = "https://news.example/pytest44"
 
 TARGET = "Target Co __pytest44__"
@@ -71,6 +86,9 @@ async def _neo4j_available() -> bool:
 async def _cleanup(session) -> None:
     await session.run("MATCH (c:Company) WHERE c.name IN $names DETACH DELETE c", names=ALL_NAMES)
     await session.run("MATCH (t:Topic {name: $t}) DETACH DELETE t", t=TOPIC)
+    await session.run(
+        "MATCH (tr:ThesisRule {ruleKey: $key}) DETACH DELETE tr", key=THESIS_RULE.rule_key
+    )
 
 
 async def _seed(driver) -> None:
@@ -92,10 +110,16 @@ async def _seed(driver) -> None:
     await upsert_company(driver, CompanyRecord(name=SAMEKIND, kind="isv"))
     await upsert_company(driver, CompanyRecord(name=OFFTOPIC, kind="service_provider"))
     # ACTIVE also partners with SHARED_P (overlap with target); 5000 people -> >=3x the
-    # target, a size-plausible ("larger") acquirer.
+    # target, a size-plausible ("larger") acquirer. Kind service_provider so the #194
+    # thesis rule (service_provider -> isv, the target's kind) matches it.
     await upsert_company(
-        driver, CompanyRecord(name=ACTIVE, partnerships=[SHARED_P], headcount=5000)
+        driver,
+        CompanyRecord(
+            name=ACTIVE, kind="service_provider", partnerships=[SHARED_P], headcount=5000
+        ),
     )
+    # Seed the test thesis rule so get_thesis_rules returns it for the ranking.
+    await upsert_thesis_rule(driver, THESIS_RULE)
     await upsert_company(driver, CompanyRecord(name=PARTNER, partnerships=[TARGET]))
 
     deals = [
@@ -163,6 +187,20 @@ def test_potential_acquirers_ranks_by_signal(event_loop):
     fit = next(w for w in active["why"] if w["signal"] == "size-fit")
     assert (fit["detail"]["low"], fit["detail"]["high"], fit["detail"]["n"]) == (80, 120, 2)
     assert fit["detail"]["amounts"] == ["$100M"]
+
+    # #194 thesis match gathered off the same single query (ACTIVE is a service_provider,
+    # the target an isv): the once-fetched rule matched and cited its statement. Tolerant
+    # of any additional seed rules also present in a shared DB.
+    assert "thesis-match" in signals
+    thesis = next(
+        w
+        for w in active["why"]
+        if w["signal"] == "thesis-match" and w["detail"]["statement"] == THESIS_STMT
+    )
+    assert thesis["detail"]["acquirer_kind"] == "service_provider"
+    assert thesis["detail"]["target_kind"] == "isv"
+    assert thesis["detail"]["confidence"] == 0.6
+    assert thesis["detail"]["evidence"] == 0  # freshly seeded, no SUPPORTED_BY yet
 
     kindly = next(r for r in ranked if r["acquirer"] == KINDLY)
     assert {w["signal"] for w in kindly["why"]} == {"acquired-same-kind"}

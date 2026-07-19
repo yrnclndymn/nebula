@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { thesisMatchSummary } from "./acquirerReasons";
 import { fetchPotentialAcquirers } from "./api";
 import type { AcquirerCandidate, AcquirerWhy } from "./types";
 import { isHttpUrl } from "./urls";
@@ -78,6 +79,21 @@ function AcquirerReason({ why }: { why: AcquirerWhy }) {
         <span className="muted">
           {d.acquirer_headcount.toLocaleString()} vs {d.target_headcount.toLocaleString()} people
           {ratio ? ` (${ratio})` : ""}
+        </span>
+      </li>
+    );
+  }
+  // #194 thesis match: the candidate's kind acquires the target's kind per a stored
+  // acquisition-thesis rule — cited with the rule's statement + supporting-deal count,
+  // never a bare score.
+  if (why.signal === "thesis-match" && d.statement) {
+    return (
+      <li>
+        <span className="acq-reason">Fits the thesis</span>{" "}
+        <span className="muted">{thesisMatchSummary(d)}</span>
+        <span className="muted">
+          {" — "}
+          {d.statement}
         </span>
       </li>
     );
