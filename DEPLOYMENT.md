@@ -108,13 +108,17 @@ Cloud Tasks is free at this scale and keeps `min-instances=0`.
   - `LLM_PROVIDER` — `gemini` (default; unchanged native path) or a LiteLLM provider
     family, e.g. `anthropic`, `openai`, `azure`.
   - `LLM_MODEL` — pass-through model id used verbatim (e.g. `anthropic/claude-…`,
-    `gpt-…`); empty keeps the `GEMINI_MODEL` / `AGENT_MODEL` defaults.
+    `gpt-…`); REQUIRED for any non-gemini provider (rejected at startup otherwise);
+    with both unset the `GEMINI_MODEL` / `AGENT_MODEL` defaults apply.
   The chosen provider's API key must be in the env — **each key wired into Secret
   Manager at deploy time** (ops task; not done here): `GEMINI_API_KEY` /
   `GOOGLE_API_KEY` for gemini, `ANTHROPIC_API_KEY` for anthropic, `OPENAI_API_KEY` for
-  openai, etc. Caveat: the litellm structured-output path (JSON-schema `response_format`)
-  is implemented but unverified without a live non-gemini key; the logo-vision
-  (multimodal) call is gemini-only and raises `NotImplementedError` on other providers.
+  openai, etc. On a non-gemini provider no Gemini key is needed: the importer and
+  tidy paths construct their `genai.Client` only on the gemini branch. Caveats: the
+  litellm structured-output path (JSON-schema `response_format`) is implemented but
+  unverified without a live non-gemini key; logo vision (multimodal) is gemini-only —
+  on other providers `identify_logos` skips the vision batch with a warning (alt-text
+  and text-mined client names still flow).
 
 ## Phased rollout
 

@@ -225,3 +225,23 @@ def test_generate_with_retry_honours_retry_info(monkeypatch):
     assert out == "ok"
     assert attempts["n"] == 2
     assert sleeps == [3.0]  # used the server hint, not the default 2s backoff
+
+
+def test_quota_retry_delay_recognises_litellm_shapes():
+    """#8 provider seam: run_with_quota_retry wraps research runs on ANY provider,
+    so the classifier must see litellm's openai-shaped rate-limit errors too."""
+
+    class RateLimitError(Exception):
+        status_code = 429
+
+    assert quota_retry_delay(RateLimitError("provider says slow down")) == 0.0
+
+    class SomeProviderError(Exception):
+        status_code = 429
+
+    assert quota_retry_delay(SomeProviderError("429 too many requests")) == 0.0
+
+    class OtherError(Exception):
+        status_code = 500
+
+    assert quota_retry_delay(OtherError("boom")) is None

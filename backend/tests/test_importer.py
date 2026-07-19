@@ -101,3 +101,29 @@ def test_extract_fields_litellm_branch_degrades_on_unparsed(monkeypatch):
     monkeypatch.setattr(extract_mod.llm, "generate", fake_generate)
     got = asyncio.run(extract_mod.extract_fields(company="Acme", notes="x", client=object()))
     assert got == ExtractedFields()
+
+
+def test_extract_fields_litellm_needs_no_gemini_client(monkeypatch):
+    """#8 review finding: the litellm branch must run BEFORE any genai.Client is
+    constructed, so a non-gemini deployment needs no Gemini key for the importer."""
+    import asyncio
+
+    from app.config import settings
+    from app.importer import extract as extract_mod
+
+    monkeypatch.setattr(settings, "llm_provider", "example-provider")
+
+    def no_client():
+        raise AssertionError("genai.Client must not be constructed on the litellm path")
+
+    monkeypatch.setattr(extract_mod, "new_client", no_client)
+
+    class _Resp:
+        parsed = ExtractedFields(notes="ok")
+
+    async def fake_generate(*, model, contents, config):
+        return _Resp()
+
+    monkeypatch.setattr(extract_mod.llm, "generate", fake_generate)
+    got = asyncio.run(extract_mod.extract_fields(company="Acme", notes="x"))
+    assert got.notes == "ok"

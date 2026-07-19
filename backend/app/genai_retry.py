@@ -39,14 +39,26 @@ _RETRY_DELAY_RE = re.compile(r"retry_?[Dd]elay['\"\s:=]+(\d+(?:\.\d+)?)\s*s")
 
 
 def quota_retry_delay(exc: BaseException) -> float | None:
-    """If `exc` is a 429 RESOURCE_EXHAUSTED, the delay to wait (seconds) before
-    retrying — the server's RetryInfo hint if present, else `0.0`. Returns `None`
-    when `exc` is *not* a quota-exhaustion error, so callers can tell "wait and
-    retry" apart from "not my problem, re-raise"."""
+    """If `exc` is a rate-limit / quota-exhaustion error, the delay to wait
+    (seconds) before retrying — the server's RetryInfo hint if present, else
+    `0.0`. Returns `None` when `exc` is *not* a quota error, so callers can tell
+    "wait and retry" apart from "not my problem, re-raise".
+
+    Recognises Gemini's shape (`.code`/`.status`, RESOURCE_EXHAUSTED text) and,
+    since the #8 provider seam, litellm's openai-shaped errors too
+    (`.status_code == 429` / a RateLimitError class) — `run_with_quota_retry`
+    wraps whole research runs regardless of the configured provider."""
     code = getattr(exc, "code", None)
     status = getattr(exc, "status", None)
+    status_code = getattr(exc, "status_code", None)
     text = str(exc)
-    is_quota = code == 429 or status == "RESOURCE_EXHAUSTED" or "RESOURCE_EXHAUSTED" in text
+    is_quota = (
+        code == 429
+        or status_code == 429
+        or status == "RESOURCE_EXHAUSTED"
+        or "RESOURCE_EXHAUSTED" in text
+        or type(exc).__name__ == "RateLimitError"
+    )
     if not is_quota:
         return None
     match = _RETRY_DELAY_RE.search(text)

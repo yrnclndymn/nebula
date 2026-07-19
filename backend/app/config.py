@@ -39,9 +39,11 @@ class Settings(BaseSettings):
     # Set LLM_PROVIDER to a LiteLLM provider family (e.g. "anthropic", "openai",
     # "azure") to route ADK agents through LiteLlm and direct structured calls
     # through litellm.acompletion instead — no code edits needed. LLM_MODEL is a
-    # pass-through model id used verbatim by BOTH surfaces when set (e.g.
-    # "anthropic/claude-...", "gpt-..."); when empty the gemini_model / agent_model
-    # defaults above apply, so an unset LLM_MODEL preserves today's behaviour. The
+    # pass-through model id used verbatim by BOTH surfaces (e.g.
+    # "anthropic/claude-...", "gpt-...") and is REQUIRED whenever LLM_PROVIDER is
+    # non-gemini (app/llm.py rejects the combination at startup — the gemini model
+    # ids below can't be routed through litellm). When both are unset the
+    # gemini_model / agent_model defaults apply: today's behaviour, unchanged. The
     # provider's own API key must be present in the env (each key wired into Secret
     # Manager at deploy time): GEMINI_API_KEY / GOOGLE_API_KEY for gemini,
     # ANTHROPIC_API_KEY for anthropic, OPENAI_API_KEY for openai, etc. — the single

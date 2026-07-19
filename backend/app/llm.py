@@ -19,20 +19,26 @@ Two surfaces, one decision:
 
 **Behaviour-preserving default:** with `LLM_PROVIDER` unset (or "gemini") and
 `LLM_MODEL` unset, every path here is byte-for-byte the pre-#8 behaviour. LiteLLM is
-only imported and engaged when a non-gemini provider is configured.
+only imported and engaged when a non-gemini provider is configured — and a
+non-gemini provider REQUIRES `LLM_MODEL` (the gemini default model ids cannot be
+routed through litellm; `resolve_model` rejects the combination loudly at startup
+rather than letting every call fail at request time).
 
-`genai_retry` stays Gemini-specific (its 429/RetryInfo parsing is Gemini's error
-shape); LiteLLM errors are NOT forced through it — litellm does its own bounded
-retries via `num_retries`.
+Retries on the LiteLLM path mirror `generate_with_retry`'s semantics — budget
+charged once per logical call, the shared rate limiter acquired per ATTEMPT, and
+transient statuses (429/5xx) retried with exponential backoff — rather than
+litellm's internal `num_retries`, whose immediate retries would bypass the
+process-wide limiter exactly when the provider is rate-limiting us.
 """
 
+import asyncio
 import json
 import logging
 from typing import Any
 
 from app import budget, ratelimit
 from app.config import settings
-from app.genai_retry import generate_with_retry
+from app.genai_retry import generate_with_retry, quota_retry_delay
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +67,17 @@ def resolve_model(default: str) -> str:
 
     `LLM_MODEL` is used verbatim (e.g. "anthropic/claude-...", "gpt-..."), so a
     provider switch never needs a code edit. Unset keeps the caller's existing
-    default (`gemini_model` for direct calls, `agent_model` for agents)."""
-    return settings.llm_model or default
+    default (`gemini_model` for direct calls, `agent_model` for agents) — which is
+    only coherent on the gemini path, so a non-gemini provider without `LLM_MODEL`
+    is rejected here, once, instead of failing on every request downstream."""
+    if settings.llm_model:
+        return settings.llm_model
+    if use_litellm():
+        raise ValueError(
+            f"LLM_PROVIDER={provider()!r} requires LLM_MODEL to be set: the gemini "
+            f"default ({default!r}) cannot be routed through litellm."
+        )
+    return default
 
 
 def adk_model(default: str | None = None):
@@ -112,28 +127,39 @@ async def _litellm_acompletion(**kwargs: Any):
     return await litellm.acompletion(**kwargs)
 
 
+# Transient provider statuses worth retrying — the same set genai_retry uses for
+# Gemini. litellm exceptions (openai-shaped) carry the HTTP status on .status_code.
+_RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
+_MAX_ATTEMPTS = 8
+
+
+def _litellm_status(exc: BaseException) -> int | None:
+    """The HTTP status of a litellm/openai-shaped exception, if it carries one."""
+    status = getattr(exc, "status_code", None)
+    return status if isinstance(status, int) else None
+
+
 async def _litellm_generate(*, model: str, contents: Any, config: Any) -> _LiteLLMResponse:
     """Route one structured call through LiteLLM.
 
     Text prompts only: the Gemini image-parts path (logo vision) can't be expressed
     on this simple text surface, so a non-string `contents` fails loudly rather than
-    silently dropping the images. Still acquires the shared rate limiter + charges the
-    per-run budget so a non-gemini provider paces against the same ceilings."""
+    silently dropping the images. Retries mirror `generate_with_retry`: budget
+    charged once per logical call, the shared rate limiter acquired per attempt,
+    transient 429/5xx retried with exponential backoff (quota hints via
+    `quota_retry_delay`, which understands litellm's RateLimitError shape too)."""
     if not isinstance(contents, str):
         raise NotImplementedError(
             "The LiteLLM path supports text prompts only; multimodal contents "
             "(e.g. Gemini image parts) require the native gemini provider."
         )
     budget.charge_llm()
-    await ratelimit.acquire()
 
     schema = getattr(config, "response_schema", None)
     temperature = getattr(config, "temperature", None)
     kwargs: dict[str, Any] = {
         "model": model,
         "messages": [{"role": "user", "content": contents}],
-        # LiteLLM does its own bounded retries — genai_retry is Gemini-specific.
-        "num_retries": 2,
     }
     if temperature is not None:
         kwargs["temperature"] = temperature
@@ -141,7 +167,20 @@ async def _litellm_generate(*, model: str, contents: Any, config: Any) -> _LiteL
         # litellm accepts a pydantic model as response_format for JSON-schema output.
         kwargs["response_format"] = schema
 
-    resp = await _litellm_acompletion(**kwargs)
+    delay = 2.0
+    resp = None
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            await ratelimit.acquire()
+            resp = await _litellm_acompletion(**kwargs)
+            break
+        except Exception as exc:  # noqa: BLE001 — classify, then retry or re-raise
+            if _litellm_status(exc) in _RETRYABLE_STATUSES and attempt < _MAX_ATTEMPTS - 1:
+                hint = quota_retry_delay(exc)
+                await asyncio.sleep(hint if hint else delay)
+                delay = min(delay * 2, 60.0)
+                continue
+            raise
     try:
         text = resp.choices[0].message.content or ""
     except (AttributeError, IndexError, TypeError):

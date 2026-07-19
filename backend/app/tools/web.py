@@ -225,6 +225,12 @@ async def identify_logos(image_urls: list[str]) -> dict:
     """Look at logo images and identify the company/brand in each. Use for client
     logos whose company name isn't clear from the filename or alt text. Pass the
     image src URLs (up to ~16 are used). Returns {"companies": [names]}."""
+    if llm.use_litellm():
+        # Logo vision needs Gemini image parts, which the litellm text surface
+        # can't carry (#8). Degrade to an empty batch so find_clients keeps its
+        # alt-text + text-mined names instead of losing the whole crawl.
+        logger.warning("identify_logos needs the gemini provider; skipping logo vision")
+        return {"companies": []}
     parts: list[types.Part] = [
         types.Part(
             text=(

@@ -70,6 +70,15 @@ def new_client() -> genai.Client:
     return genai.Client()
 
 
+def _postprocess(parsed: object) -> ExtractedFields:
+    """Shared result handling for both providers: canonicalise company types on a
+    validated parse, degrade to an empty record on anything else."""
+    if isinstance(parsed, ExtractedFields):
+        parsed.company_types = canonical_company_types(parsed.company_types)
+        return parsed
+    return ExtractedFields()
+
+
 async def extract_fields(
     *,
     company: str,
@@ -83,7 +92,6 @@ async def extract_fields(
     if not any([notes, leadership, partnerships, clients]):
         return ExtractedFields()
 
-    client = client or new_client()
     contents = _PROMPT.format(
         company=company,
         notes=notes or "(none)",
@@ -97,16 +105,14 @@ async def extract_fields(
         temperature=0,
     )
 
-    # Provider seam (#8): a non-gemini provider routes through LiteLLM. The native
-    # google-genai retry loop below is kept byte-for-byte for the default (gemini).
+    # Provider seam (#8): a non-gemini provider routes through LiteLLM, BEFORE any
+    # genai.Client is constructed — the litellm path must not require a Gemini key.
+    # The native google-genai retry loop below is kept byte-for-byte for the default.
     if llm.use_litellm():
         resp = await llm.generate(model=settings.gemini_model, contents=contents, config=config)
-        parsed = resp.parsed
-        if isinstance(parsed, ExtractedFields):
-            parsed.company_types = canonical_company_types(parsed.company_types)
-            return parsed
-        return ExtractedFields()
+        return _postprocess(resp.parsed)
 
+    client = client or new_client()
     # Retry transient 429/5xx with exponential backoff; Gemini's shared models
     # throw 503 "high demand" often enough to sink a batch otherwise.
     delay = 1.0
@@ -115,11 +121,7 @@ async def extract_fields(
             resp = await client.aio.models.generate_content(
                 model=settings.gemini_model, contents=contents, config=config
             )
-            parsed = resp.parsed
-            if isinstance(parsed, ExtractedFields):
-                parsed.company_types = canonical_company_types(parsed.company_types)
-                return parsed
-            return ExtractedFields()
+            return _postprocess(resp.parsed)
         except errors.APIError as exc:
             if exc.code in _RETRYABLE and attempt < _MAX_ATTEMPTS - 1:
                 await asyncio.sleep(delay)

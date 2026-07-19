@@ -338,3 +338,22 @@ def test_store_clients_best_effort_is_garnish(monkeypatch):
 
     monkeypatch.setattr(web_mod.cache, "store_clients", _boom)
     asyncio.run(web_mod._store_clients_best_effort("acme.example", ["Globex"]))  # must not raise
+
+
+def test_identify_logos_skips_vision_on_litellm(monkeypatch):
+    """#8 provider seam: logo vision is gemini-only; on a litellm provider the tool
+    degrades to an empty batch instead of raising out of find_clients."""
+    import asyncio
+
+    from app.config import settings
+    from app.tools import web
+
+    monkeypatch.setattr(settings, "llm_provider", "example-provider")
+    monkeypatch.setattr(settings, "llm_model", "example/model")
+
+    def no_download(*a, **k):
+        raise AssertionError("must skip before downloading images")
+
+    monkeypatch.setattr(web, "_download_image", no_download)
+    result = asyncio.run(web.identify_logos(["https://example.com/logo.png"]))
+    assert result == {"companies": []}

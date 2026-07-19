@@ -172,6 +172,7 @@ def test_generate_litellm_structured_roundtrip(monkeypatch):
 
 def test_generate_litellm_bad_json_parsed_is_none(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "anthropic")
+    monkeypatch.setattr(settings, "llm_model", "anthropic/claude-x")
 
     async def fake_acompletion(**kwargs):
         return _FakeCompletion("this is not json")
@@ -193,6 +194,7 @@ def test_generate_litellm_bad_json_parsed_is_none(monkeypatch):
 
 def test_generate_litellm_no_schema_text_only(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "anthropic")
+    monkeypatch.setattr(settings, "llm_model", "anthropic/claude-x")
 
     async def fake_acompletion(**kwargs):
         assert "response_format" not in kwargs  # no schema → no structured request
@@ -214,6 +216,7 @@ def test_generate_litellm_no_schema_text_only(monkeypatch):
 
 def test_generate_litellm_rejects_multimodal(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "anthropic")
+    monkeypatch.setattr(settings, "llm_model", "anthropic/claude-x")
     monkeypatch.setattr(llm.budget, "charge_llm", lambda: None)
 
     # A non-string `contents` (e.g. Gemini image parts) is unsupported on the
@@ -244,3 +247,90 @@ class _FakeChoice:
 class _FakeCompletion:
     def __init__(self, content):
         self.choices = [_FakeChoice(content)]
+
+
+# --- misconfiguration guard (#8 review finding) --------------------------------
+
+
+def test_resolve_model_rejects_non_gemini_without_llm_model(monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "anthropic")
+    monkeypatch.setattr(settings, "llm_model", "")
+    with pytest.raises(ValueError, match="requires LLM_MODEL"):
+        llm.resolve_model("gemini-3.1-flash-lite")
+
+
+def test_adk_model_rejects_non_gemini_without_llm_model(monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "openai")
+    monkeypatch.setattr(settings, "llm_model", "")
+    with pytest.raises(ValueError, match="requires LLM_MODEL"):
+        llm.adk_model()
+
+
+# --- litellm retry loop (#8 review finding) ------------------------------------
+
+
+class _FakeRateLimitError(Exception):
+    def __init__(self, status_code=429):
+        super().__init__("rate limited")
+        self.status_code = status_code
+
+
+def _litellm_env(monkeypatch, acquired):
+    monkeypatch.setattr(settings, "llm_provider", "anthropic")
+    monkeypatch.setattr(settings, "llm_model", "anthropic/claude-x")
+    monkeypatch.setattr(llm.budget, "charge_llm", lambda: None)
+
+    async def fake_acquire():
+        acquired["n"] += 1
+
+    monkeypatch.setattr(llm.ratelimit, "acquire", fake_acquire)
+
+    async def no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr(llm.asyncio, "sleep", no_sleep)
+
+
+def test_litellm_retries_transient_and_reacquires_limiter(monkeypatch):
+    acquired = {"n": 0}
+    _litellm_env(monkeypatch, acquired)
+    calls = {"n": 0}
+
+    async def flaky_acompletion(**kwargs):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise _FakeRateLimitError()
+        return _FakeCompletion("ok")
+
+    monkeypatch.setattr(llm, "_litellm_acompletion", flaky_acompletion)
+    resp = asyncio.run(llm.generate(model="anthropic/claude-x", contents="p", config=None))
+    assert resp.text == "ok"
+    assert calls["n"] == 3
+    # every ATTEMPT paces against the shared limiter, not just the first
+    assert acquired["n"] == 3
+
+
+def test_litellm_non_retryable_raises_immediately(monkeypatch):
+    acquired = {"n": 0}
+    _litellm_env(monkeypatch, acquired)
+
+    async def bad_request(**kwargs):
+        raise _FakeRateLimitError(status_code=400)
+
+    monkeypatch.setattr(llm, "_litellm_acompletion", bad_request)
+    with pytest.raises(_FakeRateLimitError):
+        asyncio.run(llm.generate(model="anthropic/claude-x", contents="p", config=None))
+    assert acquired["n"] == 1
+
+
+def test_litellm_retries_exhaust_then_raise(monkeypatch):
+    acquired = {"n": 0}
+    _litellm_env(monkeypatch, acquired)
+
+    async def always_429(**kwargs):
+        raise _FakeRateLimitError()
+
+    monkeypatch.setattr(llm, "_litellm_acompletion", always_429)
+    with pytest.raises(_FakeRateLimitError):
+        asyncio.run(llm.generate(model="anthropic/claude-x", contents="p", config=None))
+    assert acquired["n"] == llm._MAX_ATTEMPTS
