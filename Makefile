@@ -68,6 +68,7 @@ test:             ## Run backend tests
 lint:             ## Lint + format-check the backend (+ tooling selftests)
 	cd backend && uv run ruff check . && uv run ruff format --check . && uv run lint-imports
 	python3 scripts/wave_status.py --selftest
+	python3 scripts/wave_serve.py --selftest
 	python3 scripts/drift.py --selftest
 	python3 scripts/code_health.py --selftest
 
@@ -105,16 +106,15 @@ worktree:         ## Isolated worktree + branch for a parallel session. NAME=<sl
 .PHONY: db-up db-ephemeral db-down install db-init import seed-thesis normalize-linkedin migrate-person-identity discover-leader-linkedin repair-mojibake enrich eval chat dev schedule-tick test lint frontend-install frontend-dev worktree
 
 # --- Wave sidecar -------------------------------------------------------------
-# Live progress view of a running wave (#107). wave_status.py snapshots every
-# feat/* branch (worktrees + PRs) into scripts/wave-status.json; wave_status.html
-# polls it. See scripts/wave_status.py for the JSON schema + a two-command run.
+# Progress view of a running wave (#107). wave_status.py snapshots every feat/*
+# branch (worktrees + PRs) into scripts/wave-status.json; wave_serve.py serves
+# wave_status.html and runs a snapshot ON DEMAND (page open / Refresh — never a
+# background loop, which burned GitHub GraphQL quota). Schema: wave_status.py.
 wave-status:      ## One wave snapshot -> scripts/wave-status.json
 	python3 scripts/wave_status.py
 
-wave-watch:       ## Snapshot the wave every 15s (Ctrl-C to stop). Serve with: (cd scripts && python3 -m http.server)
-	@echo "snapshotting wave every 15s → scripts/wave-status.json  (Ctrl-C to stop)"
-	@echo "view: run 'cd scripts && python3 -m http.server' then open wave_status.html"
-	@while true; do python3 scripts/wave_status.py || true; sleep 15; done
+wave-watch:       ## Serve the wave view on :8777; snapshots run on page open / Refresh only
+	python3 scripts/wave_serve.py
 
 .PHONY: wave-status wave-watch
 
