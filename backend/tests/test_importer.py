@@ -56,3 +56,48 @@ def test_build_record_no_llm_splits_lists():
 def test_build_record_skips_nameless_row():
     row = _map_row({"Company": "", "Website": "x.com"})
     assert build_record(row, None, ExtractedFields()) is None
+
+
+def test_extract_fields_litellm_branch_canonicalises(monkeypatch):
+    """The provider seam (#8): a non-gemini provider routes extract_fields through
+    llm.generate, and the parsed result still gets company-type canonicalisation."""
+    import asyncio
+
+    from app.config import settings
+    from app.importer import extract as extract_mod
+
+    monkeypatch.setattr(settings, "llm_provider", "example-provider")
+
+    class _Resp:
+        parsed = ExtractedFields(company_types=["Privately held", "b corp"], notes="n")
+
+    async def fake_generate(*, model, contents, config):
+        assert config.response_schema is ExtractedFields
+        return _Resp()
+
+    monkeypatch.setattr(extract_mod.llm, "generate", fake_generate)
+    got = asyncio.run(
+        extract_mod.extract_fields(company="Acme", notes="founded 2015", client=object())
+    )
+    assert got.notes == "n"
+    assert got.company_types == canonical_company_types(["Privately held", "b corp"])
+
+
+def test_extract_fields_litellm_branch_degrades_on_unparsed(monkeypatch):
+    """Unvalidatable litellm output degrades to an empty ExtractedFields, not a crash."""
+    import asyncio
+
+    from app.config import settings
+    from app.importer import extract as extract_mod
+
+    monkeypatch.setattr(settings, "llm_provider", "example-provider")
+
+    class _Resp:
+        parsed = None
+
+    async def fake_generate(*, model, contents, config):
+        return _Resp()
+
+    monkeypatch.setattr(extract_mod.llm, "generate", fake_generate)
+    got = asyncio.run(extract_mod.extract_fields(company="Acme", notes="x", client=object()))
+    assert got == ExtractedFields()
