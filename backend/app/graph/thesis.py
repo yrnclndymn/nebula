@@ -261,6 +261,28 @@ async def last_committed_revision_at(driver: AsyncDriver) -> str | None:
     return record["since"] if record else None
 
 
+async def acquisitions_since_exist(driver: AsyncDriver, since: str | None = None) -> bool:
+    """Whether any observed ACQUIRED deal was written at/after ``since`` (or, when
+    ``since`` is None, whether any deal exists at all).
+
+    Read-only, deliberately CHEAP: the scheduler's thesis-revision due-gate (#211)
+    calls this to decide whether a scan is worth enqueuing WITHOUT paying to gather
+    full evidence. Mirrors :func:`gather_acquisition_evidence`'s ``since`` predicate
+    (``r.updatedAt``) so the gate and the gather agree on what counts as 'new'.
+    """
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (:Company)-[r:ACQUIRED]->(:Company)
+            WHERE $since IS NULL OR r.updatedAt >= datetime($since)
+            RETURN count(r) AS n LIMIT 1
+            """,
+            since=since,
+        )
+        record = await result.single()
+    return record["n"] > 0
+
+
 async def gather_acquisition_evidence(driver: AsyncDriver, since: str | None = None) -> list[dict]:
     """Observed ACQUIRED deals as thesis evidence: both endpoints' kinds + headcounts,
     the deal-level cited ``thesis`` text and ``source``, newest announced first (#196).

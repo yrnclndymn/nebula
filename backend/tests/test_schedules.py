@@ -625,3 +625,127 @@ async def _clean_refresh(session):
         "MATCH (j:Job) WHERE j.id STARTS WITH $p OR j.dataJson CONTAINS $p DETACH DELETE j",
         p=REF_PREFIX,
     )
+
+
+# --- Periodic thesis revision (#211): due-gate + weekly enqueue ----------------
+
+THESIS_PREFIX = "__pytest_thesis__"
+THESIS_COMPANIES = [f"Acme {THESIS_PREFIX}", f"Globex {THESIS_PREFIX}"]
+
+
+async def _clean_thesis(session):
+    await session.run(
+        "MATCH (c:Company) WHERE c.name IN $names DETACH DELETE c", names=THESIS_COMPANIES
+    )
+    # Reset both the cadence guard and the last-committed watermark for a clean slate.
+    await session.run("MATCH (j:Job {type:'thesis_revision'}) DETACH DELETE j")
+
+
+def test_thesis_revision_tick_enqueues_and_is_idempotent(monkeypatch):
+    """A deal newer than the last committed revision (here none yet, so every deal
+    is new) makes the tick enqueue a thesis_revision scan; a second tick inside the
+    cadence window enqueues nothing. The scan only proposes. Skip-guarded on Neo4j."""
+
+    async def scenario():
+        try:
+            await check_connectivity()
+        except Exception:
+            return "skip"
+
+        enqueued: list[str] = []
+        monkeypatch.setattr(jobs, "enqueue", lambda job_id: _record(enqueued, job_id))
+
+        driver = get_driver()
+        acq, tgt = THESIS_COMPANIES
+        async with driver.session() as session:
+            await _clean_thesis(session)
+            # A freshly observed ACQUIRED deal; no committed revision → it counts as new.
+            await session.run(
+                "CREATE (a:Company {name:$a}) CREATE (t:Company {name:$t}) "
+                "CREATE (a)-[:ACQUIRED {updatedAt: datetime()}]->(t)",
+                a=acq,
+                t=tgt,
+            )
+
+        due_before = await schedules._thesis_revision_due(driver)
+        first = await schedules.run_tick()
+        second = await schedules.run_tick()  # cadence guard → no double-enqueue
+
+        job_id = next(j for j in first["enqueued"] if j.startswith("thesis_revision-"))
+        scan_job = await jobs.get_job(job_id)
+
+        async with driver.session() as session:
+            await _clean_thesis(session)
+        await close_driver()
+        return due_before, first, second, scan_job
+
+    out = asyncio.run(scenario())
+    if out == "skip":
+        pytest.skip("Neo4j not reachable — run `make db-up`")
+    due_before, first, second, scan_job = out
+
+    assert due_before is True
+    assert len([j for j in first["enqueued"] if j.startswith("thesis_revision-")]) == 1
+    # Second tick: the just-created job is inside the cadence window → skipped.
+    assert not any(j.startswith("thesis_revision-") for j in second["enqueued"])
+    assert "thesis_revision:cadence" in second["skipped"]
+    # The enqueued job is a thesis_revision scan carrying the empty initial payload
+    # (matching the manual enqueue); nothing is written until the reviewer commits.
+    assert scan_job["type"] == "thesis_revision"
+    assert scan_job["status"] == "pending"
+    assert scan_job["changes"] == []
+
+
+def test_thesis_revision_tick_skips_when_no_new_deals(monkeypatch):
+    """When every observed deal predates the last committed revision, the due-gate
+    is False and the tick enqueues no scan (quiet weeks cost nothing). The committed
+    revision is aged past the cadence window so this is a genuine no-work skip, not a
+    cadence skip. Skip-guarded on Neo4j."""
+
+    async def scenario():
+        try:
+            await check_connectivity()
+        except Exception:
+            return "skip"
+
+        enqueued: list[str] = []
+        monkeypatch.setattr(jobs, "enqueue", lambda job_id: _record(enqueued, job_id))
+
+        driver = get_driver()
+        acq, tgt = THESIS_COMPANIES
+        old = settings.thesis_revision_cadence_days + 5
+        async with driver.session() as session:
+            await _clean_thesis(session)
+            # A committed revision older than the cadence window (so the tick reaches
+            # the due-gate rather than short-circuiting on cadence)…
+            await session.run(
+                "CREATE (:Job {id:$id, type:'thesis_revision', status:'committed', "
+                "dataJson:'{}', createdAt: datetime() - duration({days:$old})})",
+                id=f"{THESIS_PREFIX}committed",
+                old=old,
+            )
+            # …and the only deal predates it → nothing new to weigh.
+            await session.run(
+                "CREATE (a:Company {name:$a}) CREATE (t:Company {name:$t}) "
+                "CREATE (a)-[:ACQUIRED {updatedAt: datetime() - duration({days:$older})}]->(t)",
+                a=acq,
+                t=tgt,
+                older=old + 10,
+            )
+
+        due_before = await schedules._thesis_revision_due(driver)
+        result = await schedules.run_tick()
+
+        async with driver.session() as session:
+            await _clean_thesis(session)
+        await close_driver()
+        return due_before, result
+
+    out = asyncio.run(scenario())
+    if out == "skip":
+        pytest.skip("Neo4j not reachable — run `make db-up`")
+    due_before, result = out
+
+    assert due_before is False
+    assert not any(j.startswith("thesis_revision-") for j in result["enqueued"])
+    assert "thesis_revision:no-work" in result["skipped"]

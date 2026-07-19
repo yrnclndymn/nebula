@@ -50,7 +50,16 @@ _MAX_NOTABLE = 25
 # retention chores, not activity a reader cares about.
 # signal_refresh is the fan-out orchestrator (#36): its own "refreshed N companies"
 # line is housekeeping — the per-company capture outcomes it enqueues are the news.
-_HOUSEKEEPING_TYPES = ["digest", "cache_prune", "job_prune", "signal_prune", "signal_refresh"]
+# thesis_revision (#211) is the scheduled scan: its own "N proposed changes" line is
+# housekeeping — the notable change is a reviewer COMMITTING a rule, not the scan run.
+_HOUSEKEEPING_TYPES = [
+    "digest",
+    "cache_prune",
+    "job_prune",
+    "signal_prune",
+    "signal_refresh",
+    "thesis_revision",
+]
 
 
 @dataclass(frozen=True)

@@ -470,6 +470,44 @@ async def execute_signal_refresh(job_id: str) -> None:
     )
 
 
+# --- Periodic thesis revision (#211) -------------------------------------------
+# The acquisition-thesis evidence loop (#196) proposes rule revisions from observed
+# ACQUIRED deals, but only ever ran on a manual trigger. This schedule makes it
+# ambient: a weekly (config-overridable) tick that enqueues the SAME durable
+# `thesis_revision` scan job. The scan only PROPOSES onto its Job node — the
+# review/commit ceremony is untouched — so scheduling it adds zero write risk.
+#
+# Due-gate: quiet weeks must cost nothing, so the tick SKIPS enqueuing unless an
+# ACQUIRED deal has appeared since the last committed revision (the cheap
+# existence check `thesis.acquisitions_since_exist`, NOT a full evidence gather).
+# `last_committed_revision_at` gives the same watermark the scan itself reads, so
+# the gate and the scan agree on "new".
+#
+# Dispatch: `thesis_revision` has an explicit branch in `jobs.execute_job` (added
+# with the manual trigger, #210) that lazily imports its runner, so a job enqueued
+# here routes there directly. This registry `run` mirrors that runner (same lazy
+# import + pyproject pin as jobs.py) so `schedules.owns()` and the fallback path
+# stay self-consistent with the digest precedent.
+
+
+async def _thesis_revision_due(driver: AsyncDriver) -> bool:
+    """Any ACQUIRED deal newer than the last committed revision? Cheap existence
+    check — never gathers full evidence just to decide whether to enqueue."""
+    from app.graph.thesis import acquisitions_since_exist, last_committed_revision_at
+
+    since = await last_committed_revision_at(driver)
+    return await acquisitions_since_exist(driver, since)
+
+
+async def _run_thesis_revision(job_id: str) -> None:
+    # The runner orchestrates the deals agent, so it legitimately lives ABOVE the
+    # graph layer; the import is inside the function (no load-time cycle), same
+    # pattern + pyproject pin as jobs.py's dispatch table.
+    from app.agents.deals.thesis_revision import execute_thesis_revision_job
+
+    await execute_thesis_revision_job(job_id)
+
+
 SCHEDULES: list[Schedule] = [
     Schedule(
         job_type="cache_prune",
@@ -504,5 +542,17 @@ SCHEDULES: list[Schedule] = [
         cadence_days=7,
         run=digest.execute_digest_job,
         is_due=digest.digest_due,
+    ),
+    # Weekly thesis revision (#211): propose rule revisions from newly observed
+    # deals. Skips when nothing new has been acquired since the last committed
+    # revision — quiet weeks cost nothing. Initial payload mirrors the manual
+    # enqueue (thesis_revision.enqueue_thesis_revision) so the scan runner reads the
+    # same empty result fields.
+    Schedule(
+        job_type="thesis_revision",
+        cadence_days=settings.thesis_revision_cadence_days,
+        run=_run_thesis_revision,
+        is_due=_thesis_revision_due,
+        build_payload=lambda: {"changes": [], "rule_count": 0, "deal_count": 0},
     ),
 ]
