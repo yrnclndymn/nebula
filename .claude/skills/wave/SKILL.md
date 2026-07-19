@@ -249,3 +249,11 @@ scoped to touched files: a whole-tree pass is far too slow to be useful.
   (`test_cache_sanitize`'s try/finally pattern) or an alphabetically-later file
   (test_health's TestClient) dies with "Event loop is closed". Wave-009 shipped
   this once; check for the pattern when reviewing worker graph tests.
+
+- **Merging a workflow-file PR mid-wave silently kills concurrent in-flight
+  reviews.** claude-code-action's validation guard requires EVERY workflow file
+  in the PR's merge-ref to match the default branch; landing any workflow change
+  (review.yml, ci.yml, …) makes all other open PRs' reviews skip → liveness red
+  with a misleading "first workflow" message. Fix: merge origin/main into each
+  affected branch (fresh merge-ref). Prevention: sequence workflow-file PRs
+  LAST in a wave's merge order.
