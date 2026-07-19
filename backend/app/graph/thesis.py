@@ -209,12 +209,14 @@ async def seed_thesis(driver: AsyncDriver) -> dict:
 
 
 async def get_thesis_rules(driver: AsyncDriver) -> list[dict]:
-    """All ThesisRules with their SUPPORTED_BY evidence count, most-confident first.
+    """All ThesisRules with their SUPPORTED_BY evidence, most-confident first.
 
     Read-only. Feeds the thesis surface (#195) and the ranking signal (#194): each
     row carries the rule's kinds/qualifier/statement/origin plus how many observed
-    deals evidence it, so a match can be shown *with* its support rather than as a
-    bare score.
+    deals evidence it AND the cited Source URLs of that evidence, so a match can be
+    shown *with* its checkable provenance rather than as a bare score. The freshly
+    -seeded human rules carry no evidence yet, so ``sources`` is ``[]`` and
+    ``evidence_count`` is 0 until the evidence loop (#196) attaches deals.
     """
     async with driver.session() as session:
         result = await session.run(
@@ -228,7 +230,12 @@ async def get_thesis_rules(driver: AsyncDriver) -> list[dict]:
                    tr.confidence AS confidence,
                    tr.origin AS origin,
                    toString(tr.updatedAt) AS updated_at,
-                   COUNT { (tr)-[:SUPPORTED_BY]->() } AS evidence_count
+                   COUNT { (tr)-[:SUPPORTED_BY]->() } AS evidence_count,
+                   COLLECT {
+                       MATCH (tr)-[:SUPPORTED_BY]->(s:Source)
+                       WHERE s.url IS NOT NULL
+                       RETURN DISTINCT s.url ORDER BY s.url
+                   } AS sources
             ORDER BY tr.confidence DESC, tr.ruleKey
             """
         )

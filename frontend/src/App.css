@@ -1478,3 +1478,89 @@ td.muted {
   color: #b91c1c;
   border-color: #b91c1c;
 }
+
+/* --- Market thesis panel (#195, epic #192): read-only who-acquires-whom model
+   above the M&A deals table. Reuses .origin / .muted / .small; only the panel
+   frame + confidence bar are new. */
+.thesis-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin: 0 0 1rem;
+}
+.thesis-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-bottom: 0.5rem;
+}
+.thesis-rules {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.thesis-rule {
+  border-top: 1px solid var(--border);
+  padding-top: 0.6rem;
+}
+.thesis-rule:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+.thesis-statement {
+  font-size: 14px;
+  line-height: 1.4;
+}
+.thesis-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+}
+.thesis-meta .origin {
+  margin-left: 0.15rem;
+}
+.origin-reviewer {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+}
+.thesis-confidence {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+.thesis-bar {
+  display: inline-block;
+  width: 90px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.thesis-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent, #6366f1);
+}
+.thesis-evidence {
+  margin-top: 0.35rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+.thesis-sources {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.thesis-updated {
+  margin-top: 0.2rem;
+}

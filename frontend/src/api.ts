@@ -241,6 +241,11 @@ export const regeneratePersonExpertise = (id: string) =>
 export const getPersonExpertiseJob = (jobId: string) =>
   getJson<import("./types").PersonExpertiseJob>(`/people/expertise/${encodeURIComponent(jobId)}`);
 
+// Acquisition thesis surface (#195): the read-only ThesisRule model (statement,
+// confidence, origin, evidence count + cited Source URLs) behind the M&A page's
+// Market-thesis panel. Seeded by `make seed-thesis`; revisions arrive with #196.
+export const fetchThesisRules = () => getJson<import("./types").ThesisRule[]>("/thesis");
+
 // Person research proposal (#40, surfaced in the SPA by #178): start a background
 // person-enrichment proposal (`{name, company}` scopes which person via their LEADS
 // edge), poll the status endpoint for the proposed facts + citations + diff, then

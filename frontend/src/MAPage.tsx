@@ -5,6 +5,7 @@ import { Page } from "./Page";
 import { isHttpUrl } from "./urls";
 import { whenLabel } from "./dates";
 import { FilterBar, FilterSelect } from "./FilterBar";
+import { ThesisPanel } from "./ThesisPanel";
 
 // The M&A page (issue #45, epic #26 M&A Intelligence): recent deals across the
 // tracked space, newest announced first, filterable by topic (either endpoint in
@@ -57,6 +58,10 @@ export function MAPage({ topics }: { topics: string[] }) {
 
   return (
     <Page title={<>🤝 Mergers &amp; acquisitions</>}>
+
+        {/* Market thesis (#195): the stored who-acquires-whom model, above the deals
+            table — read-only context for the deals below it. */}
+        <ThesisPanel />
 
         <FilterBar variant="whatsnew">
           <FilterSelect

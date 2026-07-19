@@ -607,6 +607,27 @@ export interface PersonExpertiseJob {
   error?: string;
 }
 
+// --- Acquisition thesis surface (#195, epic #192) -----------------------------
+// A read-only ThesisRule from GET /thesis: the stored model of who acquires whom,
+// each rule with a human-readable `statement`, its acquirer→target kinds + optional
+// `qualifier`, `confidence` (probability in [0,1]), `origin` (user | reviewer),
+// last-updated, an evidence count, and the cited Source URLs supporting it. snake_case
+// mirrors app/graph/thesis.py's read dict, passed straight through. `sources` are the
+// crawled deal-citation URLs (SUPPORTED_BY provenance) — untrusted, so the UI links
+// out only on http(s). Read-only here; revisions arrive with the evidence loop (#196).
+export interface ThesisRule {
+  rule_key: string;
+  acquirer_kind: string;
+  target_kind: string;
+  qualifier: string;
+  statement: string;
+  confidence: number;
+  origin: string; // "user" | "reviewer"
+  updated_at: string | null;
+  evidence_count: number;
+  sources: string[];
+}
+
 // --- Person research proposal (#40 propose→review→commit, surfaced #178) ----------
 // The person-enrichment review payload from GET /people/enrich/{job_id}: the durable
 // `person_proposal` job carrying the provenance-filtered proposed facts + citations +
